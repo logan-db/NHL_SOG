@@ -14,10 +14,7 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
     :param table_name: Name of the table to be created.
     """
 
-    temp_path = tmp_base_path + table_name + file_format
-
-    # Ensure that the directory exists
-    # dbutils.fs.mkdirs(tmp_base_path)
+    temp_path = tmp_base_path + table_name + "/" + table_name + file_format
 
     # Download the file
     with requests.get(url, stream=True) as r:
