@@ -32,7 +32,7 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
             print(
                 f"The file downloaded from {url} was a ZIP file and successfully copied to {tmp_base_path}."
             )
-            temp_path = tmp_base_path + "/" + table_name + ".csv"
+            temp_path = tmp_base_path + table_name + "/" + table_name + ".csv"
     else:
         print(
             f"The file downloaded from {url} is not a ZIP file and successfully copied to {temp_path}."
