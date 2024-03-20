@@ -13,6 +13,12 @@ shots_url = spark.conf.get("base_download_url") + "shots_2023.zip"
 tmp_base_path = spark.conf.get("tmp_base_path")
 table_name = "shots_2023"
 
+# COMMAND ----------
+print(dbutils.fs.ls("/"))
+
+# COMMAND ----------
+print(spark.table("lr_nhl_demo.dev.teams_2022").count())
+
 
 # COMMAND ----------
 @dlt.table(name="bronze_shots_2023", comment="Raw Ingested NHL data on Shots")
