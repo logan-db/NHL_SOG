@@ -14,14 +14,10 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
     :param table_name: Name of the table to be created.
     """
 
-    # Temporary file path for downloading
-    if file_format == ".zip":
-        temp_path = tmp_base_path + table_name + ".zip"
-    elif file_format == ".csv":
-        temp_path = tmp_base_path + table_name + ".csv"
+    temp_path = tmp_base_path + table_name + file_format
 
     # Ensure that the directory exists
-    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+    os.makedirs(os.path.dirname(tmp_base_path), exist_ok=True)
 
     # Download the file
     with requests.get(url, stream=True) as r:
@@ -39,6 +35,7 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
             print(
                 f"The file downloaded from {url} was a ZIP file and successfully copied to {tmp_base_path}."
             )
+            temp_path = tmp_base_path + "/" + table_name + ".csv"
     else:
         print(
             f"The file downloaded from {url} is not a ZIP file and successfully copied to {temp_path}."
