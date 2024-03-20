@@ -6,8 +6,8 @@ from utils.ingestionHelper import download_unzip_and_save_as_table
 
 # COMMAND ----------
 
-shots_url = spark.conf.get("base_download_url") + "shots_2023.zip"
-teams_url = spark.conf.get("base_download_url") + "teams_2023.csv"
+shots_url = spark.conf.get("base_shots_download_url") + "shots_2023.zip"
+teams_url = spark.conf.get("base_teams_download_url")
 tmp_base_path = spark.conf.get("tmp_base_path")
 
 # COMMAND ----------

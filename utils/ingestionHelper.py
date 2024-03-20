@@ -28,7 +28,7 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
     if zipfile.is_zipfile(temp_path):
         with zipfile.ZipFile(temp_path, "r") as zip_ref:
             # Extract all the contents into the DBFS table path
-            zip_ref.extractall(tmp_base_path)
+            zip_ref.extractall(tmp_base_path + table_name + "/")
             print(
                 f"The file downloaded from {url} was a ZIP file and successfully copied to {tmp_base_path}."
             )
