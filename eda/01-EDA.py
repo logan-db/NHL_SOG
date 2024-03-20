@@ -4,19 +4,19 @@ from pyspark.sql.functions import *
 
 # COMMAND ----------
 
-dbutils.fs.ls("/mnt/Users/logan.rupert@databricks.com/nhl/raw/")
-
-# COMMAND ----------
-
 # MAGIC %sql
 # MAGIC USE CATALOG lr_nhl_demo
 
 # COMMAND ----------
 
-teams_2023 = spark.table('dev.teams_2023')
-shots_2023 = spark.table('dev.shots_2023')
-skaters_2023 = spark.table('dev.skaters_2023')
-lines_2023 = spark.table('dev.lines_2023')
+teams_2023 = spark.table('dev.bronze_teams_2023')
+shots_2023 = spark.table('dev.bronze_shots_2023')
+skaters_2023 = spark.table('dev.bronze_skaters_2023')
+lines_2023 = spark.table('dev.bronze_lines_2023')
+
+# COMMAND ----------
+
+display(skaters_2023)
 
 # COMMAND ----------
 

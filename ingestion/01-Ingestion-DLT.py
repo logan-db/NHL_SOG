@@ -28,7 +28,11 @@ def ingest_teams_data():
     teams_file_path = download_unzip_and_save_as_table(
         teams_url, tmp_base_path, "teams_2023", file_format=".csv"
     )
-    return spark.read.format("csv").option("header", "false").load(teams_file_path)
+    return spark.read \
+        .format("csv") \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .load(teams_file_path)
 
 # COMMAND ----------
 
@@ -37,7 +41,11 @@ def ingest_skaters_data():
     skaters_file_path = download_unzip_and_save_as_table(
         skaters_url, tmp_base_path, "skaters_2023", file_format=".csv"
     )
-    return spark.read.format("csv").option("header", "false").load(skaters_file_path)
+    return spark.read \
+        .format("csv") \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .load(skaters_file_path)
 
 # COMMAND ----------
 
@@ -46,4 +54,8 @@ def ingest_lines_data():
     lines_file_path = download_unzip_and_save_as_table(
         lines_url, tmp_base_path, "lines_2023", file_format=".csv"
     )
-    return spark.read.format("csv").option("header", "false").load(lines_file_path)
+    return spark.read \
+        .format("csv") \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .load(lines_file_path)
