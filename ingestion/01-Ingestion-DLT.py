@@ -6,16 +6,13 @@ from utils.ingestionHelper import download_unzip_and_save_as_table
 
 # COMMAND ----------
 
-# Example usage:
-# Assuming 'shots_2023.csv' is the name of the file inside the 'shots_2023.zip'
-
 shots_url = spark.conf.get("base_download_url") + "shots_2023.zip"
 tmp_base_path = spark.conf.get("tmp_base_path")
 table_name = "shots_2023"
 
 # COMMAND ----------
 
-print(f"TESTING ACCESS ------ {dbutils.fs.ls('/Users/')}")
+print(f"TESTING ACCESS ------ {dbutils.fs.ls('/Volumes/lr_nhl_demo/dev/shots_2023')}")
 
 # COMMAND ----------
 
