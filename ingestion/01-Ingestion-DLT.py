@@ -7,23 +7,23 @@ from utils.ingestionHelper import download_unzip_and_save_as_table
 # COMMAND ----------
 
 shots_url = spark.conf.get("base_download_url") + "shots_2023.zip"
+teams_url = spark.conf.get("base_download_url") + "teams_2023.csv"
 tmp_base_path = spark.conf.get("tmp_base_path")
-table_name = "shots_2023"
 
 # COMMAND ----------
 
-print(f"TESTING ACCESS ------ {dbutils.fs.ls('/Volumes/lr_nhl_demo/dev/shots_2023')}")
-
-# COMMAND ----------
-
-print(f"TESTING CATALOG --------  {spark.table('lr_nhl_demo.dev.teams_2022').count()}")
-
-
-# COMMAND ----------
-
-@dlt.table(name="bronze_shots_2023", comment="Raw Ingested NHL data on Shots")
+@dlt.table(name="bronze_shots_2023", comment="Raw Ingested NHL data on Shots in 2023")
 def ingest_zip_data():
     shots_file_path = download_unzip_and_save_as_table(
-        shots_url, tmp_base_path, table_name, file_format=".zip"
+        shots_url, tmp_base_path, "shots_2023", file_format=".zip"
     )
     return spark.read.format("csv").option("header", "true").load(shots_file_path)
+
+# COMMAND ----------
+
+@dlt.table(name="bronze_teams_2023", comment="Raw Ingested NHL data on Teams in 2023")
+def ingest_teams_data():
+    teams_file_path = download_unzip_and_save_as_table(
+        teams_url, tmp_base_path, "teams_2023", file_format=".csv"
+    )
+    return spark.read.format("csv").option("header", "true").load(teams_file_path)
