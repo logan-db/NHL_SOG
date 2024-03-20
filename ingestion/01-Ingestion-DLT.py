@@ -17,7 +17,7 @@ table_name = "shots_2023"
 # COMMAND ----------
 @dlt.table(name="bronze_shots_2023", comment="Raw Ingested NHL data on Shots")
 def ingest_zip_data():
-    tmp_base_path = download_unzip_and_save_as_table(
+    shots_file_path = download_unzip_and_save_as_table(
         shots_url, tmp_base_path, table_name, file_format=".zip"
     )
-    return spark.read.format("csv").option("header", "true").load(tmp_base_path)
+    return spark.read.format("csv").option("header", "true").load(shots_file_path)
