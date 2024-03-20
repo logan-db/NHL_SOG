@@ -17,7 +17,7 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
     temp_path = tmp_base_path + table_name + file_format
 
     # Ensure that the directory exists
-    dbutils.fs.mkdirs(tmp_base_path)
+    # dbutils.fs.mkdirs(tmp_base_path)
 
     # Download the file
     with requests.get(url, stream=True) as r:
