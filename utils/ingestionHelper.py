@@ -1,4 +1,5 @@
 import requests
+import os
 import shutil
 import zipfile
 from pyspark.sql import SparkSession
@@ -19,11 +20,16 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
     elif file_format == ".csv":
         temp_path = tmp_base_path + table_name + ".csv"
 
+    # Ensure that the directory exists
+    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+
     # Download the file
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
         with open(temp_path, "wb") as f:
             shutil.copyfileobj(r.raw, f)
+
+    print(f"File downloaded and saved to {temp_path}")
 
     # Check if it is a ZIP file and unzip
     if zipfile.is_zipfile(temp_path):
