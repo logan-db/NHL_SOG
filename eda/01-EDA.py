@@ -18,6 +18,10 @@ silver_skaters_enriched = spark.table('dev.silver_skaters_enriched')
 
 # COMMAND ----------
 
+display(silver_skaters_enriched)
+
+# COMMAND ----------
+
 display(skaters_2023)
 display(lines_2023)
 
