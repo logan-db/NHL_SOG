@@ -100,6 +100,7 @@ def clean_shots_data():
 
     shots_filtered = (
         spark.table("lr_nhl_demo.dev.bronze_shots_2023").select(
+            "shotID",
             "game_id",
             "teamCode",
             "shooterName",
@@ -157,6 +158,15 @@ def clean_shots_data():
             F.when((F.col('team') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
             .when((F.col('team') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
             .otherwise(0))
+        .withColumn('powerPlayShotsOnGoal',
+                    F.when((F.col('isPowerPlay') == 1) & (F.col('shotWasOnGoal') == 1), 1)
+                    .otherwise(0))
+        .withColumn('penaltyKillShotsOnGoal',
+                    F.when((F.col('isPenaltyKill') == 1) & (F.col('shotWasOnGoal') == 1), 1)
+                    .otherwise(0))
+        .withColumn('evenStrengthShotsOnGoal',
+                    F.when((F.col('isEvenStrength') == 1) & (F.col('shotWasOnGoal') == 1), 1)
+                    .otherwise(0))
     )
 
     return shots_filtered
@@ -207,17 +217,24 @@ def aggregate_games_data():
             ]
         )
         .agg(
+            F.count("shotID").alias("playerShotAttemptsInGame"),
+            F.sum("isPowerPlay").alias("playerPowerPlayShotAttemptsInGame"),
+            F.sum("isPenaltyKill").alias("playerPenaltyKillShotAttemptsInGame"),
+            F.sum("isEvenStrength").alias("playerEvenStrengthShotAttemptsInGame"),
+            F.sum("powerPlayShotsOnGoal").alias("playerPowerPlayShotsInGame"),
+            F.sum("penaltyKillShotsOnGoal").alias("playerPenaltyKillShotsInGame"),
+            F.sum("evenStrengthShotsOnGoal").alias("playerEvenStrengthShotsInGame"),
             F.sum("goal").alias("playerGoalsInGame"),
-            F.sum("shotWasOnGoal").alias("shotsOnGoalInGame"),
+            F.sum("shotWasOnGoal").alias("playerShotsOnGoalInGame"),
             F.mean("shooterTimeOnIce").alias("avgShooterTimeOnIceInGame"),
             F.mean("shooterTimeOnIceSinceFaceoff").alias(
                 "avgShooterTimeOnIceSinceFaceoffInGame"
             ),
-            F.mean("shotDistance").alias("avgShotDistanceInGame"),
-            F.sum("shotOnEmptyNet").alias("shotsOnEmptyNetInGame"),
-            F.sum("shotRebound").alias("shotsOnReboundsInGame"),
-            F.sum("shotRush").alias("shotsOnRushesInGame"),
-            F.mean("speedFromLastEvent").alias("avgSpeedFromLastEvent"),
+            F.mean("shotDistance").alias("avgPlayerShotDistanceInGame"),
+            F.sum("shotOnEmptyNet").alias("playerShotsOnEmptyNetInGame"),
+            F.sum("shotRebound").alias("playerShotsOnReboundsInGame"),
+            F.sum("shotRush").alias("playerShotsOnRushesInGame"),
+            F.mean("speedFromLastEvent").alias("avgPlayerSpeedFromLastEvent"),
         )
     )
 

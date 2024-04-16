@@ -17,6 +17,7 @@ games = spark.table("dev.bronze_games_historical")
 
 silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
 silver_shots = spark.table("dev.silver_shots")
+gold_shots = spark.table("dev.gold_shots")
 gold_model_data = spark.table("dev.gold_model_data")
 
 # COMMAND ----------
@@ -48,7 +49,7 @@ display(powerplay_shots_2023)
 
 # COMMAND ----------
 
-display(silver_shots.filter(F.col('gameID') == '2023020001'))
+display(gold_shots.filter(F.col('gameID') == '2023020001'))
 
 # COMMAND ----------
 
