@@ -5,31 +5,7 @@ from pyspark.sql import functions as F
 
 # COMMAND ----------
 
-# @dlt.create_table(
-#     name="silver_skaters_enriched",
-#     comment="Joined team and skaters data for 2023 season",
-#     table_properties={
-#     "quality": "silver"
-#   }
-# )
-# @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
-# @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
-# @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
-# @dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
-# @dlt.expect_or_drop("I_F_shotsOnGoal is not null", "I_F_shotsOnGoal IS NOT NULL")
-# def enrich_skaters_data():
-#     teams_2023_cleaned = spark.table("lr_nhl_demo.dev.bronze_teams_2023").drop(
-#         "team0", "team3", "position", "games_played", "icetime"
-#     ).withColumnRenamed("name", "team")
-
-#     silver_skaters_enriched = spark.table("lr_nhl_demo.dev.bronze_skaters_2023").join(
-#         teams_2023_cleaned, ["team", "situation", "season"], how="left"
-#     )
-
-#     return silver_skaters_enriched
-
-# COMMAND ----------
-
+# DBTITLE 1,silver_games_historical
 @dlt.table(
     name="silver_games_historical",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -68,6 +44,7 @@ def clean_games_data():
 
 # COMMAND ----------
 
+# DBTITLE 1,silver_skaters_team_game
 @dlt.table(
     name="silver_skaters_team_game",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -91,6 +68,7 @@ def merge_games_data():
 
 # COMMAND ----------
 
+# DBTITLE 1,silver_shots
 @dlt.table(
     name="silver_shots",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -99,7 +77,8 @@ def merge_games_data():
 def clean_shots_data():
 
     shots_filtered = (
-        spark.table("lr_nhl_demo.dev.bronze_shots_2023").select(
+        spark.table("lr_nhl_demo.dev.bronze_shots_2023")
+        .select(
             "shotID",
             "game_id",
             "teamCode",
@@ -128,7 +107,7 @@ def clean_shots_data():
             "shotRush",
             "shotType",
             "shotWasOnGoal",
-            "speedFromLastEvent"
+            "speedFromLastEvent",
         )
         .withColumn("shooterPlayerId", F.col("shooterPlayerId").cast("string"))
         .withColumn("shooterPlayerId", F.regexp_replace("shooterPlayerId", "\\.0$", ""))
@@ -146,33 +125,73 @@ def clean_shots_data():
                 "teamCode": "team",
             }
         )
-        .withColumn('isPowerPlay', 
-            F.when((F.col('team') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') > F.col('awaySkatersOnIce')), 1)
-            .when((F.col('team') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') < F.col('awaySkatersOnIce')), 1)
-            .otherwise(0))
-        .withColumn('isPenaltyKill', 
-            F.when((F.col('team') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') < F.col('awaySkatersOnIce')), 1)
-            .when((F.col('team') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') > F.col('awaySkatersOnIce')), 1)
-            .otherwise(0))
-        .withColumn('isEvenStrength', 
-            F.when((F.col('team') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
-            .when((F.col('team') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
-            .otherwise(0))
-        .withColumn('powerPlayShotsOnGoal',
-                    F.when((F.col('isPowerPlay') == 1) & (F.col('shotWasOnGoal') == 1), 1)
-                    .otherwise(0))
-        .withColumn('penaltyKillShotsOnGoal',
-                    F.when((F.col('isPenaltyKill') == 1) & (F.col('shotWasOnGoal') == 1), 1)
-                    .otherwise(0))
-        .withColumn('evenStrengthShotsOnGoal',
-                    F.when((F.col('isEvenStrength') == 1) & (F.col('shotWasOnGoal') == 1), 1)
-                    .otherwise(0))
+        .withColumn(
+            "isPowerPlay",
+            F.when(
+                (F.col("team") == F.col("homeTeamCode"))
+                & (F.col("homeSkatersOnIce") > F.col("awaySkatersOnIce")),
+                1,
+            )
+            .when(
+                (F.col("team") == F.col("awayTeamCode"))
+                & (F.col("homeSkatersOnIce") < F.col("awaySkatersOnIce")),
+                1,
+            )
+            .otherwise(0),
+        )
+        .withColumn(
+            "isPenaltyKill",
+            F.when(
+                (F.col("team") == F.col("homeTeamCode"))
+                & (F.col("homeSkatersOnIce") < F.col("awaySkatersOnIce")),
+                1,
+            )
+            .when(
+                (F.col("team") == F.col("awayTeamCode"))
+                & (F.col("homeSkatersOnIce") > F.col("awaySkatersOnIce")),
+                1,
+            )
+            .otherwise(0),
+        )
+        .withColumn(
+            "isEvenStrength",
+            F.when(
+                (F.col("team") == F.col("homeTeamCode"))
+                & (F.col("homeSkatersOnIce") == F.col("awaySkatersOnIce")),
+                1,
+            )
+            .when(
+                (F.col("team") == F.col("awayTeamCode"))
+                & (F.col("homeSkatersOnIce") == F.col("awaySkatersOnIce")),
+                1,
+            )
+            .otherwise(0),
+        )
+        .withColumn(
+            "powerPlayShotsOnGoal",
+            F.when(
+                (F.col("isPowerPlay") == 1) & (F.col("shotWasOnGoal") == 1), 1
+            ).otherwise(0),
+        )
+        .withColumn(
+            "penaltyKillShotsOnGoal",
+            F.when(
+                (F.col("isPenaltyKill") == 1) & (F.col("shotWasOnGoal") == 1), 1
+            ).otherwise(0),
+        )
+        .withColumn(
+            "evenStrengthShotsOnGoal",
+            F.when(
+                (F.col("isEvenStrength") == 1) & (F.col("shotWasOnGoal") == 1), 1
+            ).otherwise(0),
+        )
     )
 
     return shots_filtered
 
 # COMMAND ----------
 
+# DBTITLE 1,gold_shots
 @dlt.table(
     name="gold_shots",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -238,31 +257,53 @@ def aggregate_games_data():
         )
     )
 
-    return skater_game_stats
+    gold_shots_date = (
+        dlt.read("silver_games_historical").select("team", "gameId", "gameDate")
+        .filter(F.col("situation")=="all")
+        .join(skater_game_stats, how="left", on=["team", "gameId"])
+    )
+
+    gold_shots_date = gold_shots_date.alias("gold_shots_date")
+    schedule_2023 = spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day").alias("schedule_2023")
+
+    schedule_shots = (
+    schedule_2023.join(
+        gold_shots_date,
+        how="left", 
+        on=[
+        F.col("gold_shots_date.homeTeamCode") == F.col("schedule_2023.HOME"),
+        F.col("gold_shots_date.awayTeamCode") == F.col("schedule_2023.AWAY"),
+        F.col("gold_shots_date.gameDate") == F.col("schedule_2023.DATE"),
+        ]
+    )
+    )
+
+    return gold_shots_date
 
 # COMMAND ----------
 
-@dlt.table(
-    name="gold_model_data",
-    # comment="Raw Ingested NHL data on games from 2008 - Present",
-    table_properties={"quality": "gold"},
-)
-def merge_game_shots_data():
-    # create situation column - 'all' for now, then create columns for powerplay time and shots
-    # Join columns [gameId, playerId, teamCode, situation]
+# DBTITLE 1,gold_model_data
+# @dlt.table(
+#     name="gold_model_data",
+#     # comment="Raw Ingested NHL data on games from 2008 - Present",
+#     table_properties={"quality": "gold"},
+# )
+# def merge_game_shots_data():
+#     # create situation column - 'all' for now, then create columns for powerplay time and shots
+#     # Join columns [gameId, playerId, teamCode, situation]
 
-    # Filter games to "all" and just 2023
-    skaters_team_game_filtered = (
-        dlt.read("silver_skaters_team_game")
-        .filter(F.col("situation") == "all")
-        .withColumn("gameId", F.col("gameId").cast("string"))
-        .withColumn("playerId", F.col("playerId").cast("string"))
-    )
+#     # Filter games to "all" and just 2023
+#     skaters_team_game_filtered = (
+#         dlt.read("silver_skaters_team_game")
+#         .filter(F.col("situation") == "all")
+#         .withColumn("gameId", F.col("gameId").cast("string"))
+#         .withColumn("playerId", F.col("playerId").cast("string"))
+#     )
 
-    final_skater_game_stats = dlt.read("gold_shots").join(
-        skaters_team_game_filtered,
-        how="left",
-        on=["gameId", "playerId", "season", "team", "home_or_away"],
-    )
+#     final_skater_game_stats = dlt.read("gold_shots").join(
+#         skaters_team_game_filtered,
+#         how="left",
+#         on=["gameId", "playerId", "season", "team", "home_or_away"],
+#     )
 
-    return final_skater_game_stats
+#     return final_skater_game_stats

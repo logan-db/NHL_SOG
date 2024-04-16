@@ -15,10 +15,13 @@ skaters_2023 = spark.table("dev.bronze_skaters_2023")
 lines_2023 = spark.table("dev.bronze_lines_2023")
 games = spark.table("dev.bronze_games_historical")
 
+schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
+
 silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
 silver_shots = spark.table("dev.silver_shots")
+silver_games_historical = spark.table("dev.silver_games_historical")
 gold_shots = spark.table("dev.gold_shots")
-gold_model_data = spark.table("dev.gold_model_data")
+# gold_model_data = spark.table("dev.gold_model_data")
 
 # COMMAND ----------
 
@@ -30,26 +33,102 @@ display(shots_2023)
 
 # COMMAND ----------
 
-powerplay_shots_2023 = (shots_2023
-              .withColumn('isPowerPlay', 
-                   F.when((F.col('teamCode') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') > F.col('awaySkatersOnIce')), 1)
-                   .when((F.col('teamCode') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') < F.col('awaySkatersOnIce')), 1)
-                   .otherwise(0))
-              .withColumn('isPenaltyKill', 
-                   F.when((F.col('teamCode') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') < F.col('awaySkatersOnIce')), 1)
-                   .when((F.col('teamCode') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') > F.col('awaySkatersOnIce')), 1)
-                   .otherwise(0))
-              .withColumn('isEvenStrength', 
-                   F.when((F.col('teamCode') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
-                   .when((F.col('teamCode') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
-                   .otherwise(0))
+powerplay_shots_2023 = (
+    shots_2023.withColumn(
+        "isPowerPlay",
+        F.when(
+            (F.col("teamCode") == F.col("homeTeamCode"))
+            & (F.col("homeSkatersOnIce") > F.col("awaySkatersOnIce")),
+            1,
+        )
+        .when(
+            (F.col("teamCode") == F.col("awayTeamCode"))
+            & (F.col("homeSkatersOnIce") < F.col("awaySkatersOnIce")),
+            1,
+        )
+        .otherwise(0),
+    )
+    .withColumn(
+        "isPenaltyKill",
+        F.when(
+            (F.col("teamCode") == F.col("homeTeamCode"))
+            & (F.col("homeSkatersOnIce") < F.col("awaySkatersOnIce")),
+            1,
+        )
+        .when(
+            (F.col("teamCode") == F.col("awayTeamCode"))
+            & (F.col("homeSkatersOnIce") > F.col("awaySkatersOnIce")),
+            1,
+        )
+        .otherwise(0),
+    )
+    .withColumn(
+        "isEvenStrength",
+        F.when(
+            (F.col("teamCode") == F.col("homeTeamCode"))
+            & (F.col("homeSkatersOnIce") == F.col("awaySkatersOnIce")),
+            1,
+        )
+        .when(
+            (F.col("teamCode") == F.col("awayTeamCode"))
+            & (F.col("homeSkatersOnIce") == F.col("awaySkatersOnIce")),
+            1,
+        )
+        .otherwise(0),
+    )
 )
 
 display(powerplay_shots_2023)
 
 # COMMAND ----------
 
-display(gold_shots.filter(F.col('gameID') == '2023020001'))
+display(schedule_2023)
+
+# COMMAND ----------
+
+display(gold_shots.filter(F.col("gameID") == "2023020001"))
+
+# Should include Total, PP, PK, EV SOGs and Attempts | Icetime, Rebounds, Rush, Empties, shot distance, speed last event
+# Granularity: GameID, PlayerID
+# Join columns: GameID, homeTeamCode, awayTeamCode
+
+# COMMAND ----------
+
+display(silver_games_historical)
+
+# COMMAND ----------
+
+display(
+    silver_games_historical.select("team", "gameId", "gameDate")
+    .filter(F.col("situation")=="all")
+    .join(gold_shots, how="left", on=["team", "gameId"])
+    .filter(F.col("gameID") == "2023020001")
+)
+
+# COMMAND ----------
+
+gold_shots_date = (
+    silver_games_historical.select("team", "gameId", "gameDate")
+    .filter(F.col("situation")=="all")
+    .join(gold_shots, how="left", on=["team", "gameId"])
+)
+
+gold_shots_date = gold_shots_date.alias("gold_shots_date")
+schedule_2023 = schedule_2023.alias("schedule_2023")
+
+schedule_shots = (
+  schedule_2023.join(
+    gold_shots_date,
+    how="left", 
+    on=[
+      F.col("gold_shots_date.homeTeamCode") == F.col("schedule_2023.HOME"),
+      F.col("gold_shots_date.awayTeamCode") == F.col("schedule_2023.AWAY"),
+      F.col("gold_shots_date.gameDate") == F.col("schedule_2023.DATE"),
+    ]
+  )
+)
+
+display(schedule_shots)
 
 # COMMAND ----------
 
