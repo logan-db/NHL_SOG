@@ -46,13 +46,27 @@ def ingest_skaters_data():
     skaters_file_path = download_unzip_and_save_as_table(
         skaters_url, tmp_base_path, "skaters_2023", file_format=".csv"
     )
-    return (
+     
+    skaters_df = (
       spark.read
         .format("csv")
         .option("header", "true")
         .option("inferSchema", "true")
         .load(skaters_file_path)
         )
+    # Add 'game_' before each column name except for 'team' and 'player'
+    skater_columns = skaters_df.columns
+    for column in skater_columns:
+        if column not in [
+            "situation",
+            "season",
+            "team",
+            "name",
+            "playerId",
+        ]:
+            skaters_df = skaters_df.withColumnRenamed(column, f"player_{column}")
+
+    return skaters_df
 
 # COMMAND ----------
 
@@ -87,21 +101,13 @@ def ingest_games_data():
     games_file_path = download_unzip_and_save_as_table(
         games_url, tmp_base_path, "games_historical", file_format=".csv"
     )
-    games_df = (
+    return (
       spark.read
         .format("csv")
         .option("header", "true")
         .option("inferSchema", "true")
         .load(games_file_path)
         )
-    
-    # Add 'team_' before each column name except for 'team' and 'player'
-    game_columns = games_df.columns
-    for column in game_columns:
-        if column not in ["situation", "season", "team", "name", "playerTeam", "home_or_away", "gameDate", "position", "opposingTeam"]:
-            games_cleaned = games_df.withColumnRenamed(column, f"game_{column}")
-
-    return games_cleaned
 
 # COMMAND ----------
 
@@ -114,7 +120,6 @@ def ingest_games_data():
 @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
 @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
 @dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
-@dlt.expect_or_drop("I_F_shotsOnGoal is not null", "I_F_shotsOnGoal IS NOT NULL")
 def enrich_skaters_data():
     teams_2023_cleaned = (
         dlt.read("bronze_teams_2023")

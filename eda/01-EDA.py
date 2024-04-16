@@ -16,6 +16,43 @@ lines_2023 = spark.table("dev.bronze_lines_2023")
 games = spark.table("dev.bronze_games_historical")
 
 silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
+silver_shots = spark.table("dev.silver_shots")
+gold_model_data = spark.table("dev.gold_model_data")
+
+# COMMAND ----------
+
+display(skaters_2023)
+
+# COMMAND ----------
+
+display(shots_2023)
+
+# COMMAND ----------
+
+powerplay_shots_2023 = (shots_2023
+              .withColumn('isPowerPlay', 
+                   F.when((F.col('teamCode') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') > F.col('awaySkatersOnIce')), 1)
+                   .when((F.col('teamCode') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') < F.col('awaySkatersOnIce')), 1)
+                   .otherwise(0))
+              .withColumn('isPenaltyKill', 
+                   F.when((F.col('teamCode') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') < F.col('awaySkatersOnIce')), 1)
+                   .when((F.col('teamCode') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') > F.col('awaySkatersOnIce')), 1)
+                   .otherwise(0))
+              .withColumn('isEvenStrength', 
+                   F.when((F.col('teamCode') == F.col('homeTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
+                   .when((F.col('teamCode') == F.col('awayTeamCode')) & (F.col('homeSkatersOnIce') == F.col('awaySkatersOnIce')), 1)
+                   .otherwise(0))
+)
+
+display(powerplay_shots_2023)
+
+# COMMAND ----------
+
+display(silver_shots.filter(F.col('gameID') == '2023020001'))
+
+# COMMAND ----------
+
+display(gold_model_data)
 
 # COMMAND ----------
 
