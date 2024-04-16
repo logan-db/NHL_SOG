@@ -87,13 +87,21 @@ def ingest_games_data():
     games_file_path = download_unzip_and_save_as_table(
         games_url, tmp_base_path, "games_historical", file_format=".csv"
     )
-    return (
+    games_df = (
       spark.read
         .format("csv")
         .option("header", "true")
         .option("inferSchema", "true")
         .load(games_file_path)
         )
+    
+    # Add 'team_' before each column name except for 'team' and 'player'
+    game_columns = games_df.columns
+    for column in game_columns:
+        if column not in ["situation", "season", "team", "name", "playerTeam", "home_or_away", "gameDate", "position", "opposingTeam"]:
+            games_cleaned = games_df.withColumnRenamed(column, f"game_{column}")
+
+    return games_cleaned
 
 # COMMAND ----------
 
@@ -113,6 +121,12 @@ def enrich_skaters_data():
         .drop("team0", "team3", "position", "games_played", "icetime")
         .withColumnRenamed("name", "team")
     )
+
+    # Add 'team_' before each column name except for 'team' and 'player'
+    team_columns = teams_2023_cleaned.columns
+    for column in team_columns:
+        if column not in ["situation", "season", "team"]:
+            teams_2023_cleaned = teams_2023_cleaned.withColumnRenamed(column, f"team_{column}")
 
     silver_skaters_enriched = dlt.read("bronze_skaters_2023").join(
         teams_2023_cleaned, ["team", "situation", "season"], how="left"
