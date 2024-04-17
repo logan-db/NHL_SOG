@@ -20,8 +20,9 @@ schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
 silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
 silver_shots = spark.table("dev.silver_shots")
 silver_games_historical = spark.table("dev.silver_games_historical")
-gold_shots = spark.table("dev.gold_shots")
-# gold_model_data = spark.table("dev.gold_model_data")
+gold_player_stats = spark.table("dev.gold_player_stats")
+gold_game_stats = spark.table("dev.gold_game_stats")
+gold_model_data = spark.table("dev.gold_model_stats")
 
 # COMMAND ----------
 
@@ -86,11 +87,97 @@ display(schedule_2023)
 
 # COMMAND ----------
 
-display(gold_shots.filter(F.col("gameID") == "2023020001"))
+silver_games_cleaned = (
+  silver_games_historical
+  .select(
+    "team",
+    "season",
+    "gameId",
+    "playerTeam",
+    "opposingTeam",
+    "home_or_away",
+    "gameDate",
+    "game_corsiPercentage",
+    "game_fenwickPercentage",
+    "game_shotsOnGoalFor",
+    "game_missedShotsFor",
+    "game_blockedShotAttemptsFor",
+    "game_shotAttemptsFor",
+    "game_goalsFor",
+    "game_reboundsFor",
+    "game_reboundGoalsFor",
+    "game_playContinuedInZoneFor",
+    "game_playContinuedOutsideZoneFor",
+    "game_savedShotsOnGoalFor",
+    "game_savedUnblockedShotAttemptsFor",
+    "game_penaltiesFor",
+    "game_faceOffsWonFor",
+    "game_hitsFor",
+    "game_takeawaysFor",
+    "game_giveawaysFor",
+    "game_lowDangerShotsFor",
+    "game_mediumDangerShotsFor",
+    "game_highDangerShotsFor",
+    "game_shotsOnGoalAgainst",
+    "game_missedShotsAgainst",
+    "game_blockedShotAttemptsAgainst",
+    "game_shotAttemptsAgainst",
+    "game_goalsAgainst",
+    "game_reboundsAgainst",
+    "game_reboundGoalsAgainst",
+    "game_playContinuedInZoneAgainst",
+    "game_playContinuedOutsideZoneAgainst",
+    "game_savedShotsOnGoalAgainst",
+    "game_savedUnblockedShotAttemptsAgainst",
+    "game_penaltiesAgainst",
+    "game_faceOffsWonAgainst",
+    "game_hitsAgainst",
+    "game_takeawaysAgainst",
+    "game_giveawaysAgainst",
+    "game_lowDangerShotsAgainst",
+    "game_mediumDangerShotsAgainst",
+    "game_highDangerShotsAgainst"
+  )
+  .filter(F.col("situation")=="all")
+  .withColumn("game_goalPercentageFor", F.round(F.col("game_goalsFor") / F.col("game_shotsOnGoalFor"), 2))
+  .withColumn("game_goalPercentageAgainst", F.round(F.col("game_goalsAgainst") / F.col("game_shotsOnGoalAgainst"), 2))
+  )
+
+display(silver_games_cleaned)
+
+# COMMAND ----------
+
+display(
+  silver_games_cleaned.groupBy(
+  "team", "season", "gameId", "opposingTeam", "home_or_away", "gameDate"
+  ).agg(F.sum("game_corsiPercentage"))
+)
+
+# COMMAND ----------
+
+display(gold_player_stats.filter(F.col("gameID") == "2023020050"))
 
 # Should include Total, PP, PK, EV SOGs and Attempts | Icetime, Rebounds, Rush, Empties, shot distance, speed last event
 # Granularity: GameID, PlayerID
 # Join columns: GameID, homeTeamCode, awayTeamCode
+
+# COMMAND ----------
+
+# Check if the count of 'gold_player_stats' table is equal to the distinct count of columns ["gameId", "playerId"]
+gold_player_stats_count = gold_player_stats.count()
+distinct_count = gold_player_stats.select("gameId", "playerId").distinct().count()
+
+print(f"gold_player_stats_count:{gold_player_stats_count} distinct_count:{distinct_count}")
+
+# COMMAND ----------
+
+# Find rows that are not unique by gameID and playerID
+non_unique_rows = gold_player_stats.groupBy("gameId", "playerId").count().filter("count > 1").show()
+
+# COMMAND ----------
+
+# Display gold_player_stats where GameId or PlayerId is NULL
+display(gold_player_stats.filter("gameId IS NULL OR playerId IS NULL"))
 
 # COMMAND ----------
 
@@ -99,31 +186,31 @@ display(silver_games_historical)
 # COMMAND ----------
 
 display(
-    silver_games_historical.select("team", "gameId", "gameDate")
+    silver_games_cleaned
     .filter(F.col("situation")=="all")
-    .join(gold_shots, how="left", on=["team", "gameId"])
+    .join(gold_player_stats, how="left", on=["team", "gameId"])
     .filter(F.col("gameID") == "2023020001")
 )
 
 # COMMAND ----------
 
-gold_shots_date = (
+gold_player_stats_date = (
     silver_games_historical.select("team", "gameId", "gameDate")
     .filter(F.col("situation")=="all")
-    .join(gold_shots, how="left", on=["team", "gameId"])
+    .join(gold_player_stats, how="left", on=["team", "gameId"])
 )
 
-gold_shots_date = gold_shots_date.alias("gold_shots_date")
+gold_player_stats_date = gold_player_stats_date.alias("gold_player_stats_date")
 schedule_2023 = schedule_2023.alias("schedule_2023")
 
 schedule_shots = (
   schedule_2023.join(
-    gold_shots_date,
+    gold_player_stats_date,
     how="left", 
     on=[
-      F.col("gold_shots_date.homeTeamCode") == F.col("schedule_2023.HOME"),
-      F.col("gold_shots_date.awayTeamCode") == F.col("schedule_2023.AWAY"),
-      F.col("gold_shots_date.gameDate") == F.col("schedule_2023.DATE"),
+      F.col("gold_player_stats_date.homeTeamCode") == F.col("schedule_2023.HOME"),
+      F.col("gold_player_stats_date.awayTeamCode") == F.col("schedule_2023.AWAY"),
+      F.col("gold_player_stats_date.gameDate") == F.col("schedule_2023.DATE"),
     ]
   )
 )
@@ -132,7 +219,144 @@ display(schedule_shots)
 
 # COMMAND ----------
 
-display(gold_model_data)
+display(gold_player_stats)
+
+# COMMAND ----------
+
+from pyspark.sql.window import Window
+from pyspark.sql.functions import lag, col, avg
+
+windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(col("gameDate"))
+last3WindowSpec = windowSpec.rowsBetween(-2, 0)
+last7WindowSpec = windowSpec.rowsBetween(-6, 0)
+
+reorder_list = [
+        "gameDate",
+        "gameId",
+        "season",
+        "home_or_away",
+        "isHome",
+        "isPlayoffGame",
+        "playerTeam",
+        "opposingTeam",
+        "playerId",
+        "shooterName",
+        "DAY",
+        "dummyDay",
+        "AWAY",
+        "HOME",
+    ]
+
+columns_to_iterate = [
+            col
+            for col in gold_player_stats.columns
+            if col not in reorder_list
+        ]
+
+# Create a list of column expressions for lag and averages
+column_exprs = [col(c) for c in gold_player_stats.columns]  # Start with all existing columns
+
+for column_name in columns_to_iterate:
+    column_exprs += [
+        lag(col(column_name)).over(windowSpec).alias(f"previous_{column_name}"),
+        avg(col(column_name)).over(last3WindowSpec).alias(f"average_{column_name}_last_3_games"),
+        avg(col(column_name)).over(last7WindowSpec).alias(f"average_{column_name}_last_7_games")
+    ]
+
+# Apply all column expressions at once using select
+gold_player_stats_with_previous = gold_player_stats.select(*column_exprs)
+
+# Create a list of column expressions for lag and averages
+keep_column_exprs = []  # Start with an empty list
+
+for column_name in gold_player_stats_with_previous.columns:
+    if column_name in reorder_list or column_name.startswith("previous") or column_name.startswith("average"):
+        keep_column_exprs.append(col(column_name))
+
+# Apply all column expressions at once using select
+gold_player_stats_without_og = gold_player_stats_with_previous.select(*keep_column_exprs)
+
+display(gold_player_stats_without_og)
+
+# COMMAND ----------
+
+# DBTITLE 1,matchup data
+from pyspark.sql.window import Window
+from pyspark.sql.functions import lag, col, avg
+
+windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(col("gameDate"))
+last3WindowSpec = windowSpec.rowsBetween(-2, 0)
+last7WindowSpec = windowSpec.rowsBetween(-6, 0)
+
+reorder_list = [
+        "gameDate",
+        "gameId",
+        "season",
+        "home_or_away",
+        "isHome",
+        "isPlayoffGame",
+        "playerTeam",
+        "opposingTeam",
+        "playerId",
+        "shooterName",
+        "DAY",
+        "dummyDay",
+        "AWAY",
+        "HOME",
+    ]
+
+columns_to_iterate = [
+            col
+            for col in gold_player_stats.columns
+            if col not in reorder_list
+        ]
+
+# Create a list of column expressions for lag and averages
+column_exprs = [col(c) for c in gold_player_stats.columns]  # Start with all existing columns
+
+for column_name in columns_to_iterate:
+    column_exprs += [
+        lag(col(column_name)).over(windowSpec).alias(f"previous_{column_name}"),
+        avg(col(column_name)).over(last3WindowSpec).alias(f"average_{column_name}_last_3_games"),
+        avg(col(column_name)).over(last7WindowSpec).alias(f"average_{column_name}_last_7_games")
+    ]
+
+# Apply all column expressions at once using select
+gold_player_stats_with_previous = gold_player_stats.select(*column_exprs)
+
+# Create a list of column expressions for lag and averages
+keep_column_exprs = []  # Start with an empty list
+
+for column_name in gold_player_stats_with_previous.columns:
+    if column_name in reorder_list or column_name.startswith("previous") or column_name.startswith("average"):
+        keep_column_exprs.append(col(column_name))
+
+# Apply all column expressions at once using select
+gold_player_stats_without_og = gold_player_stats_with_previous.select(*keep_column_exprs)
+
+display(gold_player_stats_without_og)
+
+# COMMAND ----------
+
+from pyspark.sql.window import Window
+from pyspark.sql.functions import lag, col, avg
+
+windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(col("gameDate"))
+last3WindowSpec = windowSpec.rowsBetween(-2, 0)
+last7WindowSpec = windowSpec.rowsBetween(-6, 0)
+
+gold_player_stats_with_previous = (
+    gold_player_stats.withColumn("previous_gameDate", lag(col("gameDate")).over(windowSpec))
+              .withColumn("previous_game_shotsOnGoalFor", lag(col("game_shotsOnGoalFor")).over(windowSpec))
+              .withColumn("previous_playerShotsOnGoalInGame", lag(col("playerShotsOnGoalInGame")).over(windowSpec))
+              .withColumn("average_playerShotsOnGoalInGame_last_3_games", avg(col("playerShotsOnGoalInGame")).over(last3WindowSpec))
+)
+
+display(gold_player_stats_with_previous)
+
+# COMMAND ----------
+
+display(gold_player_stats)
 
 # COMMAND ----------
 
@@ -341,6 +565,28 @@ display(teams_2023.filter(teams_2023.team0 != teams_2023.team3))
 # COMMAND ----------
 
 display(teams_2023)
+
+# COMMAND ----------
+
+from pyspark.sql.window import Window
+from pyspark.sql.functions import count
+
+# Create a window specification
+gameCountWindowSpec = Window.partitionBy("playerId").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
+matchupCountWindowSpec = Window.partitionBy("playerId", "playerTeam", "opposingTeam").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
+
+# Apply the count function within the window
+gold_shots_date_count = gold_player_stats.withColumn("playerGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)).withColumn("playerMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec))
+
+display(gold_shots_date_count)
+
+# COMMAND ----------
+
+display(gold_game_stats)
+
+# COMMAND ----------
+
+display(gold_model_data)
 
 # COMMAND ----------
 

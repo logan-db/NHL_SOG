@@ -31,7 +31,15 @@
 
 # COMMAND ----------
 
-silver_skaters_table = spark.table("lr_nhl_demo.dev.silver_skaters_table")
+model_shots_game = spark.table("lr_nhl_demo.dev.model_shots_game")
+
+# COMMAND ----------
+
+display(model_shots_game)
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
@@ -49,13 +57,13 @@ except:
 
 customer_feature_table = fs.create_table( 
     name='lr_nhl_demo.dev.SOG_features', 
-    primary_keys=['playerId', 'team', 'season', 'situation'],
-    schema=silver_skaters_table.schema, 
+    primary_keys=['gameId', 'playerId', 'team', 'season'],
+    schema=model_shots_game.schema, 
     description='Skater features' 
 )
 
 fs.write_table( 
     name='lr_nhl_demo.dev.SOG_features', 
-    df = silver_skaters_table, 
+    df = model_shots_game, 
     mode = 'overwrite' 
 )
