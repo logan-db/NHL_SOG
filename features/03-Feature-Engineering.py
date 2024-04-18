@@ -31,15 +31,30 @@
 
 # COMMAND ----------
 
-model_shots_game = spark.table("lr_nhl_demo.dev.model_shots_game")
+gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta")
 
 # COMMAND ----------
 
-display(model_shots_game)
+from pyspark.sql.functions import col
+from pyspark.sql.types import StringType
+
+# Assuming `gold_model_stats` is your DataFrame
+categorical_columns = [f.name for f in gold_model_stats.schema.fields if isinstance(f.dataType, StringType)]
+
+# Printing the list of categorical columns
+print(categorical_columns)
 
 # COMMAND ----------
 
+display(
+  gold_model_stats.filter(col("previous_opposingTeam").isNull())
+)
 
+# COMMAND ----------
+
+model_remove_1st_and_upcoming_games = (
+  gold_model_stats.filter((col("gameId").isNotNull()) & (col("playerGamesPlayedRolling") > 1))
+)
 
 # COMMAND ----------
 
@@ -57,13 +72,17 @@ except:
 
 customer_feature_table = fs.create_table( 
     name='lr_nhl_demo.dev.SOG_features', 
-    primary_keys=['gameId', 'playerId', 'team', 'season'],
-    schema=model_shots_game.schema, 
+    primary_keys=['gameId', 'playerId', 'home_or_away', 'isPlayoffGame', 'playerTeam', 'opposingTeam', 'shooterName', 'DAY', 'AWAY', 'HOME', 'previous_opposingTeam'],
+    schema=model_remove_1st_and_upcoming_games.schema, 
     description='Skater features' 
 )
 
 fs.write_table( 
     name='lr_nhl_demo.dev.SOG_features', 
-    df = model_shots_game, 
+    df = model_remove_1st_and_upcoming_games, 
     mode = 'overwrite' 
 )
+
+# COMMAND ----------
+
+

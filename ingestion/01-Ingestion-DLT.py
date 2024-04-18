@@ -14,6 +14,7 @@
 import dlt
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
+from pyspark.sql import DataFrame
 from utils.ingestionHelper import download_unzip_and_save_as_table
 
 # COMMAND ----------
@@ -46,15 +47,16 @@ def ingest_shot_data():
 # DBTITLE 1,bronze_teams_2023
 @dlt.table(name="bronze_teams_2023", comment="Raw Ingested NHL data on Teams in 2023")
 def ingest_teams_data():
-    teams_file_path = download_unzip_and_save_as_table(
-        teams_url, tmp_base_path, "teams_2023", file_format=".csv"
-    )
-    return (
-        spark.read.format("csv")
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .load(teams_file_path)
-    )
+    # teams_file_path = download_unzip_and_save_as_table(
+    #     teams_url, tmp_base_path, "teams_2023", file_format=".csv"
+    # )
+    # return (
+    #     spark.read.format("csv")
+    #     .option("header", "true")
+    #     .option("inferSchema", "true")
+    #     .load(teams_file_path)
+    # )
+    return spark.table("lr_nhl_demo.dev.bronze_teams_2023")
 
 # COMMAND ----------
 
@@ -137,9 +139,7 @@ def ingest_games_data():
 )
 def ingest_schedule_data():
     # TO DO : make live
-    return spark.table(
-        "lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day"
-    )
+    return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
 # COMMAND ----------
 
@@ -366,7 +366,7 @@ def clean_shots_data():
         .withColumnRenamed("team", "home_or_away")
         .withColumnsRenamed(
             {
-                "game_id": "gameID",
+                "game_id": "gameId",
                 "shooterPlayerId": "playerId",
                 # "team": "home_or_away",
                 "teamCode": "team",
@@ -457,7 +457,7 @@ def aggregate_games_data():
         dlt.read("silver_shots")
         .groupBy(
             [
-                "gameID",
+                "gameId",
                 "team",
                 "shooterName",
                 "playerId",
@@ -471,39 +471,56 @@ def aggregate_games_data():
             ]
         )
         .agg(
-            count("shotID").alias("playerShotAttemptsInGame"),
-            sum("isPowerPlay").alias("playerPowerPlayShotAttemptsInGame"),
-            sum("isPenaltyKill").alias("playerPenaltyKillShotAttemptsInGame"),
-            sum("isEvenStrength").alias("playerEvenStrengthShotAttemptsInGame"),
-            sum("powerPlayShotsOnGoal").alias("playerPowerPlayShotsInGame"),
-            sum("penaltyKillShotsOnGoal").alias("playerPenaltyKillShotsInGame"),
-            sum("evenStrengthShotsOnGoal").alias("playerEvenStrengthShotsInGame"),
-            sum("goal").alias("playerGoalsInGame"),
-            sum("shotWasOnGoal").alias("playerShotsOnGoalInGame"),
-            mean("shooterTimeOnIce").alias("avgShooterTimeOnIceInGame"),
+            count("shotID").alias("player_ShotAttemptsInGame"),
+            sum("isPowerPlay").alias("player_PowerPlayShotAttemptsInGame"),
+            sum("isPenaltyKill").alias("player_PenaltyKillShotAttemptsInGame"),
+            sum("isEvenStrength").alias("player_EvenStrengthShotAttemptsInGame"),
+            sum("powerPlayShotsOnGoal").alias("player_PowerPlayShotsInGame"),
+            sum("penaltyKillShotsOnGoal").alias("player_PenaltyKillShotsInGame"),
+            sum("evenStrengthShotsOnGoal").alias("player_EvenStrengthShotsInGame"),
+            sum("goal").alias("player_GoalsInGame"),
+            sum("shotWasOnGoal").alias("player_ShotsOnGoalInGame"),
+            mean("shooterTimeOnIce").alias("player_avgTimeOnIceInGame"),
             mean("shooterTimeOnIceSinceFaceoff").alias(
-                "avgShooterTimeOnIceSinceFaceoffInGame"
+                "player_avgTimeOnIceSinceFaceoffInGame"
             ),
-            mean("shotDistance").alias("avgPlayerShotDistanceInGame"),
-            sum("shotOnEmptyNet").alias("playerShotsOnEmptyNetInGame"),
-            sum("shotRebound").alias("playerShotsOnReboundsInGame"),
-            sum("shotRush").alias("playerShotsOnRushesInGame"),
-            mean("speedFromLastEvent").alias("avgPlayerSpeedFromLastEvent"),
+            mean("shotDistance").alias("player_avgShotDistanceInGame"),
+            sum("shotOnEmptyNet").alias("player_ShotsOnEmptyNetInGame"),
+            sum("shotRebound").alias("player_ShotsOnReboundsInGame"),
+            sum("shotRush").alias("player_ShotsOnRushesInGame"),
+            mean("speedFromLastEvent").alias("player_avgSpeedFromLastEvent"),
         )
     )
 
-    gold_shots_date = dlt.read("silver_games_historical").select("team", "gameId", "season", "home_or_away", "gameDate", "playerTeam", "opposingTeam").join(
-        skater_game_stats, how="left", on=["team", "gameId", "season", "home_or_away"]
+    gold_shots_date = (
+        dlt.read("silver_games_historical")
+        .select(
+            "team",
+            "gameId",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        )
+        .join(
+            skater_game_stats,
+            how="left",
+            on=["team", "gameId", "season", "home_or_away"],
+        )
     )
 
     # Define Windows (player last games, and players last matchups)
-    windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(col("gameDate"))
+    windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(
+        col("gameDate")
+    )
     last3WindowSpec = windowSpec.rowsBetween(-2, 0)
     last7WindowSpec = windowSpec.rowsBetween(-6, 0)
-    matchupWindowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName", "opposingTeam").orderBy(col("gameDate"))
+    matchupWindowSpec = Window.partitionBy(
+        "playerId", "playerTeam", "shooterName", "opposingTeam"
+    ).orderBy(col("gameDate"))
     matchupLast3WindowSpec = matchupWindowSpec.rowsBetween(-2, 0)
     matchupLast7WindowSpec = matchupWindowSpec.rowsBetween(-6, 0)
-
 
     reorder_list = [
         "gameDate",
@@ -528,29 +545,85 @@ def aggregate_games_data():
     ]
 
     # Create a window specification
-    gameCountWindowSpec = Window.partitionBy("playerId").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
-    matchupCountWindowSpec = Window.partitionBy("playerId", "playerTeam", "opposingTeam").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
+    gameCountWindowSpec = (
+        Window.partitionBy("playerId")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
+    matchupCountWindowSpec = (
+        Window.partitionBy("playerId", "playerTeam", "opposingTeam")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
 
     # Apply the count function within the window
-    gold_shots_date_count = gold_shots_date.withColumn("playerGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)).withColumn("playerMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec))
+    gold_shots_date_count = gold_shots_date.withColumn(
+        "playerGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
+    ).withColumn(
+        "playerMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+    )
 
     columns_to_iterate = [
-                col
-                for col in gold_shots_date_count.columns
-                if col not in reorder_list
-            ]
+        col for col in gold_shots_date_count.columns if col not in reorder_list
+    ]
 
     # Create a list of column expressions for lag and averages
-    column_exprs = [col(c) for c in gold_shots_date_count.columns]  # Start with all existing columns
+    column_exprs = [
+        col(c) for c in gold_shots_date_count.columns
+    ]  # Start with all existing columns
+    player_avg_exprs = {
+        col_name: median(col(col_name)).over(
+            Window.partitionBy("playerId", "playerTeam")
+        )
+        for col_name in columns_to_iterate
+    }
+    playerMatch_avg_exprs = {
+        col_name: median(col(col_name)).over(
+            Window.partitionBy("playerId", "playerTeam", "opposingTeam")
+        )
+        for col_name in columns_to_iterate
+    }
 
     for column_name in columns_to_iterate:
+        player_avg = player_avg_exprs[column_name]
+        matchup_avg = playerMatch_avg_exprs[column_name]
         column_exprs += [
-            when(col("playerGamesPlayedRolling") > 0, lag(col(column_name)).over(windowSpec)).otherwise(lit(None)).alias(f"previous_{column_name}"),
-            when(col("playerGamesPlayedRolling") > 2, avg(col(column_name)).over(last3WindowSpec)).otherwise(lit(None)).alias(f"average_{column_name}_last_3_games"),
-            when(col("playerGamesPlayedRolling") > 6, avg(col(column_name)).over(last7WindowSpec)).otherwise(lit(None)).alias(f"average_{column_name}_last_7_games"),
-            when(col("playerMatchupPlayedRolling") > 0, lag(col(column_name)).over(matchupWindowSpec)).otherwise(lit(None)).alias(f"matchup_previous_{column_name}"),
-            when(col("playerMatchupPlayedRolling") > 2, avg(col(column_name)).over(matchupLast3WindowSpec)).otherwise(lit(None)).alias(f"matchup_average_{column_name}_last_3_games"),
-            when(col("playerMatchupPlayedRolling") > 6, avg(col(column_name)).over(matchupLast7WindowSpec)).otherwise(lit(None)).alias(f"matchup_average_{column_name}_last_7_games")
+            when(
+                col("playerGamesPlayedRolling") > 0,
+                lag(col(column_name)).over(windowSpec),
+            )
+            .otherwise(lit(None))
+            .alias(f"previous_{column_name}"),
+            when(
+                col("playerGamesPlayedRolling") > 2,
+                avg(col(column_name)).over(last3WindowSpec),
+            )
+            .otherwise(player_avg)
+            .alias(f"average_{column_name}_last_3_games"),
+            when(
+                col("playerGamesPlayedRolling") > 6,
+                avg(col(column_name)).over(last7WindowSpec),
+            )
+            .otherwise(player_avg)
+            .alias(f"average_{column_name}_last_7_games"),
+            when(
+                col("playerMatchupPlayedRolling") > 0,
+                lag(col(column_name)).over(matchupWindowSpec),
+            )
+            .otherwise(lit(None))
+            .alias(f"matchup_previous_{column_name}"),
+            when(
+                col("playerMatchupPlayedRolling") > 2,
+                avg(col(column_name)).over(matchupLast3WindowSpec),
+            )
+            .otherwise(matchup_avg)
+            .alias(f"matchup_average_{column_name}_last_3_games"),
+            when(
+                col("playerMatchupPlayedRolling") > 6,
+                avg(col(column_name)).over(matchupLast7WindowSpec),
+            )
+            .otherwise(matchup_avg)
+            .alias(f"matchup_average_{column_name}_last_7_games"),
         ]
 
     # Apply all column expressions at once using select
@@ -572,10 +645,11 @@ def window_gold_game_data():
     windowSpec = Window.partitionBy("playerTeam").orderBy(col("gameDate"))
     last3WindowSpec = windowSpec.rowsBetween(-2, 0)
     last7WindowSpec = windowSpec.rowsBetween(-6, 0)
-    matchupWindowSpec = Window.partitionBy("playerTeam", "opposingTeam").orderBy(col("gameDate"))
+    matchupWindowSpec = Window.partitionBy("playerTeam", "opposingTeam").orderBy(
+        col("gameDate")
+    )
     matchupLast3WindowSpec = matchupWindowSpec.rowsBetween(-2, 0)
     matchupLast7WindowSpec = matchupWindowSpec.rowsBetween(-6, 0)
-
 
     reorder_list = [
         "gameDate",
@@ -598,33 +672,94 @@ def window_gold_game_data():
     ]
 
     # Create a window specification
-    gameCountWindowSpec = Window.partitionBy("playerTeam").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
-    matchupCountWindowSpec = Window.partitionBy("playerTeam", "opposingTeam").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
+    gameCountWindowSpec = (
+        Window.partitionBy("playerTeam")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
+    matchupCountWindowSpec = (
+        Window.partitionBy("playerTeam", "opposingTeam")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
 
     # Apply the count function within the window
-    gold_games_count = dlt.read("silver_games_historical").withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)).withColumn("teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec))
+    gold_games_count = (
+        dlt.read("silver_games_historical")
+        .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+        .withColumn(
+            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+        )
+    )
 
     columns_to_iterate = [
-                col
-                for col in gold_games_count.columns
-                if col not in reorder_list
-            ]
+        col for col in gold_games_count.columns if col not in reorder_list
+    ]
 
     # Create a list of column expressions for lag and averages
-    column_exprs = [col(c) for c in gold_games_count.columns]  # Start with all existing columns
+    column_exprs = [
+        col(c) for c in gold_games_count.columns
+    ]  # Start with all existing columns
+    game_avg_exprs = {
+        col_name: median(col(col_name)).over(Window.partitionBy("playerTeam"))
+        for col_name in columns_to_iterate
+    }
+    matchup_avg_exprs = {
+        col_name: median(col(col_name)).over(
+            Window.partitionBy("playerTeam", "opposingTeam")
+        )
+        for col_name in columns_to_iterate
+    }
 
     for column_name in columns_to_iterate:
+        game_avg = game_avg_exprs[column_name]
+        matchup_avg = matchup_avg_exprs[column_name]
         column_exprs += [
-            when(col("teamGamesPlayedRolling") > 0, lag(col(column_name)).over(windowSpec)).otherwise(lit(None)).alias(f"previous_{column_name}"),
-            when(col("teamGamesPlayedRolling") > 2, avg(col(column_name)).over(last3WindowSpec)).otherwise(lit(None)).alias(f"average_{column_name}_last_3_games"),
-            when(col("teamGamesPlayedRolling") > 6, avg(col(column_name)).over(last7WindowSpec)).otherwise(lit(None)).alias(f"average_{column_name}_last_7_games"),
-            when(col("teamMatchupPlayedRolling") > 0, lag(col(column_name)).over(matchupWindowSpec)).otherwise(lit(None)).alias(f"matchup_previous_{column_name}"),
-            when(col("teamMatchupPlayedRolling") > 2, avg(col(column_name)).over(matchupLast3WindowSpec)).otherwise(lit(None)).alias(f"matchup_average_{column_name}_last_3_games"),
-            when(col("teamMatchupPlayedRolling") > 6, avg(col(column_name)).over(matchupLast7WindowSpec)).otherwise(lit(None)).alias(f"matchup_average_{column_name}_last_7_games")
+            when(
+                col("teamGamesPlayedRolling") > 0,
+                lag(col(column_name)).over(windowSpec),
+            )
+            .otherwise(lit(None))
+            .alias(f"previous_{column_name}"),
+            when(
+                col("teamGamesPlayedRolling") > 2,
+                avg(col(column_name)).over(last3WindowSpec),
+            )
+            .otherwise(game_avg)
+            .alias(f"average_{column_name}_last_3_games"),
+            when(
+                col("teamGamesPlayedRolling") > 6,
+                avg(col(column_name)).over(last7WindowSpec),
+            )
+            .otherwise(game_avg)
+            .alias(f"average_{column_name}_last_7_games"),
+            when(
+                col("teamMatchupPlayedRolling") > 0,
+                lag(col(column_name)).over(matchupWindowSpec),
+            )
+            .otherwise(lit(None))
+            .alias(f"matchup_previous_{column_name}"),
+            when(
+                col("teamMatchupPlayedRolling") > 2,
+                avg(col(column_name)).over(matchupLast3WindowSpec),
+            )
+            .otherwise(matchup_avg)
+            .alias(f"matchup_average_{column_name}_last_3_games"),
+            when(
+                col("teamMatchupPlayedRolling") > 6,
+                avg(col(column_name)).over(matchupLast7WindowSpec),
+            )
+            .otherwise(matchup_avg)
+            .alias(f"matchup_average_{column_name}_last_7_games"),
         ]
 
     # Apply all column expressions at once using select
-    gold_game_stats = gold_games_count.select(*column_exprs).withColumn("previous_opposingTeam", when(col("teamGamesPlayedRolling") > 0, lag(col("opposingTeam")).over(windowSpec)).otherwise(lit(None)))
+    gold_game_stats = gold_games_count.select(*column_exprs).withColumn(
+        "previous_opposingTeam",
+        when(
+            col("teamGamesPlayedRolling") > 0, lag(col("opposingTeam")).over(windowSpec)
+        ).otherwise(lit(None)),
+    )
 
     return gold_game_stats
 
@@ -638,37 +773,54 @@ def window_gold_game_data():
 )
 def merge_player_game_stats():
 
-  gold_player_stats = dlt.read('gold_player_stats').alias("gold_player_stats")
-  gold_game_stats = dlt.read('gold_game_stats').alias("gold_game_stats")
-  schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
+    gold_player_stats = dlt.read("gold_player_stats").alias("gold_player_stats")
+    gold_game_stats = dlt.read("gold_game_stats").alias("gold_game_stats")
+    schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
 
-  gold_merged_stats = gold_game_stats.join(
-    gold_player_stats, how="left", on=["team", "gameId", "season", "home_or_away", "gameDate", "playerTeam", "opposingTeam"]
+    gold_merged_stats = gold_game_stats.join(
+        gold_player_stats,
+        how="left",
+        on=[
+            "team",
+            "gameId",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        ],
     ).alias("gold_merged_stats")
 
-  schedule_shots = (
-      schedule_2023.join(
-          gold_merged_stats,
-          how="left",
-          on=[
-              col("gold_merged_stats.homeTeamCode") == col("schedule_2023.HOME"),
-              col("gold_merged_stats.awayTeamCode") == col("schedule_2023.AWAY"),
-              col("gold_merged_stats.gameDate") == col("schedule_2023.DATE"),
-          ],
-      )
-      .drop("DATE", "EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
-      .withColumn("isHome", when(col("home_or_away") == "HOME", 1).otherwise(0))
-      .withColumn("dummyDay", when(col("DAY") == "Mon", 1)
-                                      .when(col("DAY") == "Tue", 2)
-                                      .when(col("DAY") == "Wed", 3)
-                                      .when(col("DAY") == "Thu", 4)
-                                      .when(col("DAY") == "Fri", 5)
-                                      .when(col("DAY") == "Sat", 6)
-                                      .when(col("DAY") == "Sun", 7)
-                                      .otherwise(0))
-  )
+    schedule_shots = (
+        schedule_2023.join(
+            gold_merged_stats,
+            how="left",
+            on=[
+                col("gold_merged_stats.homeTeamCode") == col("schedule_2023.HOME"),
+                col("gold_merged_stats.awayTeamCode") == col("schedule_2023.AWAY"),
+                col("gold_merged_stats.gameDate") == col("schedule_2023.DATE"),
+            ],
+        )
+        .drop("DATE", "EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
+        .withColumn("isHome", when(col("home_or_away") == "HOME", 1).otherwise(0))
+        .withColumn(
+            "dummyDay",
+            when(col("DAY") == "Mon", 1)
+            .when(col("DAY") == "Tue", 2)
+            .when(col("DAY") == "Wed", 3)
+            .when(col("DAY") == "Thu", 4)
+            .when(col("DAY") == "Fri", 5)
+            .when(col("DAY") == "Sat", 6)
+            .when(col("DAY") == "Sun", 7)
+            .otherwise(0),
+        )
+        .withColumn("gameId", col("gameId").cast("string"))
+        .withColumn("playerId", col("playerId").cast("string"))
+        .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
+        .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
+    )
 
-  reorder_list = [
+    reorder_list = [
         "gameDate",
         "gameId",
         "season",
@@ -688,20 +840,15 @@ def merge_player_game_stats():
         "playerMatchupPlayedRolling",
         "teamGamesPlayedRolling",
         "teamMatchupPlayedRolling",
-        "playerShotsOnGoalInGame",
+        "player_ShotsOnGoalInGame",
     ]
 
-  schedule_shots_reordered = schedule_shots.select(
-      *reorder_list,
-      *[
-          col
-          for col in schedule_shots.columns
-          if col not in reorder_list
-      ]
-  )
+    schedule_shots_reordered = schedule_shots.select(
+        *reorder_list,
+        *[col for col in schedule_shots.columns if col not in reorder_list]
+    )
 
-  return schedule_shots_reordered
-
+    return schedule_shots_reordered
 
 # COMMAND ----------
 
@@ -713,9 +860,9 @@ def merge_player_game_stats():
 )
 def make_model_ready():
 
-  gold_model_data = dlt.read("gold_merged_stats")
+    gold_model_data = dlt.read("gold_merged_stats")
 
-  reorder_list = [
+    reorder_list = [
         "gameDate",
         "gameId",
         "season",
@@ -735,18 +882,83 @@ def make_model_ready():
         "playerMatchupPlayedRolling",
         "teamGamesPlayedRolling",
         "teamMatchupPlayedRolling",
-        "playerShotsOnGoalInGame",
-        "playerShotsOnGoalInGame",
+        "player_ShotsOnGoalInGame",
     ]
-  
-  # Create a list of column expressions for lag and averages
-  keep_column_exprs = []  # Start with an empty list
 
-  for column_name in gold_model_data.columns:
-      if column_name in reorder_list or column_name.startswith("previous") or column_name.startswith("average"):
-          keep_column_exprs.append(col(column_name))
+    # Create a list of column expressions for lag and averages
+    keep_column_exprs = []  # Start with an empty list
 
-  # Apply all column expressions at once using select
-  gold_model_data = gold_model_data.select(*keep_column_exprs)
+    for column_name in gold_model_data.columns:
+        if (
+            column_name in reorder_list
+            or column_name.startswith("previous")
+            or column_name.startswith("average")
+            or column_name.startswith("matchup")
+        ):
+            keep_column_exprs.append(col(column_name))
 
-  return gold_model_data
+    # Apply all column expressions at once using select
+    gold_model_data = gold_model_data.select(*keep_column_exprs)
+
+    return gold_model_data
+
+# COMMAND ----------
+
+# DBTITLE 1,impute_nulls_with_grouped_avgs
+def impute_nulls_with_grouped_avgs(
+    df: DataFrame, target_columns: list, group_by_columns: list
+) -> DataFrame:
+    """
+    Imputes nulls in the specified target columns with the average of those columns, grouped by the specified group_by_columns.
+
+    :param df: Input DataFrame.
+    :param target_columns: List of column names to impute.
+    :param group_by_columns: List of column names to group by for calculating the average.
+    :return: DataFrame with nulls imputed.
+    """
+    # Loop through each target column to calculate the grouped average and impute nulls
+    for target_column in target_columns:
+        # Calculate the average of the target column, grouped by the provided columns
+        avg_df = df.groupBy(group_by_columns).agg(
+            avg(target_column).alias(f"{target_column}_avg")
+        )
+
+        # Join the original dataframe with the averages dataframe
+        df = df.join(avg_df, group_by_columns, "left")
+
+        # Replace null values in the target column with the corresponding average
+        df = df.withColumn(
+            target_column,
+            when(col(target_column).isNull(), col(f"{target_column}_avg")).otherwise(
+                col(target_column)
+            ),
+        ).drop(f"{target_column}_avg")
+
+    return df
+
+# COMMAND ----------
+
+# DBTITLE 1,gold_features_imputed
+# @dlt.table(
+#     name="gold_model_imputed",
+#     # comment="Raw Ingested NHL data on games from 2008 - Present",
+#     table_properties={"quality": "gold"},
+# )
+# def impute_features():
+#   # Filtering columns that start with "previous_game" or "average_game"
+#   game_stats_columns = [c for c in dlt.read("gold_model_stats").columns if c.startswith('previous_game_') or c.startswith('average_game_')]
+#   player_stats_columns = [c for c in dlt.read("gold_model_stats").columns if c.startswith('previous_player_') or c.startswith('average_player_')]
+#   game_matchup_stats_columns = [c for c in dlt.read("gold_model_stats").columns if c.startswith('matchup_previous_player_') or c.startswith('matchup_average_player_')]
+#   player_matchup_stats_columns = [c for c in dlt.read("gold_model_stats").columns if c.startswith('matchup_previous_game_') or c.startswith('matchup_average_game_')]
+
+#   playerGroupBy = ["playerId", "playerTeam"]
+#   playerMatchupGroupBy = ["playerId", "playerTeam", "opposingTeam"]
+#   gameGroupBy = ["playerTeam"]
+#   matchupGroupBy = ["playerTeam", "opposingTeam"]
+
+#   imputed_player_stats = impute_nulls_with_grouped_avgs(dlt.read("gold_model_stats"), player_stats_columns, playerGroupBy)
+#   imputed_player_matchup_stats = impute_nulls_with_grouped_avgs(imputed_player_stats, player_matchup_stats_columns, playerMatchupGroupBy)
+#   imputed_game_stats = impute_nulls_with_grouped_avgs(imputed_player_matchup_stats, game_stats_columns, gameGroupBy)
+#   imputed_game_matchup_stats = impute_nulls_with_grouped_avgs(imputed_game_stats, game_stats_columns, gameGroupBy)
+
+#   return imputed_game_matchup_stats
