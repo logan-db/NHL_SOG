@@ -58,6 +58,11 @@ model_remove_1st_and_upcoming_games = (
 
 # COMMAND ----------
 
+
+assert model_remove_1st_and_upcoming_games.count() == model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()
+
+# COMMAND ----------
+
 from databricks.feature_store import FeatureStoreClient 
 
 # customer_features_df = compute_customer_features(df) 
@@ -72,7 +77,7 @@ except:
 
 customer_feature_table = fs.create_table( 
     name='lr_nhl_demo.dev.SOG_features', 
-    primary_keys=['gameId', 'playerId', 'home_or_away', 'isPlayoffGame', 'playerTeam', 'opposingTeam', 'shooterName', 'DAY', 'AWAY', 'HOME', 'previous_opposingTeam'],
+    primary_keys=['gameId', 'playerId'],
     schema=model_remove_1st_and_upcoming_games.schema, 
     description='Skater features' 
 )
@@ -82,7 +87,3 @@ fs.write_table(
     df = model_remove_1st_and_upcoming_games, 
     mode = 'overwrite' 
 )
-
-# COMMAND ----------
-
-
