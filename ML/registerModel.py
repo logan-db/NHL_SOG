@@ -9,7 +9,7 @@ catalog = "lr_nhl_demo"
 schema = "dev"
 model_name = "SOGModel"
 mlflow.set_registry_uri("databricks-uc")
-mlflow.register_model("runs:/3a788a1f9c9f4489b5584d6a02ba8487/model", f"{catalog}.{schema}.{model_name}")
+mlflow.register_model("runs:/6834dfcb3b0640dab3c8cf80b9e9f61c/model", f"{catalog}.{schema}.{model_name}")
 
 # COMMAND ----------
 

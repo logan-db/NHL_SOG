@@ -34,17 +34,19 @@ fs = FeatureStoreClient()
 # Replace "your_table_name" with the name of your table
 sog_features = fs.read_table("lr_nhl_demo.dev.sog_features")
 
+gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta")
+
 # COMMAND ----------
 
 model_name = "lr_nhl_demo.dev.SOGModel"
-model_version = 1
+model_version = 2
 
 model_uri=f"models:/{model_name}/{model_version}"
 model = mlflow.pyfunc.load_model(model_uri=model_uri)
 
 # COMMAND ----------
 
-current_games = spark.table("lr_nhl_demo.dev.gold_model_stats_delta")
+current_games = spark.table("lr_nhl_demo.dev.sog_features")
 
 # COMMAND ----------
 
@@ -56,55 +58,76 @@ current_games.filter(col("gameId").isNull()).count()
 
 # COMMAND ----------
 
-current_games.filter(col("gameId").isNotNull()).count()
+gold_model_stats.filter(col("gameId").isNull()).count()
 
 # COMMAND ----------
 
-upcoming_games_df = (
-  current_games.filter(col("gameId").isNull())
+upcoming_games = (
+  gold_model_stats.filter((col("gameId").isNull())
+                           & (col("playerGamesPlayedRolling") > 0) 
+                           & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+                           & (col("gameDate") != "2024-01-17")
+                           )
 )
-display(upcoming_games_df)
+
+display(upcoming_games)
 
 # COMMAND ----------
 
-predict_games_df = (
-  current_games.filter(col("gameId").isNotNull())
-)
-display(predict_games_df)
-
-# COMMAND ----------
-
-predict_games_df.count()
-
-# COMMAND ----------
-
+# DBTITLE 1,Run on Upcoming Games and historical Games
 # Import necessary libraries
-from pyspark.sql.functions import monotonically_increasing_id, col
+from pyspark.sql.functions import monotonically_increasing_id, col, row_number
+from pyspark.sql.window import Window
 from pyspark.sql.types import FloatType
 
 # Use the trained model to predict on the predict_games_df dataframe
 # Convert the DataFrame to Pandas, as MLflow's PyFunc models typically work with Pandas DataFrames
-predict_games_pd = predict_games_df.toPandas()
+predict_games_pd = upcoming_games.toPandas()
+hist_games_pd = current_games.toPandas()
 
 # Use the predict method
 predictions = model.predict(predict_games_pd)
+predictions_hist = model.predict(hist_games_pd)
 
 # Convert predictions (a numpy array) to a Spark DataFrame with a single column 'predictedSOG'
 predictions_df = spark.createDataFrame([(float(x),) for x in predictions], ['predictedSOG'])
+predictions_hist_df = spark.createDataFrame([(float(x),) for x in predictions_hist], ['predictedSOG'])
 
-# Add an "id" column to both DataFrames to ensure the correct row-wise match
-predict_games_df = predict_games_df.withColumn('id', monotonically_increasing_id())
-predictions_df = predictions_df.withColumn('id', monotonically_increasing_id())
+predictions_df = predictions_df.withColumn("idx", monotonically_increasing_id())
+predictions_hist_df = predictions_hist_df.withColumn("idx", monotonically_increasing_id())
 
-# Join the DataFrames on the "id" column and drop it after joining
-predict_games_df = predict_games_df.join(predictions_df, 'id', 'inner').drop('id')
+predict_games_df = upcoming_games.withColumn("idx", monotonically_increasing_id())
+hist_games_df = current_games.withColumn("idx", monotonically_increasing_id())
 
-# Now predict_games_df should have the 'predictedSOG' column correctly added
+windowSpec = Window.orderBy("idx")
+predictions_df = predictions_df.withColumn("idx", row_number().over(windowSpec))
+predictions_hist_df = predictions_hist_df.withColumn("idx", row_number().over(windowSpec))
+
+predict_games_df = predict_games_df.withColumn("idx", row_number().over(windowSpec))
+hist_games_df = hist_games_df.withColumn("idx", row_number().over(windowSpec))
 
 # COMMAND ----------
 
+predictions_df.count()
+
+# COMMAND ----------
+
+display(predict_games_df)
+
+# COMMAND ----------
+
+# Join the DataFrames on the "id" column and drop it after joining
+predict_games_df = predict_games_df.join(predictions_df, 'idx', 'inner').drop('idx')
+predict_hist_games_df = hist_games_df.join(predictions_hist_df, 'idx', 'inner').drop('idx')
+
+# Now predict_games_df should have the 'predictedSOG' column correctly added
 # Display the dataframe with specified columns at the front
 display(predict_games_df.select("player_ShotsOnGoalInGame", "predictedSOG", "*"))
+display(predict_hist_games_df.select("player_ShotsOnGoalInGame", "predictedSOG", "*"))
+
+# COMMAND ----------
+
+display(predict_hist_games_df.filter(col("gameDate")=="2024-04-18").select("player_ShotsOnGoalInGame", "predictedSOG", "*"))
 
 # COMMAND ----------
 
@@ -112,4 +135,32 @@ predict_games_df.count()
 
 # COMMAND ----------
 
-score_model(table_df)
+predict_hist_games_df.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.predictSOG_hist")
+predict_games_df.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.predictSOG_upcoming")
+
+# COMMAND ----------
+
+from pyspark.ml.evaluation import RegressionEvaluator
+
+# Create a RegressionEvaluator object
+evaluator = RegressionEvaluator(labelCol='player_ShotsOnGoalInGame', predictionCol='predictedSOG')
+
+# Calculate evaluation metrics
+mse = evaluator.evaluate(predict_hist_games_df)
+rmse = evaluator.evaluate(predict_hist_games_df, {evaluator.metricName: "rmse"})
+mae = evaluator.evaluate(predict_hist_games_df, {evaluator.metricName: "mae"})
+r2 = evaluator.evaluate(predict_hist_games_df, {evaluator.metricName: "r2"})
+
+# Print the evaluation metrics
+print("Mean Squared Error (MSE):", mse)
+print("Root Mean Squared Error (RMSE):", rmse)
+print("Mean Absolute Error (MAE):", mae)
+print("R-squared (R2):", r2)
+
+# COMMAND ----------
+
+display(predict_games_df)
+
+# COMMAND ----------
+
+

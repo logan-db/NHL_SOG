@@ -47,16 +47,16 @@ def ingest_shot_data():
 # DBTITLE 1,bronze_teams_2023
 @dlt.table(name="bronze_teams_2023", comment="Raw Ingested NHL data on Teams in 2023")
 def ingest_teams_data():
-    # teams_file_path = download_unzip_and_save_as_table(
-    #     teams_url, tmp_base_path, "teams_2023", file_format=".csv"
-    # )
-    # return (
-    #     spark.read.format("csv")
-    #     .option("header", "true")
-    #     .option("inferSchema", "true")
-    #     .load(teams_file_path)
-    # )
-    return spark.table("lr_nhl_demo.dev.bronze_teams_2023")
+    teams_file_path = download_unzip_and_save_as_table(
+        teams_url, tmp_base_path, "teams_2023", file_format=".csv"
+    )
+    return (
+        spark.read.format("csv")
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .load(teams_file_path)
+    )
+    # return spark.table("lr_nhl_demo.dev.bronze_teams_2023")
 
 # COMMAND ----------
 
@@ -283,13 +283,70 @@ def clean_games_data():
         )
     )
 
+    
+
     return silver_games_historical
 
 # COMMAND ----------
 
+# DBTITLE 1,silver_games_schedule
+@dlt.table(
+    name="silver_games_schedule",
+    table_properties={"quality": "silver"},
+)
+def merge_games_data():
+
+  silver_games_schedule = (
+      dlt.read("bronze_schedule_2023").join(
+          dlt.read("silver_games_historical").withColumn("homeTeamCode", when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam"))).withColumn("awayTeamCode", when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam"))),
+          how="left",
+          on=[
+              col("homeTeamCode") == col("HOME"),
+              col("awayTeamCode") == col("AWAY"),
+              col("gameDate") == col("DATE"),
+          ],
+      )
+  )
+
+  home_silver_games_schedule = silver_games_schedule.filter(
+      col("gameId").isNull()
+  ).withColumn("team", col("HOME"))
+  away_silver_games_schedule = silver_games_schedule.filter(
+      col("gameId").isNull()
+  ).withColumn("team", col("AWAY"))
+
+  upcoming_final_clean = (
+      home_silver_games_schedule.union(away_silver_games_schedule)
+      .withColumn("season", lit(2023))
+      .withColumn(
+          "gameDate",
+          when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
+      )
+      .withColumn(
+          "playerTeam",
+          when(col("playerTeam").isNull(), col("team")).otherwise(
+              col("playerTeam")
+          ),
+      )
+      .withColumn(
+          "opposingTeam",
+          when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(
+              col("HOME")
+          ),
+      )
+      .withColumn(
+          "home_or_away",
+          when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(
+              lit("AWAY")
+          ),
+      )
+  )  
+
+  return silver_games_schedule.filter(col("gameId").isNotNull()).unionAll(upcoming_final_clean).orderBy(desc("DATE"))
+
+# COMMAND ----------
+
 # DBTITLE 1,silver_skaters_team_game
-@dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
-@dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
     name="silver_skaters_team_game",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -444,8 +501,8 @@ def clean_shots_data():
 # COMMAND ----------
 
 # DBTITLE 1,gold_player_stats
-@dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
-@dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
+# @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
+# @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
     name="gold_player_stats",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -480,9 +537,9 @@ def aggregate_games_data():
             sum("evenStrengthShotsOnGoal").alias("player_EvenStrengthShotsInGame"),
             sum("goal").alias("player_GoalsInGame"),
             sum("shotWasOnGoal").alias("player_ShotsOnGoalInGame"),
-            mean("shooterTimeOnIce").alias("player_avgTimeOnIceInGame"),
-            mean("shooterTimeOnIceSinceFaceoff").alias(
-                "player_avgTimeOnIceSinceFaceoffInGame"
+            sum("shooterTimeOnIce").alias("player_totalTimeOnIceInGame"),
+            sum("shooterTimeOnIceSinceFaceoff").alias(
+                "player_totalTimeOnIceSinceFaceoffInGame"
             ),
             mean("shotDistance").alias("player_avgShotDistanceInGame"),
             sum("shotOnEmptyNet").alias("player_ShotsOnEmptyNetInGame"),
@@ -493,7 +550,7 @@ def aggregate_games_data():
     )
 
     gold_shots_date = (
-        dlt.read("silver_games_historical")
+        dlt.read("silver_games_schedule")
         .select(
             "team",
             "gameId",
@@ -509,6 +566,71 @@ def aggregate_games_data():
             on=["team", "gameId", "season", "home_or_away"],
         )
     )
+
+    player_index_2023 = (
+        dlt.read("bronze_skaters_2023")
+        .select("playerId", "season", "team", "name")
+        .filter(col("situation") == "all")
+        .distinct()
+    )
+
+    player_game_index_2023 = (
+        dlt.read("silver_games_schedule")
+        .select(
+            "team",
+            "gameId",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        )
+        .join(player_index_2023, how="left", on=["team", "season"])
+        .select("team", "playerId", "season", "name")
+        .distinct()
+        .withColumnRenamed("name", "shooterName")
+    )
+
+    silver_games_schedule = (
+        dlt.read("silver_games_schedule")
+        .select(
+            "team",
+            "gameId",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        )
+        .alias("silver_games_schedule")
+    )
+
+    for col_name in player_game_index_2023.columns:
+        player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
+
+    player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
+
+    upcoming_games_player_index = silver_games_schedule.filter(
+        col("gameId").isNull()
+    ).join(
+        player_game_index_2023,
+        how="left",
+        on=[col("index_team") == col("team"), col("index_season") == col("season")],
+    )
+
+    gold_shots_date_final = (gold_shots_date
+            .join(
+            upcoming_games_player_index.drop("gameId"),
+            how="left",
+            on=["team", "season", "home_or_away", "gameDate", "playerTeam", "opposingTeam"],
+        )
+            .withColumn("playerId", when(col("playerId").isNull(), col("index_playerId")).otherwise(col("playerId")))
+            .withColumn("shooterName", when(col("shooterName").isNull(), col("index_shooterName")).otherwise(col("shooterName")))
+            .drop("index_season", "index_team", "index_shooterName", "index_playerId")
+    )
+
+#        .withColumn("isHome", when(col("playerTeam") == col("HOME"), lit(1)).otherwise(lit(0))) \
+#        .withColumn("isPlayoffGame", lit(0))
 
     # Define Windows (player last games, and players last matchups)
     windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(
@@ -534,6 +656,7 @@ def aggregate_games_data():
         "playerId",
         "shooterName",
         "DAY",
+        "DATE",
         "dummyDay",
         "AWAY",
         "HOME",
@@ -557,7 +680,7 @@ def aggregate_games_data():
     )
 
     # Apply the count function within the window
-    gold_shots_date_count = gold_shots_date.withColumn(
+    gold_shots_date_count = gold_shots_date_final.withColumn(
         "playerGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
     ).withColumn(
         "playerMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
@@ -589,37 +712,37 @@ def aggregate_games_data():
         matchup_avg = playerMatch_avg_exprs[column_name]
         column_exprs += [
             when(
-                col("playerGamesPlayedRolling") > 0,
+                col("playerGamesPlayedRolling") > 1,
                 lag(col(column_name)).over(windowSpec),
             )
             .otherwise(player_avg)
             .alias(f"previous_{column_name}"),
             when(
-                col("playerGamesPlayedRolling") > 2,
+                col("playerGamesPlayedRolling") > 3,
                 avg(col(column_name)).over(last3WindowSpec),
             )
             .otherwise(player_avg)
             .alias(f"average_{column_name}_last_3_games"),
             when(
-                col("playerGamesPlayedRolling") > 6,
+                col("playerGamesPlayedRolling") > 7,
                 avg(col(column_name)).over(last7WindowSpec),
             )
             .otherwise(player_avg)
             .alias(f"average_{column_name}_last_7_games"),
             when(
-                col("playerMatchupPlayedRolling") > 0,
+                col("playerMatchupPlayedRolling") > 1,
                 lag(col(column_name)).over(matchupWindowSpec),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_previous_{column_name}"),
             when(
-                col("playerMatchupPlayedRolling") > 2,
+                col("playerMatchupPlayedRolling") > 3,
                 avg(col(column_name)).over(matchupLast3WindowSpec),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_average_{column_name}_last_3_games"),
             when(
-                col("playerMatchupPlayedRolling") > 6,
+                col("playerMatchupPlayedRolling") > 7,
                 avg(col(column_name)).over(matchupLast7WindowSpec),
             )
             .otherwise(matchup_avg)
@@ -663,6 +786,7 @@ def window_gold_game_data():
         "playerId",
         "shooterName",
         "DAY",
+        "DATE",
         "dummyDay",
         "AWAY",
         "HOME",
@@ -685,7 +809,7 @@ def window_gold_game_data():
 
     # Apply the count function within the window
     gold_games_count = (
-        dlt.read("silver_games_historical")
+        dlt.read("silver_games_schedule").drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
         .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
         .withColumn(
             "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
@@ -716,37 +840,37 @@ def window_gold_game_data():
         matchup_avg = matchup_avg_exprs[column_name]
         column_exprs += [
             when(
-                col("teamGamesPlayedRolling") > 0,
+                col("teamGamesPlayedRolling") > 1,
                 lag(col(column_name)).over(windowSpec),
             )
             .otherwise(game_avg)
             .alias(f"previous_{column_name}"),
             when(
-                col("teamGamesPlayedRolling") > 2,
+                col("teamGamesPlayedRolling") > 3,
                 avg(col(column_name)).over(last3WindowSpec),
             )
             .otherwise(game_avg)
             .alias(f"average_{column_name}_last_3_games"),
             when(
-                col("teamGamesPlayedRolling") > 6,
+                col("teamGamesPlayedRolling") > 7,
                 avg(col(column_name)).over(last7WindowSpec),
             )
             .otherwise(game_avg)
             .alias(f"average_{column_name}_last_7_games"),
             when(
-                col("teamMatchupPlayedRolling") > 0,
+                col("teamMatchupPlayedRolling") > 1,
                 lag(col(column_name)).over(matchupWindowSpec),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_previous_{column_name}"),
             when(
-                col("teamMatchupPlayedRolling") > 2,
+                col("teamMatchupPlayedRolling") > 3,
                 avg(col(column_name)).over(matchupLast3WindowSpec),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_average_{column_name}_last_3_games"),
             when(
-                col("teamMatchupPlayedRolling") > 6,
+                col("teamMatchupPlayedRolling") > 7,
                 avg(col(column_name)).over(matchupLast7WindowSpec),
             )
             .otherwise(matchup_avg)
@@ -757,7 +881,7 @@ def window_gold_game_data():
     gold_game_stats = gold_games_count.select(*column_exprs).withColumn(
         "previous_opposingTeam",
         when(
-            col("teamGamesPlayedRolling") > 0, lag(col("opposingTeam")).over(windowSpec)
+            col("teamGamesPlayedRolling") > 1, lag(col("opposingTeam")).over(windowSpec)
         ).otherwise(lit(None)),
     )
 
@@ -775,14 +899,13 @@ def merge_player_game_stats():
 
     gold_player_stats = dlt.read("gold_player_stats").alias("gold_player_stats")
     gold_game_stats = dlt.read("gold_game_stats").alias("gold_game_stats")
-    schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
+    # schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
 
     gold_merged_stats = gold_game_stats.join(
-        gold_player_stats,
+        gold_player_stats.drop('gameId'),
         how="left",
         on=[
             "team",
-            "gameId",
             "season",
             "home_or_away",
             "gameDate",
@@ -792,15 +915,7 @@ def merge_player_game_stats():
     ).alias("gold_merged_stats")
 
     schedule_shots = (
-        schedule_2023.join(
-            gold_merged_stats,
-            how="left",
-            on=[
-                col("gold_merged_stats.homeTeamCode") == col("schedule_2023.HOME"),
-                col("gold_merged_stats.awayTeamCode") == col("schedule_2023.AWAY"),
-                col("gold_merged_stats.gameDate") == col("schedule_2023.DATE"),
-            ],
-        )
+        gold_merged_stats
         .drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
         .withColumn("isHome", when(col("home_or_away") == "HOME", 1).otherwise(0))
         .withColumn(
@@ -818,6 +933,7 @@ def merge_player_game_stats():
         .withColumn("playerId", col("playerId").cast("string"))
         .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
         .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
+        .withColumn("isPlayoffGame", lit(0))
     )
 
     reorder_list = [
@@ -899,83 +1015,89 @@ def make_model_ready():
         ):
             keep_column_exprs.append(col(column_name))
 
+    # Window Spec for calculating sum of 'player_totalTimeOnIceInGame' partitioned by playerId and ordered by gameDate
+    timeOnIceWindowSpec = Window.partitionBy("playerId").orderBy("gameDate").rowsBetween(Window.unboundedPreceding, 0)
+
     # Apply all column expressions at once using select
-    gold_model_data = gold_model_data.select(*keep_column_exprs)
+    gold_model_data = gold_model_data.select(
+        *keep_column_exprs,
+        sum(col("player_totalTimeOnIceInGame")).over(timeOnIceWindowSpec).alias("rolling_playerTotalTimeOnIceInGame")
+    )
 
     return gold_model_data
 
 # COMMAND ----------
 
 # DBTITLE 1,gold_upcoming_games
-@dlt.table(
-    name="gold_upcoming_games",
-    table_properties={"quality": "gold"},
-)
-def get_prediciton_data():
+# @dlt.table(
+#     name="gold_upcoming_games",
+#     table_properties={"quality": "gold"},
+# )
+# def get_prediciton_data():
 
-  game_index_2023 = (dlt.read("silver_games_historical").select("season", "team", "opposingTeam", "home_or_away").distinct()
-                    .withColumn("homeTeamCode", 
-                                F.when(F.col("home_or_away")=="HOME", F.col("team")).otherwise(F.col("opposingTeam"))
-                    )
-                    .withColumn("awayTeamCode", 
-                                F.when(F.col("home_or_away")=="AWAY", F.col("team")).otherwise(F.col("opposingTeam"))
-                    )
-  )
+#   game_index_2023 = (dlt.read("silver_games_historical").select("season", "team", "opposingTeam", "home_or_away").distinct()
+#                     .withColumn("homeTeamCode", 
+#                                 when(col("home_or_away")=="HOME", col("team")).otherwise(col("opposingTeam"))
+#                     )
+#                     .withColumn("awayTeamCode", 
+#                                 when(col("home_or_away")=="AWAY", col("team")).otherwise(col("opposingTeam"))
+#                     )
+#   )
 
-  player_index_2023 = (dlt.read("skaters_2023").select("playerId", "season", "team", "name").filter(F.col("situation")=="all").distinct())
+#   player_index_2023 = (dlt.read("skaters_2023").select("playerId", "season", "team", "name").filter(col("situation")=="all").distinct())
 
-  player_game_index_2023 = game_index_2023.join(player_index_2023, how="left", on=["team", "season"]).select("team", "playerId", "season", "name").distinct()
+#   player_game_index_2023 = game_index_2023.join(player_index_2023, how="left", on=["team", "season"]).select("team", "playerId", "season", "name").distinct()
 
-  for col_name in player_game_index_2023.columns:
-      player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
+#   for col_name in player_game_index_2023.columns:
+#       player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
 
-  gold_model_data = dlt.read("gold_model_data").alias("gold_model_data")
-  player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
+#   gold_model_data = dlt.read("gold_model_data").alias("gold_model_data")
+#   player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
 
-  home_upcoming_games_df = gold_model_data.filter(F.col("gameId").isNull()).join(
-      player_game_index_2023,
-      how="left",
-      on=[
-          F.col("player_game_index_2023.index_team") == F.col("gold_model_data.HOME")
-      ],
-  )
-  away_upcoming_games_df = gold_model_data.filter(F.col("gameId").isNull()).join(
-      player_game_index_2023,
-      how="left",
-      on=[
-          F.col("player_game_index_2023.index_team") == F.col("gold_model_data.AWAY"),
-      ],
-  )
+#   home_upcoming_games_df = gold_model_data.filter(col("gameId").isNull()).join(
+#       player_game_index_2023,
+#       how="left",
+#       on=[
+#           col("player_game_index_2023.index_team") == col("gold_model_data.HOME")
+#       ],
+#   )
+#   away_upcoming_games_df = gold_model_data.filter(col("gameId").isNull()).join(
+#       player_game_index_2023,
+#       how="left",
+#       on=[
+#           col("player_game_index_2023.index_team") == col("gold_model_data.AWAY"),
+#       ],
+#   )
 
-  home_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
-      home_upcoming_games_df.select("index_playerId", "index_team", "index_season", "index_name"),
-      how="left",
-      on=[
-          F.col("index_team")
-          == F.col("HOME")
-      ],
-  )
+#   home_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
+#       home_upcoming_games_dselect("index_playerId", "index_team", "index_season", "index_name"),
+#       how="left",
+#       on=[
+#           col("index_team")
+#           == col("HOME")
+#       ],
+#   )
 
-  away_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
-      away_upcoming_games_df.select("index_playerId", "index_team", "index_season", "index_name"),
-      how="left",
-      on=[
-          F.col("index_team")
-          == F.col("AWAY")
-      ],
-  )
+#   away_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
+#       away_upcoming_games_dselect("index_playerId", "index_team", "index_season", "index_name"),
+#       how="left",
+#       on=[
+#           col("index_team")
+#           == col("AWAY")
+#       ],
+#   )
 
-  upcoming_final = home_upcoming_final.union(away_upcoming_final)
+#   upcoming_final = home_upcoming_final.union(away_upcoming_final)
 
-  upcoming_final_clean = upcoming_final \
-        .withColumn("gameDate", when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate"))) \
-        .withColumn("season", when(col("season").isNull(), col("index_season")).otherwise(col("season"))) \
-        .withColumn("playerId", when(col("playerId").isNull(), col("index_playerId")).otherwise(col("playerId"))) \
-        .withColumn("playerTeam", when(col("playerTeam").isNull(), col("index_team")).otherwise(col("playerTeam"))) \
-        .withColumn("opposingTeam", when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME"))) \
-        .withColumn("isHome", when(col("playerTeam") == col("HOME"), lit(1)).otherwise(lit(0))) \
-        .withColumn("home_or_away", when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY"))) \
-        .withColumn("shooterName", when(col("shooterName").isNull(), col("index_name")).otherwise(col("shooterName"))) \
-        .withColumn("isPlayoffGame", lit(0))
+#   upcoming_final_clean = upcoming_final \
+#         .withColumn("gameDate", when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate"))) \
+#         .withColumn("season", when(col("season").isNull(), col("index_season")).otherwise(col("season"))) \
+#         .withColumn("playerId", when(col("playerId").isNull(), col("index_playerId")).otherwise(col("playerId"))) \
+#         .withColumn("playerTeam", when(col("playerTeam").isNull(), col("index_team")).otherwise(col("playerTeam"))) \
+#         .withColumn("opposingTeam", when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME"))) \
+#         .withColumn("isHome", when(col("playerTeam") == col("HOME"), lit(1)).otherwise(lit(0))) \
+#         .withColumn("home_or_away", when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY"))) \
+#         .withColumn("shooterName", when(col("shooterName").isNull(), col("index_name")).otherwise(col("shooterName"))) \
+#         .withColumn("isPlayoffGame", lit(0))
 
-  return upcoming_final_clean
+#   return upcoming_final_clean

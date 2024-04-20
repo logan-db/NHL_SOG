@@ -46,15 +46,42 @@ print(categorical_columns)
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
+
+min_player_matchup_played_rolling = gold_model_stats.agg(F.min("playerGamesPlayedRolling")).collect()[0][0]
+min_player_matchup_played_rolling
+
+# COMMAND ----------
+
 display(
-  gold_model_stats.filter(col("previous_opposingTeam").isNull())
+  gold_model_stats.filter(col("playerMatchupPlayedRolling")==0)
+)
+
+# COMMAND ----------
+
+display(
+  gold_model_stats.filter(col("gameId").isNull())
 )
 
 # COMMAND ----------
 
 model_remove_1st_and_upcoming_games = (
-  gold_model_stats.filter((col("gameId").isNotNull()) & (col("playerGamesPlayedRolling") > 1))
+  gold_model_stats.filter((col("gameId").isNotNull()) & (col("playerGamesPlayedRolling") > 0) & (col("rolling_playerTotalTimeOnIceInGame") > 180))
 )
+
+model_remove_1st_and_upcoming_games.count()
+
+# COMMAND ----------
+
+upcoming_games = (
+  gold_model_stats.filter((col("gameId").isNull())
+                           & (col("playerGamesPlayedRolling") > 0) 
+                           & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+                           & (col("gameDate") != "2024-01-17")
+                           )
+)
+
+display(upcoming_games)
 
 # COMMAND ----------
 
@@ -87,3 +114,7 @@ fs.write_table(
     df = model_remove_1st_and_upcoming_games, 
     mode = 'overwrite' 
 )
+
+# COMMAND ----------
+
+

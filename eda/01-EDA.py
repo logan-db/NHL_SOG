@@ -1,6 +1,6 @@
 # Databricks notebook source
 # Imports
-from pyspark.sql import functions as F
+from pyspark.sql.functions import *
 
 # COMMAND ----------
 
@@ -16,6 +16,7 @@ lines_2023 = spark.table("dev.bronze_lines_2023")
 games = spark.table("dev.bronze_games_historical")
 
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
+silver_games_schedule = spark.table("dev.silver_games_schedule")
 
 silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
 silver_shots = spark.table("dev.silver_shots")
@@ -27,11 +28,257 @@ gold_merged_stats = spark.table("dev.gold_merged_stats")
 
 # COMMAND ----------
 
+# filtered_schedule = schedule_2023.filter(col("DATE") != "2024-04-19")
+
+# display(filtered_schedule)
+
+# filtered_schedule.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
+
+# COMMAND ----------
+
+gold_model_data.count()
+
+# COMMAND ----------
+
+display(gold_model_data.orderBy("playerId", "gameDate"))
+
+# COMMAND ----------
+
+display(gold_model_data.filter(F.col("gameId").isNull()))
+
+# COMMAND ----------
+
+skater_game_stats = (
+        silver_shots
+        .groupBy(
+            [
+                "gameId",
+                "team",
+                "shooterName",
+                "playerId",
+                "season",
+                "home_or_away",
+                "homeTeamCode",
+                "awayTeamCode",
+                # "goalieIdForShot",
+                # "goalieNameForShot",
+                "isPlayoffGame",
+            ]
+        )
+        .agg(
+            count("shotID").alias("player_ShotAttemptsInGame"),
+            sum("isPowerPlay").alias("player_PowerPlayShotAttemptsInGame"),
+            sum("isPenaltyKill").alias("player_PenaltyKillShotAttemptsInGame"),
+            sum("isEvenStrength").alias("player_EvenStrengthShotAttemptsInGame"),
+            sum("powerPlayShotsOnGoal").alias("player_PowerPlayShotsInGame"),
+            sum("penaltyKillShotsOnGoal").alias("player_PenaltyKillShotsInGame"),
+            sum("evenStrengthShotsOnGoal").alias("player_EvenStrengthShotsInGame"),
+            sum("goal").alias("player_GoalsInGame"),
+            sum("shotWasOnGoal").alias("player_ShotsOnGoalInGame"),
+            mean("shooterTimeOnIce").alias("player_avgTimeOnIceInGame"),
+            mean("shooterTimeOnIceSinceFaceoff").alias(
+                "player_avgTimeOnIceSinceFaceoffInGame"
+            ),
+            mean("shotDistance").alias("player_avgShotDistanceInGame"),
+            sum("shotOnEmptyNet").alias("player_ShotsOnEmptyNetInGame"),
+            sum("shotRebound").alias("player_ShotsOnReboundsInGame"),
+            sum("shotRush").alias("player_ShotsOnRushesInGame"),
+            mean("speedFromLastEvent").alias("player_avgSpeedFromLastEvent"),
+        )
+    )
+
+# COMMAND ----------
+
+gold_shots_date = (
+    silver_games_schedule
+    .select(
+        "team",
+        "gameId",
+        "season",
+        "home_or_away",
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+    )
+    .join(
+        skater_game_stats,
+        how="left",
+        on=["team", "gameId", "season", "home_or_away"],
+    )
+)
+
+# COMMAND ----------
+
+from pyspark.sql.window import Window
+
+player_index_2023 = (
+    skaters_2023
+    .select("playerId", "season", "team", "name")
+    .filter(col("situation") == "all")
+    .distinct()
+)
+
+player_game_index_2023 = (
+    silver_games_schedule
+    .select(
+        "team",
+        "gameId",
+        "season",
+        "home_or_away",
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+    )
+    .join(player_index_2023, how="left", on=["team", "season"])
+    .select("team", "playerId", "season", "name")
+    .distinct()
+    .withColumnRenamed("name", "shooterName")
+)
+
+silver_games_schedule = (
+    silver_games_schedule
+    .select(
+        "team",
+        "gameId",
+        "season",
+        "home_or_away",
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+    )
+    .alias("silver_games_schedule")
+)
+
+for col_name in player_game_index_2023.columns:
+    player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
+
+player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
+
+upcoming_games_player_index = silver_games_schedule.filter(
+    col("gameId").isNull()
+).join(
+    player_game_index_2023,
+    how="left",
+    on=[col("index_team") == col("team"), col("index_season") == col("season")],
+)
+
+gold_shots_date_final = (gold_shots_date
+        .join(
+        upcoming_games_player_index.drop("gameId"),
+        how="left",
+        on=["team", "season", "home_or_away", "gameDate", "playerTeam", "opposingTeam"],
+    )
+        .withColumn("playerId", when(col("playerId").isNull(), col("index_playerId")).otherwise(col("playerId")))
+        .withColumn("shooterName", when(col("shooterName").isNull(), col("index_shooterName")).otherwise(col("shooterName")))
+        .drop("index_season", "index_team", "index_shooterName", "index_playerId")
+)
+
+windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(
+    col("gameDate")
+)
+last3WindowSpec = windowSpec.rowsBetween(-2, 0)
+last7WindowSpec = windowSpec.rowsBetween(-6, 0)
+matchupWindowSpec = Window.partitionBy(
+    "playerId", "playerTeam", "shooterName", "opposingTeam"
+).orderBy(col("gameDate"))
+matchupLast3WindowSpec = matchupWindowSpec.rowsBetween(-2, 0)
+matchupLast7WindowSpec = matchupWindowSpec.rowsBetween(-6, 0)
+
+reorder_list = [
+    "gameDate",
+    "gameId",
+    "season",
+    "home_or_away",
+    "isHome",
+    "isPlayoffGame",
+    "playerTeam",
+    "opposingTeam",
+    "playerId",
+    "shooterName",
+    "DAY",
+    "DATE",
+    "dummyDay",
+    "AWAY",
+    "HOME",
+    "team",
+    "homeTeamCode",
+    "awayTeamCode",
+    "playerGamesPlayedRolling",
+    "playerMatchupPlayedRolling",
+]
+
+# Create a window specification
+gameCountWindowSpec = (
+    Window.partitionBy("playerId")
+    .orderBy("gameDate")
+    .rowsBetween(Window.unboundedPreceding, 0)
+)
+matchupCountWindowSpec = (
+    Window.partitionBy("playerId", "playerTeam", "opposingTeam")
+    .orderBy("gameDate")
+    .rowsBetween(Window.unboundedPreceding, 0)
+)
+
+# Apply the count function within the window
+gold_shots_date_count = gold_shots_date_final.withColumn(
+    "playerGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
+).withColumn(
+    "playerMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+)
+
+
+# COMMAND ----------
+
+display(gold_player_stats.filter(col("shooterName")=="Ryan Suter").orderBy('gameDate'))
+
+# COMMAND ----------
+
+display(gold_game_stats.filter(col("playerTeam")=="CHI").orderBy('gameDate'))
+
+# COMMAND ----------
+
+# display(gold_shots_date_count.filter(col("gameId").isNull()))
+
+display(gold_shots_date_count.filter(col("playerTeam")=="CHI").orderBy('gameDate'))
+
+# COMMAND ----------
+
+display(gold_model_data.filter(col("gameDate")=="2024-04-19"))
+
+# COMMAND ----------
+
+display(silver_games_schedule.filter(F.col("gameID").isNull()))
+
+# COMMAND ----------
+
 display(schedule_2023)
 
 # COMMAND ----------
 
-display(gold_model_data.orderBy(F.desc("gameDate")))
+from pyspark.sql import Row
+
+# Sample row data to be added - replace with your actual data and column names
+new_row_data = [('Sun', '2024-04-21', '12:30 PM', '12:30 PM', 'TBL', 'FLA'), ('Sun', '2024-04-21', '3:00 PM', '3:00 PM', 'WSH', 'NYR'), ('Sun', '2024-04-21', '7:00 PM', '7:00 PM', 'COL', 'WPG'), ('Sun', '2024-04-21', '10:00 PM', '10:00 PM', 'NSH', 'VAN')]
+
+# Create a DataFrame with the new row - ensure the structure matches schedule_2023
+new_row_df = spark.createDataFrame(new_row_data, ["DAY", "DATE", "EASTERN", "LOCAL", "AWAY", "HOME"])
+
+# Union the new row with the existing schedule_2023 DataFrame
+updated_schedule_2023 = schedule_2023.union(new_row_df)
+
+# Show the updated DataFrame
+display(updated_schedule_2023)
+
+# COMMAND ----------
+
+(updated_schedule_2023.write
+    .format("delta")
+    .mode("overwrite")  # Use "overwrite" if you want to replace the table
+    .saveAsTable("dev.2023_24_official_nhl_schedule_by_day"))
+
+# COMMAND ----------
+
+display(gold_merged_stats.orderBy(F.desc("gameDate")))
 
 # COMMAND ----------
 
@@ -100,7 +347,145 @@ away_upcoming_games_df.select("index_playerId").distinct().count()
 
 # COMMAND ----------
 
-game_index_2023 = (silver_games_historical.select("season", "team", "opposingTeam", "home_or_away").distinct()
+display(silver_games_historical)
+
+# COMMAND ----------
+
+from pyspark.sql.functions import *
+
+silver_games_schedule = (
+    schedule_2023.join(
+        silver_games_historical.withColumn("homeTeamCode", F.when(F.col("home_or_away") == "HOME", F.col("team")).otherwise(F.col("opposingTeam"))).withColumn("awayTeamCode", F.when(F.col("home_or_away") == "AWAY", F.col("team")).otherwise(F.col("opposingTeam"))),
+        how="left",
+        on=[
+            col("homeTeamCode") == col("HOME"),
+            col("awayTeamCode") == col("AWAY"),
+            col("gameDate") == col("DATE"),
+        ],
+    )
+)
+
+# COMMAND ----------
+
+display(silver_games_schedule)
+
+# COMMAND ----------
+
+silver_games_schedule = (
+    schedule_2023.join(
+        silver_games_historical.withColumn("homeTeamCode", F.when(F.col("home_or_away") == "HOME", F.col("team")).otherwise(F.col("opposingTeam"))).withColumn("awayTeamCode", F.when(F.col("home_or_away") == "AWAY", F.col("team")).otherwise(F.col("opposingTeam"))),
+        how="left",
+        on=[
+            col("homeTeamCode") == col("HOME"),
+            col("awayTeamCode") == col("AWAY"),
+            col("gameDate") == col("DATE"),
+        ],
+    )
+)
+
+home_silver_games_schedule = silver_games_schedule.filter(
+    col("gameId").isNull()
+).withColumn("team", col("HOME"))
+away_silver_games_schedule = silver_games_schedule.filter(
+    col("gameId").isNull()
+).withColumn("team", col("AWAY"))
+
+upcoming_final_clean = (
+    home_silver_games_schedule.union(away_silver_games_schedule)
+    .withColumn("season", lit(2023))
+    .withColumn(
+        "gameDate",
+        F.when(F.col("gameDate").isNull(), F.col("DATE")).otherwise(F.col("gameDate")),
+    )
+    .withColumn(
+        "playerTeam",
+        F.when(F.col("playerTeam").isNull(), F.col("team")).otherwise(
+            F.col("playerTeam")
+        ),
+    )
+    .withColumn(
+        "opposingTeam",
+        F.when(F.col("playerTeam") == F.col("HOME"), F.col("AWAY")).otherwise(
+            F.col("HOME")
+        ),
+    )
+    .withColumn(
+        "home_or_away",
+        F.when(F.col("playerTeam") == F.col("HOME"), F.lit("HOME")).otherwise(
+            F.lit("AWAY")
+        ),
+    )
+)  
+
+silver_games_schedule_final = silver_games_schedule.filter(col("gameId").isNotNull()).unionAll(upcoming_final_clean).orderBy(desc("DATE"))
+
+display(silver_games_schedule_final)
+
+# COMMAND ----------
+
+display(player_game_index_2023)
+
+# COMMAND ----------
+
+player_index_2023 = (skaters_2023.select("playerId", "season", "team", "name").filter(F.col("situation")=="all").distinct())
+
+player_game_index_2023 = silver_games_schedule_final.join(player_index_2023, how="left", on=["team", "season"]).select("team", "playerId", "season", "name").distinct()
+
+for col_name in player_game_index_2023.columns:
+    player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
+
+silver_games_schedule_final = silver_games_schedule_final.alias("silver_games_schedule_final")
+player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
+
+home_upcoming_games_df = silver_games_schedule_final.filter(F.col("gameId").isNull()).select(
+            "team",
+            "gameId",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        ).join(
+    player_game_index_2023,
+    how="left",
+    on=[col("index_team") == col("team"), col("index_season") == col("season")],
+).withColumnRenamed("name", "shooterName")
+
+display(home_upcoming_games_df)
+
+# COMMAND ----------
+
+display(silver_games_schedule_final
+        .join(
+        home_upcoming_games_df.drop("gameId"),
+        how="left",
+        on=["team", "season", "home_or_away", "gameDate", "playerTeam", "opposingTeam"],
+    )
+)
+
+# COMMAND ----------
+
+display(silver_games_schedule_final)
+
+# COMMAND ----------
+
+display(
+silver_games_schedule_final.filter(
+        F.col("gameId").isNull()
+    ).join(
+        home_upcoming_games_df,
+        how="left",
+        on=["team", "season"],
+    )
+)
+
+# COMMAND ----------
+
+display(silver_games_schedule.filter(col("gameId").isNotNull()).unionAll(upcoming_final_clean).orderBy(desc("DATE")))
+
+# COMMAND ----------
+
+game_index_2023 = (silver_games_schedule.select("season", "team", "opposingTeam", "home_or_away").distinct()
                    .withColumn("homeTeamCode", 
                                F.when(F.col("home_or_away")=="HOME", F.col("team")).otherwise(F.col("opposingTeam"))
                    )
@@ -116,54 +501,43 @@ player_game_index_2023 = game_index_2023.join(player_index_2023, how="left", on=
 for col_name in player_game_index_2023.columns:
     player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
 
-gold_model_data = gold_model_data.alias("gold_model_data")
+silver_games_schedule = silver_games_schedule.alias("silver_games_schedule")
 player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
 
-home_upcoming_games_df = gold_model_data.filter(F.col("gameId").isNull()).join(
+home_upcoming_games_df = silver_games_schedule.filter(F.col("gameId").isNull()).join(
     player_game_index_2023,
     how="left",
     on=[
-        F.col("player_game_index_2023.index_team") == F.col("gold_model_data.HOME")
+        F.col("player_game_index_2023.index_team") == F.col("silver_games_schedule.HOME")
     ],
 )
-away_upcoming_games_df = gold_model_data.filter(F.col("gameId").isNull()).join(
+away_upcoming_games_df = silver_games_schedule.filter(F.col("gameId").isNull()).join(
     player_game_index_2023,
     how="left",
     on=[
-        F.col("player_game_index_2023.index_team") == F.col("gold_model_data.AWAY"),
+        F.col("player_game_index_2023.index_team") == F.col("silver_games_schedule.AWAY"),
     ],
 )
 
-home_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
-    home_upcoming_games_df.select("index_playerId", "index_team", "index_season", "index_name"),
-    how="left",
-    on=[
-        F.col("index_team")
-        == F.col("HOME")
-    ],
-)
 
-away_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
-    away_upcoming_games_df.select("index_playerId", "index_team", "index_season", "index_name"),
-    how="left",
-    on=[
-        F.col("index_team")
-        == F.col("AWAY")
-    ],
-)
+upcoming_final = home_upcoming_games_df.union(away_upcoming_games_df)
 
-upcoming_final = home_upcoming_final.union(away_upcoming_final)
+display(upcoming_final)
 
-upcoming_final_clean = upcoming_final \
-       .withColumn("gameDate", when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate"))) \
-       .withColumn("season", when(col("season").isNull(), col("index_season")).otherwise(col("season"))) \
-       .withColumn("playerId", when(col("playerId").isNull(), col("index_playerId")).otherwise(col("playerId"))) \
-       .withColumn("playerTeam", when(col("playerTeam").isNull(), col("index_team")).otherwise(col("playerTeam"))) \
-       .withColumn("opposingTeam", when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME"))) \
-       .withColumn("isHome", when(col("playerTeam") == col("HOME"), lit(1)).otherwise(lit(0))) \
-       .withColumn("home_or_away", when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY"))) \
-       .withColumn("shooterName", when(col("shooterName").isNull(), col("index_name")).otherwise(col("shooterName"))) \
-       .withColumn("isPlayoffGame", lit(0))
+# upcoming_final_clean = upcoming_final \
+#        .withColumn("gameDate", F.when(F.col("gameDate").isNull(), F.col("DATE")).otherwise(F.col("gameDate"))) \
+#        .withColumn("season", F.when(F.col("season").isNull(), F.col("index_season")).otherwise(F.col("season"))) \
+#        .withColumn("playerId", F.when(F.col("playerId").isNull(), F.col("index_playerId")).otherwise(F.col("playerId"))) \
+#        .withColumn("playerTeam", F.when(F.col("playerTeam").isNull(), F.col("index_team")).otherwise(F.col("playerTeam"))) \
+#        .withColumn("opposingTeam", F.when(F.col("playerTeam") == F.col("HOME"), F.col("AWAY")).otherwise(F.col("HOME"))) \
+#        .withColumn("isHome", F.when(F.col("playerTeam") == F.col("HOME"), F.lit(1)).otherwise(F.lit(0))) \
+#        .withColumn("home_or_away", F.when(F.col("playerTeam") == F.col("HOME"), F.lit("HOME")).otherwise(F.lit("AWAY"))) \
+#        .withColumn("shooterName", F.when(F.col("shooterName").isNull(), F.col("index_name")).otherwise(F.col("shooterName"))) \
+#        .withColumn("isPlayoffGame", F.lit(0))
+
+# COMMAND ----------
+
+display(away_upcoming_games_df)
 
 # COMMAND ----------
 
