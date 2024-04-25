@@ -280,9 +280,9 @@ def ingest_games_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,silver_skaters_enriched
+# DBTITLE 1,silver_skaters_enriched_v2
 @dlt.table(
-    name="silver_skaters_enriched",
+    name="silver_skaters_enriched_v2",
     comment="Joined team and skaters data for 2023 season",
     table_properties={"quality": "silver"},
 )
@@ -313,10 +313,10 @@ def enrich_skaters_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,silver_games_historical
+# DBTITLE 1,silver_games_historical_v2
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 @dlt.table(
-    name="silver_games_historical",
+    name="silver_games_historical_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "silver"},
 )
@@ -327,7 +327,7 @@ def clean_games_data():
     Returns:
         DataFrame: The cleaned and merged game data.
     """
-    
+
     select_game_cols = [
         "team",
         "season",
@@ -380,16 +380,16 @@ def clean_games_data():
 
     # Call the function on the DataFrame
     game_stats_total = select_rename_game_columns(
-        games, select_game_cols, "game_Total_", "all", 2023
+        dlt.read("bronze_games_historical"), select_game_cols, "game_Total_", "all", 2023
     )
     game_stats_pp = select_rename_game_columns(
-        games, select_game_cols, "game_PP_", "5on4", 2023
+        dlt.read("bronze_games_historical"), select_game_cols, "game_PP_", "5on4", 2023
     )
     game_stats_pk = select_rename_game_columns(
-        games, select_game_cols, "game_PK_", "4on5", 2023
+        dlt.read("bronze_games_historical"), select_game_cols, "game_PK_", "4on5", 2023
     )
     game_stats_ev = select_rename_game_columns(
-        games, select_game_cols, "game_EV_", "5on5", 2023
+        dlt.read("bronze_games_historical"), select_game_cols, "game_EV_", "5on5", 2023
     )
 
     joined_game_stats = (
@@ -440,15 +440,15 @@ def clean_games_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,silver_games_schedule
+# DBTITLE 1,silver_games_schedule_v2
 @dlt.table(
-    name="silver_games_schedule",
+    name="silver_games_schedule_v2",
     table_properties={"quality": "silver"},
 )
 def merge_games_data():
 
     silver_games_schedule = dlt.read("bronze_schedule_2023").join(
-        dlt.read("silver_games_historical")
+        dlt.read("silver_games_historical_v2")
         .withColumn(
             "homeTeamCode",
             when(col("home_or_away") == "HOME", col("team")).otherwise(
@@ -505,16 +505,16 @@ def merge_games_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,silver_skaters_team_game
+# DBTITLE 1,silver_skaters_team_game_v2
 @dlt.table(
-    name="silver_skaters_team_game",
+    name="silver_skaters_team_game_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "silver"},
 )
 def merge_games_data():
 
     skaters_team_game = (
-        dlt.read("silver_games_historical")
+        dlt.read("silver_games_historical_v2")
         .join(
             dlt.read("silver_skaters_enriched").filter(col("situation") == "all"),
             ["team", "season"],
@@ -529,11 +529,11 @@ def merge_games_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,silver_shots
+# DBTITLE 1,silver_shots_v2
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
-    name="silver_shots",
+    name="silver_shots_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "silver"},
 )
@@ -659,11 +659,11 @@ def clean_shots_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,gold_player_stats
+# DBTITLE 1,gold_player_stats_v2
 # @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 # @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
-    name="gold_player_stats",
+    name="gold_player_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "gold"},
 )
@@ -728,16 +728,16 @@ def aggregate_games_data():
 
     # Call the function on the DataFrame
     player_game_stats_total = select_rename_columns(
-        player_game_stats, select_cols, "player_Total_", "all", 2023
+        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_Total_", "all", 2023
     )
     player_game_stats_pp = select_rename_columns(
-        player_game_stats, select_cols, "player_PP_", "5on4", 2023
+        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_PP_", "5on4", 2023
     )
     player_game_stats_pk = select_rename_columns(
-        player_game_stats, select_cols, "player_PK_", "4on5", 2023
+        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_PK_", "4on5", 2023
     )
     player_game_stats_ev = select_rename_columns(
-        player_game_stats, select_cols, "player_EV_", "5on5", 2023
+        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_EV_", "5on5", 2023
     )
 
     joined_player_stats = (
@@ -791,7 +791,7 @@ def aggregate_games_data():
     assert player_game_stats_total.count() == joined_player_stats.count()
 
     gold_shots_date = (
-        dlt.read("silver_games_schedule")
+        dlt.read("silver_games_schedule_v2")
         .select(
             "team",
             "gameId",
@@ -816,7 +816,7 @@ def aggregate_games_data():
     )
 
     player_game_index_2023 = (
-        dlt.read("silver_games_schedule")
+        dlt.read("silver_games_schedule_v2")
         .select(
             "team",
             "gameId",
@@ -833,7 +833,7 @@ def aggregate_games_data():
     )
 
     silver_games_schedule = (
-        dlt.read("silver_games_schedule")
+        dlt.read("silver_games_schedule_v2")
         .select(
             "team",
             "gameId",
@@ -1017,9 +1017,9 @@ def aggregate_games_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,gold_game_stats
+# DBTITLE 1,gold_game_stats_v2
 @dlt.table(
-    name="gold_game_stats",
+    name="gold_game_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "gold"},
 )
@@ -1070,7 +1070,7 @@ def window_gold_game_data():
 
     # Apply the count function within the window
     gold_games_count = (
-        dlt.read("silver_games_schedule")
+        dlt.read("silver_games_schedule_v2")
         .drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
         .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
         .withColumn(
@@ -1151,16 +1151,16 @@ def window_gold_game_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,gold_merged_stats
+# DBTITLE 1,gold_merged_stats_v2
 @dlt.table(
-    name="gold_merged_stats",
+    name="gold_merged_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "gold"},
 )
 def merge_player_game_stats():
 
-    gold_player_stats = dlt.read("gold_player_stats").alias("gold_player_stats")
-    gold_game_stats = dlt.read("gold_game_stats").alias("gold_game_stats")
+    gold_player_stats = dlt.read("gold_player_stats_v2").alias("gold_player_stats")
+    gold_game_stats = dlt.read("gold_game_stats_v2").alias("gold_game_stats")
     # schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
 
     gold_merged_stats = gold_game_stats.join(
@@ -1224,7 +1224,7 @@ def merge_player_game_stats():
         "playerMatchupPlayedRolling",
         "teamGamesPlayedRolling",
         "teamMatchupPlayedRolling",
-        "player_ShotsOnGoalInGame",
+        "player_Total_shotsOnGoal",
     ]
 
     schedule_shots_reordered = schedule_shots.select(
@@ -1236,15 +1236,15 @@ def merge_player_game_stats():
 
 # COMMAND ----------
 
-# DBTITLE 1,gold_model_stats
+# DBTITLE 1,gold_model_stats_v2
 @dlt.table(
-    name="gold_model_stats",
+    name="gold_model_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "gold"},
 )
 def make_model_ready():
 
-    gold_model_data = dlt.read("gold_merged_stats")
+    gold_model_data = dlt.read("gold_merged_stats_v2")
 
     reorder_list = [
         "gameDate",
@@ -1268,7 +1268,7 @@ def make_model_ready():
         "playerMatchupPlayedRolling",
         "teamGamesPlayedRolling",
         "teamMatchupPlayedRolling",
-        "player_ShotsOnGoalInGame",
+        "player_Total_shotsOnGoal",
     ]
 
     # Create a list of column expressions for lag and averages
@@ -1293,85 +1293,9 @@ def make_model_ready():
     # Apply all column expressions at once using select
     gold_model_data = gold_model_data.select(
         *keep_column_exprs,
-        sum(col("player_totalTimeOnIceInGame"))
+        sum(col("player_Total_icetime"))
         .over(timeOnIceWindowSpec)
         .alias("rolling_playerTotalTimeOnIceInGame")
     )
 
     return gold_model_data
-
-# COMMAND ----------
-
-# DBTITLE 1,gold_upcoming_games
-# @dlt.table(
-#     name="gold_upcoming_games",
-#     table_properties={"quality": "gold"},
-# )
-# def get_prediciton_data():
-
-#   game_index_2023 = (dlt.read("silver_games_historical").select("season", "team", "opposingTeam", "home_or_away").distinct()
-#                     .withColumn("homeTeamCode",
-#                                 when(col("home_or_away")=="HOME", col("team")).otherwise(col("opposingTeam"))
-#                     )
-#                     .withColumn("awayTeamCode",
-#                                 when(col("home_or_away")=="AWAY", col("team")).otherwise(col("opposingTeam"))
-#                     )
-#   )
-
-#   player_index_2023 = (dlt.read("skaters_2023").select("playerId", "season", "team", "name").filter(col("situation")=="all").distinct())
-
-#   player_game_index_2023 = game_index_2023.join(player_index_2023, how="left", on=["team", "season"]).select("team", "playerId", "season", "name").distinct()
-
-#   for col_name in player_game_index_2023.columns:
-#       player_game_index_2023 = player_game_index_2023.withColumnRenamed(col_name, "index_" + col_name)
-
-#   gold_model_data = dlt.read("gold_model_data").alias("gold_model_data")
-#   player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
-
-#   home_upcoming_games_df = gold_model_data.filter(col("gameId").isNull()).join(
-#       player_game_index_2023,
-#       how="left",
-#       on=[
-#           col("player_game_index_2023.index_team") == col("gold_model_data.HOME")
-#       ],
-#   )
-#   away_upcoming_games_df = gold_model_data.filter(col("gameId").isNull()).join(
-#       player_game_index_2023,
-#       how="left",
-#       on=[
-#           col("player_game_index_2023.index_team") == col("gold_model_data.AWAY"),
-#       ],
-#   )
-
-#   home_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
-#       home_upcoming_games_dselect("index_playerId", "index_team", "index_season", "index_name"),
-#       how="left",
-#       on=[
-#           col("index_team")
-#           == col("HOME")
-#       ],
-#   )
-
-#   away_upcoming_final = gold_model_data.filter(col("gameId").isNull()).join(
-#       away_upcoming_games_dselect("index_playerId", "index_team", "index_season", "index_name"),
-#       how="left",
-#       on=[
-#           col("index_team")
-#           == col("AWAY")
-#       ],
-#   )
-
-#   upcoming_final = home_upcoming_final.union(away_upcoming_final)
-
-#   upcoming_final_clean = upcoming_final \
-#         .withColumn("gameDate", when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate"))) \
-#         .withColumn("season", when(col("season").isNull(), col("index_season")).otherwise(col("season"))) \
-#         .withColumn("playerId", when(col("playerId").isNull(), col("index_playerId")).otherwise(col("playerId"))) \
-#         .withColumn("playerTeam", when(col("playerTeam").isNull(), col("index_team")).otherwise(col("playerTeam"))) \
-#         .withColumn("opposingTeam", when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME"))) \
-#         .withColumn("isHome", when(col("playerTeam") == col("HOME"), lit(1)).otherwise(lit(0))) \
-#         .withColumn("home_or_away", when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY"))) \
-#         .withColumn("shooterName", when(col("shooterName").isNull(), col("index_name")).otherwise(col("shooterName"))) \
-#         .withColumn("isPlayoffGame", lit(0))
-
-#   return upcoming_final_clean
