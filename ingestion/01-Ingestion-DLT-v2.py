@@ -31,6 +31,101 @@ one_time_load = spark.conf.get("one_time_load").lower()
 
 # COMMAND ----------
 
+# DBTITLE 1,Define Helper Functions
+def select_rename_columns(
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+) -> DataFrame:
+    """
+    Selects and renames columns of a DataFrame based on input criteria.
+
+    Args:
+        df (DataFrame): The input DataFrame.
+        select_cols (list): A list of column names to select.
+        col_abrev (str): An abbreviation to add as a prefix to the column names.
+        situation (str): The situation criteria for filtering the DataFrame.
+        season (int, optional): The season for filtering the DataFrame (default: 2023).
+
+    Returns:
+        DataFrame: The modified DataFrame with selected and renamed columns.
+    """
+
+    df_filtered = (
+        df.filter((col("season") == 2023) & (col("situation") == situation))
+        .select(select_cols)
+        .withColumn("gameDate", col("gameDate").cast("string"))
+        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
+        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+        .withColumnRenamed("name", "shooterName")
+    )
+    player_stat_columns = df_filtered.columns
+    for column in player_stat_columns:
+        if column not in [
+            "playerId",
+            "season",
+            "shooterName",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ]:
+            if "I_F_" in column:
+                new_column = column.replace("I_F_", "")
+                df_filtered = df_filtered.withColumnRenamed(
+                    column, f"{col_abrev}{new_column}"
+                )
+            else:
+                df_filtered = df_filtered.withColumnRenamed(
+                    column, f"{col_abrev}{column}"
+                )
+
+    return df_filtered
+
+
+def select_rename_game_columns(
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+) -> DataFrame:
+    """
+    Selects and renames columns of a DataFrame (excluding 'name' and 'position' columns) based on input criteria.
+
+    Args:
+        df (DataFrame): The input DataFrame.
+        select_cols (list): A list of column names to select.
+        col_abrev (str): An abbreviation to add as a prefix to the column names.
+        situation (str): The situation criteria for filtering the DataFrame.
+        season (int, optional): The season for filtering the DataFrame (default: 2023).
+
+    Returns:
+        DataFrame: The modified DataFrame with selected and renamed columns.
+    """
+
+    df_filtered = (
+        df.filter((col("season") == 2023) & (col("situation") == situation))
+        .select(select_cols)
+        .drop("name", "position")
+        .withColumn("gameDate", col("gameDate").cast("string"))
+        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
+        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+    )
+    game_stat_columns = df_filtered.columns
+    for column in game_stat_columns:
+        if column not in [
+            "situation",
+            "season",
+            "team",
+            "name",
+            "playerTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+            "opposingTeam",
+            "gameId",
+        ]:
+            df_filtered = df_filtered.withColumnRenamed(column, f"{col_abrev}{column}")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC #### Ingesting of Raw Data - Bronze
 
@@ -226,94 +321,120 @@ def enrich_skaters_data():
     table_properties={"quality": "silver"},
 )
 def clean_games_data():
-    games_cleaned = (
-        (
-            # spark.table("lr_nhl_demo.dev.bronze_games_historical")
-            dlt.read("bronze_games_historical")
-            .filter((col("season") == "2023") & (col("situation") == "all"))
-            .drop("name", "position")
-        )
-        .withColumn("gameDate", col("gameDate").cast("string"))
-        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
-        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+    """
+    Cleans and merges historical game data from multiple sources.
+
+    Returns:
+        DataFrame: The cleaned and merged game data.
+    """
+    
+    select_game_cols = [
+        "team",
+        "season",
+        "gameId",
+        "playerTeam",
+        "opposingTeam",
+        "home_or_away",
+        "gameDate",
+        "corsiPercentage",
+        "fenwickPercentage",
+        "shotsOnGoalFor",
+        "missedShotsFor",
+        "blockedShotAttemptsFor",
+        "shotAttemptsFor",
+        "goalsFor",
+        "reboundsFor",
+        "reboundGoalsFor",
+        "playContinuedInZoneFor",
+        "playContinuedOutsideZoneFor",
+        "savedShotsOnGoalFor",
+        "savedUnblockedShotAttemptsFor",
+        "penaltiesFor",
+        "faceOffsWonFor",
+        "hitsFor",
+        "takeawaysFor",
+        "giveawaysFor",
+        "lowDangerShotsFor",
+        "mediumDangerShotsFor",
+        "highDangerShotsFor",
+        "shotsOnGoalAgainst",
+        "missedShotsAgainst",
+        "blockedShotAttemptsAgainst",
+        "shotAttemptsAgainst",
+        "goalsAgainst",
+        "reboundsAgainst",
+        "reboundGoalsAgainst",
+        "playContinuedInZoneAgainst",
+        "playContinuedOutsideZoneAgainst",
+        "savedShotsOnGoalAgainst",
+        "savedUnblockedShotAttemptsAgainst",
+        "penaltiesAgainst",
+        "faceOffsWonAgainst",
+        "hitsAgainst",
+        "takeawaysAgainst",
+        "giveawaysAgainst",
+        "lowDangerShotsAgainst",
+        "mediumDangerShotsAgainst",
+        "highDangerShotsAgainst",
+    ]
+
+    # Call the function on the DataFrame
+    game_stats_total = select_rename_game_columns(
+        games, select_game_cols, "game_Total_", "all", 2023
+    )
+    game_stats_pp = select_rename_game_columns(
+        games, select_game_cols, "game_PP_", "5on4", 2023
+    )
+    game_stats_pk = select_rename_game_columns(
+        games, select_game_cols, "game_PK_", "4on5", 2023
+    )
+    game_stats_ev = select_rename_game_columns(
+        games, select_game_cols, "game_EV_", "5on5", 2023
     )
 
-    # Add 'game_' before each column name except for 'team' and 'player'
-    game_columns = games_cleaned.columns
-    for column in game_columns:
-        if column not in [
-            "situation",
-            "season",
-            "team",
-            "name",
-            "playerTeam",
-            "home_or_away",
-            "gameDate",
-            "position",
-            "opposingTeam",
-            "gameId",
-        ]:
-            games_cleaned = games_cleaned.withColumnRenamed(column, f"game_{column}")
-
-    silver_games_historical = (
-        games_cleaned.select(
-            "team",
-            "season",
-            "gameId",
-            "playerTeam",
-            "opposingTeam",
-            "home_or_away",
-            "gameDate",
-            "game_corsiPercentage",
-            "game_fenwickPercentage",
-            "game_shotsOnGoalFor",
-            "game_missedShotsFor",
-            "game_blockedShotAttemptsFor",
-            "game_shotAttemptsFor",
-            "game_goalsFor",
-            "game_reboundsFor",
-            "game_reboundGoalsFor",
-            "game_playContinuedInZoneFor",
-            "game_playContinuedOutsideZoneFor",
-            "game_savedShotsOnGoalFor",
-            "game_savedUnblockedShotAttemptsFor",
-            "game_penaltiesFor",
-            "game_faceOffsWonFor",
-            "game_hitsFor",
-            "game_takeawaysFor",
-            "game_giveawaysFor",
-            "game_lowDangerShotsFor",
-            "game_mediumDangerShotsFor",
-            "game_highDangerShotsFor",
-            "game_shotsOnGoalAgainst",
-            "game_missedShotsAgainst",
-            "game_blockedShotAttemptsAgainst",
-            "game_shotAttemptsAgainst",
-            "game_goalsAgainst",
-            "game_reboundsAgainst",
-            "game_reboundGoalsAgainst",
-            "game_playContinuedInZoneAgainst",
-            "game_playContinuedOutsideZoneAgainst",
-            "game_savedShotsOnGoalAgainst",
-            "game_savedUnblockedShotAttemptsAgainst",
-            "game_penaltiesAgainst",
-            "game_faceOffsWonAgainst",
-            "game_hitsAgainst",
-            "game_takeawaysAgainst",
-            "game_giveawaysAgainst",
-            "game_lowDangerShotsAgainst",
-            "game_mediumDangerShotsAgainst",
-            "game_highDangerShotsAgainst",
+    joined_game_stats = (
+        game_stats_total.join(
+            game_stats_pp,
+            [
+                "season",
+                "team",
+                "playerTeam",
+                "home_or_away",
+                "gameDate",
+                "opposingTeam",
+                "gameId",
+            ],
+            "left",
         )
-        .withColumn(
-            "game_goalPercentageFor",
-            round(col("game_goalsFor") / col("game_shotsOnGoalFor"), 2),
+        .join(
+            game_stats_pk,
+            [
+                "season",
+                "team",
+                "playerTeam",
+                "home_or_away",
+                "gameDate",
+                "opposingTeam",
+                "gameId",
+            ],
+            "left",
         )
-        .withColumn(
-            "game_goalPercentageAgainst",
-            round(col("game_goalsAgainst") / col("game_shotsOnGoalAgainst"), 2),
+        .join(
+            game_stats_ev,
+            [
+                "season",
+                "team",
+                "playerTeam",
+                "home_or_away",
+                "gameDate",
+                "opposingTeam",
+                "gameId",
+            ],
+            "left",
         )
     )
+
+    assert joined_game_stats.count() == game_stats_total.count()
 
     return silver_games_historical
 
@@ -548,44 +669,126 @@ def clean_shots_data():
 )
 def aggregate_games_data():
 
-    skater_game_stats = (
-        dlt.read("silver_shots")
-        .groupBy(
+    select_cols = [
+        "playerId",
+        "season",
+        "name",
+        "gameId",
+        "playerTeam",
+        "opposingTeam",
+        "home_or_away",
+        "gameDate",
+        "position",
+        "icetime",
+        "shifts",
+        "onIce_corsiPercentage",
+        "offIce_corsiPercentage",
+        "onIce_fenwickPercentage",
+        "offIce_fenwickPercentage",
+        "iceTimeRank",
+        "I_F_primaryAssists",
+        "I_F_secondaryAssists",
+        "I_F_shotsOnGoal",
+        "I_F_missedShots",
+        "I_F_blockedShotAttempts",
+        "I_F_shotAttempts",
+        "I_F_points",
+        "I_F_goals",
+        "I_F_rebounds",
+        "I_F_reboundGoals",
+        "I_F_savedShotsOnGoal",
+        "I_F_savedUnblockedShotAttempts",
+        "I_F_hits",
+        "I_F_takeaways",
+        "I_F_giveaways",
+        "I_F_lowDangerShots",
+        "I_F_mediumDangerShots",
+        "I_F_highDangerShots",
+        "I_F_lowDangerGoals",
+        "I_F_mediumDangerGoals",
+        "I_F_highDangerGoals",
+        "I_F_unblockedShotAttempts",
+        "OnIce_F_shotsOnGoal",
+        "OnIce_F_missedShots",
+        "OnIce_F_blockedShotAttempts",
+        "OnIce_F_shotAttempts",
+        "OnIce_F_goals",
+        "OnIce_F_lowDangerShots",
+        "OnIce_F_mediumDangerShots",
+        "OnIce_F_highDangerShots",
+        "OnIce_F_lowDangerGoals",
+        "OnIce_F_mediumDangerGoals",
+        "OnIce_F_highDangerGoals",
+        "OnIce_A_shotsOnGoal",
+        "OnIce_A_shotAttempts",
+        "OnIce_A_goals",
+        "OffIce_F_shotAttempts",
+        "OffIce_A_shotAttempts",
+    ]
+
+    # Call the function on the DataFrame
+    player_game_stats_total = select_rename_columns(
+        player_game_stats, select_cols, "player_Total_", "all", 2023
+    )
+    player_game_stats_pp = select_rename_columns(
+        player_game_stats, select_cols, "player_PP_", "5on4", 2023
+    )
+    player_game_stats_pk = select_rename_columns(
+        player_game_stats, select_cols, "player_PK_", "4on5", 2023
+    )
+    player_game_stats_ev = select_rename_columns(
+        player_game_stats, select_cols, "player_EV_", "5on5", 2023
+    )
+
+    joined_player_stats = (
+        player_game_stats_total.join(
+            player_game_stats_pp,
             [
-                "gameId",
-                "team",
-                "shooterName",
                 "playerId",
                 "season",
+                "shooterName",
+                "gameId",
+                "playerTeam",
+                "opposingTeam",
                 "home_or_away",
-                "homeTeamCode",
-                "awayTeamCode",
-                # "goalieIdForShot",
-                # "goalieNameForShot",
-                "isPlayoffGame",
-            ]
+                "gameDate",
+                "position",
+            ],
+            "left",
         )
-        .agg(
-            count("shotID").alias("player_ShotAttemptsInGame"),
-            sum("isPowerPlay").alias("player_PowerPlayShotAttemptsInGame"),
-            sum("isPenaltyKill").alias("player_PenaltyKillShotAttemptsInGame"),
-            sum("isEvenStrength").alias("player_EvenStrengthShotAttemptsInGame"),
-            sum("powerPlayShotsOnGoal").alias("player_PowerPlayShotsInGame"),
-            sum("penaltyKillShotsOnGoal").alias("player_PenaltyKillShotsInGame"),
-            sum("evenStrengthShotsOnGoal").alias("player_EvenStrengthShotsInGame"),
-            sum("goal").alias("player_GoalsInGame"),
-            sum("shotWasOnGoal").alias("player_ShotsOnGoalInGame"),
-            # sum("shooterTimeOnIce").alias("player_totalTimeOnIceInGame"),
-            # sum("shooterTimeOnIceSinceFaceoff").alias(
-            #     "player_totalTimeOnIceSinceFaceoffInGame"
-            # ),
-            mean("shotDistance").alias("player_avgShotDistanceInGame"),
-            sum("shotOnEmptyNet").alias("player_ShotsOnEmptyNetInGame"),
-            sum("shotRebound").alias("player_ShotsOnReboundsInGame"),
-            sum("shotRush").alias("player_ShotsOnRushesInGame"),
-            mean("speedFromLastEvent").alias("player_avgSpeedFromLastEvent"),
+        .join(
+            player_game_stats_pk,
+            [
+                "playerId",
+                "season",
+                "shooterName",
+                "gameId",
+                "playerTeam",
+                "opposingTeam",
+                "home_or_away",
+                "gameDate",
+                "position",
+            ],
+            "left",
+        )
+        .join(
+            player_game_stats_ev,
+            [
+                "playerId",
+                "season",
+                "shooterName",
+                "gameId",
+                "playerTeam",
+                "opposingTeam",
+                "home_or_away",
+                "gameDate",
+                "position",
+            ],
+            "left",
         )
     )
+
+    assert player_game_stats_total.count() == joined_player_stats.count()
 
     gold_shots_date = (
         dlt.read("silver_games_schedule")
@@ -599,7 +802,7 @@ def aggregate_games_data():
             "opposingTeam",
         )
         .join(
-            skater_game_stats,
+            joined_player_stats,
             how="left",
             on=["team", "gameId", "season", "home_or_away"],
         )
@@ -705,6 +908,7 @@ def aggregate_games_data():
         "gameDate",
         "gameId",
         "season",
+        "position",
         "home_or_away",
         "isHome",
         "isPlayoffGame",
@@ -1002,6 +1206,7 @@ def merge_player_game_stats():
         "gameDate",
         "gameId",
         "season",
+        "position",
         "home_or_away",
         "isHome",
         "isPlayoffGame",
@@ -1045,6 +1250,7 @@ def make_model_ready():
         "gameDate",
         "gameId",
         "season",
+        "position",
         "home_or_away",
         "isHome",
         "isPlayoffGame",

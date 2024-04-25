@@ -14,6 +14,7 @@ shots_2023 = spark.table("dev.bronze_shots_2023")
 skaters_2023 = spark.table("dev.bronze_skaters_2023")
 lines_2023 = spark.table("dev.bronze_lines_2023")
 games = spark.table("dev.bronze_games_historical")
+player_game_stats = spark.table("dev.bronze_player_game_stats")
 
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
 silver_games_schedule = spark.table("dev.silver_games_schedule")
@@ -28,9 +29,350 @@ gold_merged_stats = spark.table("dev.gold_merged_stats")
 
 # COMMAND ----------
 
+# DBTITLE 1,define funcs
+from pyspark.sql import DataFrame
+
+
+def select_rename_columns(
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+) -> DataFrame:
+    df_filtered = (
+        df.filter((col("season") == 2023) & (col("situation") == situation))
+        .select(select_cols)
+        .withColumn("gameDate", col("gameDate").cast("string"))
+        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
+        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+    )
+    player_stat_columns = df_filtered.columns
+    for column in player_stat_columns:
+        if column not in [
+            "playerId",
+            "season",
+            "name",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ]:
+            if "I_F_" in column:
+                new_column = column.replace("I_F_", "")
+                df_filtered = df_filtered.withColumnRenamed(
+                    column, f"{col_abrev}{new_column}"
+                )
+            else:
+                df_filtered = df_filtered.withColumnRenamed(
+                    column, f"{col_abrev}{column}"
+                )
+
+    return df_filtered
+
+
+def select_rename_game_columns(
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+) -> DataFrame:
+    df_filtered = (
+        df.filter((col("season") == 2023) & (col("situation") == situation))
+        .select(select_cols)
+        .drop("name", "position")
+        .withColumn("gameDate", col("gameDate").cast("string"))
+        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
+        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+    )
+    game_stat_columns = df_filtered.columns
+    for column in game_stat_columns:
+        if column not in [
+            "situation",
+            "season",
+            "team",
+            "name",
+            "playerTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+            "opposingTeam",
+            "gameId",
+        ]:
+            df_filtered = df_filtered.withColumnRenamed(column, f"{col_abrev}{column}")
+            
+    # df_filtered = df_filtered.withColumn(
+    #     f"{col_abrev}goalPercentageFor",
+    #     round(col("{col_abrev}goalsFor") / col(f"{col_abrev}shotsOnGoalFor"), 2),
+    # ).withColumn(
+    #     f"{col_abrev}goalPercentageAgainst",
+    #     round(col(f"{col_abrev}goalsAgainst") / col(f"{col_abrev}shotsOnGoalAgainst"), 2),
+    # )
+
+    return df_filtered
+
+# COMMAND ----------
+
+select_cols = ["playerId",
+    "season",
+    "name",
+    "gameId",
+    "playerTeam",
+    "opposingTeam",
+    "home_or_away",
+    "gameDate",
+    "position",
+    "icetime",
+    "shifts",
+    "onIce_corsiPercentage",
+    "offIce_corsiPercentage",
+    "onIce_fenwickPercentage",
+    "offIce_fenwickPercentage",
+    "iceTimeRank",
+    "I_F_primaryAssists",
+    "I_F_secondaryAssists",
+    "I_F_shotsOnGoal",
+    "I_F_missedShots",
+    "I_F_blockedShotAttempts",
+    "I_F_shotAttempts",
+    "I_F_points",
+    "I_F_goals",
+    "I_F_rebounds",
+    "I_F_reboundGoals",
+    "I_F_savedShotsOnGoal",
+    "I_F_savedUnblockedShotAttempts",
+    "I_F_hits",
+    "I_F_takeaways",
+    "I_F_giveaways",
+    "I_F_lowDangerShots",
+    "I_F_mediumDangerShots",
+    "I_F_highDangerShots",
+    "I_F_lowDangerGoals",
+    "I_F_mediumDangerGoals",
+    "I_F_highDangerGoals",
+    "I_F_unblockedShotAttempts",
+    "OnIce_F_shotsOnGoal",
+    "OnIce_F_missedShots",
+    "OnIce_F_blockedShotAttempts",
+    "OnIce_F_shotAttempts",
+    "OnIce_F_goals",
+    "OnIce_F_lowDangerShots",
+    "OnIce_F_mediumDangerShots",
+    "OnIce_F_highDangerShots",
+    "OnIce_F_lowDangerGoals",
+    "OnIce_F_mediumDangerGoals",
+    "OnIce_F_highDangerGoals",
+    "OnIce_A_shotsOnGoal",
+    "OnIce_A_shotAttempts",
+    "OnIce_A_goals",
+    "OffIce_F_shotAttempts",
+    "OffIce_A_shotAttempts"]
+
+# Call the function on the DataFrame
+player_game_stats_total = select_rename_columns(
+    player_game_stats, select_cols, "player_Total_", "all", 2023
+)
+player_game_stats_pp = select_rename_columns(
+    player_game_stats, select_cols, "player_PP_", "5on4", 2023
+)
+player_game_stats_pk = select_rename_columns(
+    player_game_stats, select_cols, "player_PK_", "4on5", 2023
+)
+player_game_stats_ev = select_rename_columns(
+    player_game_stats, select_cols, "player_EV_", "5on5", 2023
+)
+
+# COMMAND ----------
+
+joined_player_stats = (
+    player_game_stats_total.join(
+        player_game_stats_pp,
+        [
+            "playerId",
+            "season",
+            "name",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ],
+        "left",
+    )
+    .join(
+        player_game_stats_pk,
+        [
+            "playerId",
+            "season",
+            "name",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ],
+        "left",
+    )
+    .join(
+        player_game_stats_ev,
+        [
+            "playerId",
+            "season",
+            "name",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ],
+        "left",
+    )
+)
+
+assert player_game_stats_total.count() == joined_player_stats.count()
+
+# COMMAND ----------
+
+display(silver_games_schedule)
+
+# COMMAND ----------
+
+display(joined_player_stats)
+
+# COMMAND ----------
+
+select_game_cols = [
+    "team",
+    "season",
+    "gameId",
+    "playerTeam",
+    "opposingTeam",
+    "home_or_away",
+    "gameDate",
+    "corsiPercentage",
+    "fenwickPercentage",
+    "shotsOnGoalFor",
+    "missedShotsFor",
+    "blockedShotAttemptsFor",
+    "shotAttemptsFor",
+    "goalsFor",
+    "reboundsFor",
+    "reboundGoalsFor",
+    "playContinuedInZoneFor",
+    "playContinuedOutsideZoneFor",
+    "savedShotsOnGoalFor",
+    "savedUnblockedShotAttemptsFor",
+    "penaltiesFor",
+    "faceOffsWonFor",
+    "hitsFor",
+    "takeawaysFor",
+    "giveawaysFor",
+    "lowDangerShotsFor",
+    "mediumDangerShotsFor",
+    "highDangerShotsFor",
+    "shotsOnGoalAgainst",
+    "missedShotsAgainst",
+    "blockedShotAttemptsAgainst",
+    "shotAttemptsAgainst",
+    "goalsAgainst",
+    "reboundsAgainst",
+    "reboundGoalsAgainst",
+    "playContinuedInZoneAgainst",
+    "playContinuedOutsideZoneAgainst",
+    "savedShotsOnGoalAgainst",
+    "savedUnblockedShotAttemptsAgainst",
+    "penaltiesAgainst",
+    "faceOffsWonAgainst",
+    "hitsAgainst",
+    "takeawaysAgainst",
+    "giveawaysAgainst",
+    "lowDangerShotsAgainst",
+    "mediumDangerShotsAgainst",
+    "highDangerShotsAgainst",
+]
+
+# Call the function on the DataFrame
+game_stats_total = select_rename_game_columns(
+    games, select_game_cols, "game_Total_", "all", 2023
+)
+game_stats_pp = select_rename_game_columns(
+    games, select_game_cols, "game_PP_", "5on4", 2023
+)
+game_stats_pk = select_rename_game_columns(
+    games, select_game_cols, "game_PK_", "4on5", 2023
+)
+game_stats_ev = select_rename_game_columns(
+    games, select_game_cols, "game_EV_", "5on5", 2023
+)
+
+# COMMAND ----------
+
+joined_game_stats = (
+    game_stats_total.join(
+        game_stats_pp,
+        [
+            "season",
+            "team",
+            "playerTeam",
+            "home_or_away",
+            "gameDate",
+            "opposingTeam",
+            "gameId",
+        ],
+        "left",
+    )
+    .join(
+        game_stats_pk,
+        [
+            "season",
+            "team",
+            "playerTeam",
+            "home_or_away",
+            "gameDate",
+            "opposingTeam",
+            "gameId",
+        ],
+        "left",
+    )
+    .join(
+        game_stats_ev,
+        [
+            "season",
+            "team",
+            "playerTeam",
+            "home_or_away",
+            "gameDate",
+            "opposingTeam",
+            "gameId",
+        ],
+        "left",
+    )
+)
+
+assert joined_game_stats.count() == game_stats_total.count()
+
+# COMMAND ----------
+
+display(joined_game_stats)
+
+# COMMAND ----------
+
+# Select appropriate stats
+# Calculate EV, PP, PK for each player for all stats
+# Per 60 IceTime: ShotAttempts, SOG, Goals, Assists, Points
+# Position, Win?, line number, PP number, PK number
+
+# COMMAND ----------
+
+len(games.columns)
+
+# COMMAND ----------
+
+len(player_game_stats.columns)
+
+# COMMAND ----------
+
 # filtered_schedule = schedule_2023.filter(col("DATE") != "2024-04-19")
 
-# display(filtered_schedule)
+display(schedule_2023)
 
 # filtered_schedule.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
@@ -255,13 +597,38 @@ display(schedule_2023)
 
 # COMMAND ----------
 
+display(schedule_2023)
+
+# COMMAND ----------
+
+# DBTITLE 1,ADD SCHEDULE ROWS
 from pyspark.sql import Row
 
 # Sample row data to be added - replace with your actual data and column names
-new_row_data = [('Sun', '2024-04-21', '12:30 PM', '12:30 PM', 'TBL', 'FLA'), ('Sun', '2024-04-21', '3:00 PM', '3:00 PM', 'WSH', 'NYR'), ('Sun', '2024-04-21', '7:00 PM', '7:00 PM', 'COL', 'WPG'), ('Sun', '2024-04-21', '10:00 PM', '10:00 PM', 'NSH', 'VAN')]
+new_row_data = [
+    # ("Sat", "2024-04-20", "3:00 PM", "3:00 PM", "NYI", "CAR"),
+    # ("Sat", "2024-04-20", "7:00 PM", "7:00 PM", "TOR", "BOS"),
+    # ("Sun", "2024-04-21", "12:30 PM", "12:30 PM", "TBL", "FLA"),
+    # ("Sun", "2024-04-21", "3:00 PM", "3:00 PM", "WSH", "NYR"),
+    # ("Sun", "2024-04-21", "7:00 PM", "7:00 PM", "COL", "WPG"),
+    # ("Sun", "2024-04-21", "10:00 PM", "10:00 PM", "NSH", "VAN"),
+    # ("Mon", "2024-04-22", "7:00 PM", "7:00 PM", "TOR", "BOS"),
+    # ("Mon", "2024-04-22", "7:30 PM", "7:30 PM", "NYI", "CAR"),
+    # ("Mon", "2024-04-22", "9:30 PM", "9:30 PM", "VGK", "DAL"),
+    # ("Mon", "2024-04-22", "10:00 PM", "10:00 PM", "LAK", "EDM"),
+    # ("Tue", "2024-04-23", "6:10 PM", "6:10 PM", "WSH", "NYR"),
+    # ("Tue", "2024-04-23", "6:30 PM", "6:30 PM", "TBL", "FLA"),
+    # ("Tue", "2024-04-23", "8:00 PM", "8:00 PM", "COL", "WPG"),
+    # ("Tue", "2024-04-23", "9:00 PM", "9:00 PM", "NSH", "VAN"),
+    # ("Wed", "2024-04-24", "5:00 PM", "5:00 PM", "TOR", "BOS"),
+    # ("Wed", "2024-04-24", "8:00 PM", "8:00 PM", "LAK", "EDM"),
+    # ("Wed", "2024-04-24", "7:30 PM", "7:30 PM", "VGK", "DAL"),
+]
 
 # Create a DataFrame with the new row - ensure the structure matches schedule_2023
-new_row_df = spark.createDataFrame(new_row_data, ["DAY", "DATE", "EASTERN", "LOCAL", "AWAY", "HOME"])
+new_row_df = spark.createDataFrame(
+    new_row_data, ["DAY", "DATE", "EASTERN", "LOCAL", "AWAY", "HOME"]
+)
 
 # Union the new row with the existing schedule_2023 DataFrame
 updated_schedule_2023 = schedule_2023.union(new_row_df)
@@ -271,10 +638,10 @@ display(updated_schedule_2023)
 
 # COMMAND ----------
 
-(updated_schedule_2023.write
-    .format("delta")
-    .mode("overwrite")  # Use "overwrite" if you want to replace the table
-    .saveAsTable("dev.2023_24_official_nhl_schedule_by_day"))
+# (updated_schedule_2023.write
+#     .format("delta")
+#     .mode("overwrite")  # Use "overwrite" if you want to replace the table
+#     .saveAsTable("dev.2023_24_official_nhl_schedule_by_day"))
 
 # COMMAND ----------
 

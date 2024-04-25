@@ -5,7 +5,7 @@ import zipfile
 from pyspark.sql import SparkSession
 
 
-def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format):
+def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format, game_by_game=False):
     """
     Downloads a ZIP file from a URL, checks if it is a ZIP file, unzips it, and saves the contents as a table in DBFS storage.
 
@@ -34,6 +34,9 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
             temp_path = tmp_base_path + table_name + "/" + table_name + ".csv"
     else:
         # Download the file
+        if game_by_game:
+            temp_path = tmp_base_path + "player_game_stats/" + table_name + file_format
+            
         with requests.get(url, stream=True) as r:
             r.raise_for_status()
             # Open the file in write mode with UTF-8 encoding
@@ -45,6 +48,6 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
 
         print(
             f"The file downloaded from {url} is not a ZIP file and successfully copied to {temp_path}."
-        )
+        )            
 
     return temp_path
