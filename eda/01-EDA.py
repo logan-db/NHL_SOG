@@ -26,6 +26,15 @@ gold_player_stats = spark.table("dev.gold_player_stats")
 gold_game_stats = spark.table("dev.gold_game_stats")
 gold_model_data = spark.table("dev.gold_model_stats")
 gold_merged_stats = spark.table("dev.gold_merged_stats")
+gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
+
+# COMMAND ----------
+
+display(gold_model_data_v2)
+
+# COMMAND ----------
+
+display(gold_game_stats)
 
 # COMMAND ----------
 
@@ -232,6 +241,10 @@ assert player_game_stats_total.count() == joined_player_stats.count()
 # COMMAND ----------
 
 display(silver_games_schedule)
+
+# COMMAND ----------
+
+display(games)
 
 # COMMAND ----------
 
@@ -601,28 +614,52 @@ display(schedule_2023)
 
 # COMMAND ----------
 
+schedule_2023 = schedule_2023.filter(col("DATE"))
+
+# COMMAND ----------
+
 # DBTITLE 1,ADD SCHEDULE ROWS
 from pyspark.sql import Row
 
 # Sample row data to be added - replace with your actual data and column names
 new_row_data = [
-    # ("Sat", "2024-04-20", "3:00 PM", "3:00 PM", "NYI", "CAR"),
-    # ("Sat", "2024-04-20", "7:00 PM", "7:00 PM", "TOR", "BOS"),
-    # ("Sun", "2024-04-21", "12:30 PM", "12:30 PM", "TBL", "FLA"),
-    # ("Sun", "2024-04-21", "3:00 PM", "3:00 PM", "WSH", "NYR"),
-    # ("Sun", "2024-04-21", "7:00 PM", "7:00 PM", "COL", "WPG"),
-    # ("Sun", "2024-04-21", "10:00 PM", "10:00 PM", "NSH", "VAN"),
-    # ("Mon", "2024-04-22", "7:00 PM", "7:00 PM", "TOR", "BOS"),
-    # ("Mon", "2024-04-22", "7:30 PM", "7:30 PM", "NYI", "CAR"),
-    # ("Mon", "2024-04-22", "9:30 PM", "9:30 PM", "VGK", "DAL"),
-    # ("Mon", "2024-04-22", "10:00 PM", "10:00 PM", "LAK", "EDM"),
-    # ("Tue", "2024-04-23", "6:10 PM", "6:10 PM", "WSH", "NYR"),
-    # ("Tue", "2024-04-23", "6:30 PM", "6:30 PM", "TBL", "FLA"),
-    # ("Tue", "2024-04-23", "8:00 PM", "8:00 PM", "COL", "WPG"),
-    # ("Tue", "2024-04-23", "9:00 PM", "9:00 PM", "NSH", "VAN"),
-    # ("Wed", "2024-04-24", "5:00 PM", "5:00 PM", "TOR", "BOS"),
-    # ("Wed", "2024-04-24", "8:00 PM", "8:00 PM", "LAK", "EDM"),
-    # ("Wed", "2024-04-24", "7:30 PM", "7:30 PM", "VGK", "DAL"),
+    ("Sat", "2024-04-20", "3:00 PM", "3:00 PM", "NYI", "CAR"),
+    ("Sat", "2024-04-20", "7:00 PM", "7:00 PM", "TOR", "BOS"),
+    ("Sun", "2024-04-21", "12:30 PM", "12:30 PM", "TBL", "FLA"),
+    ("Sun", "2024-04-21", "3:00 PM", "3:00 PM", "WSH", "NYR"),
+    ("Sun", "2024-04-21", "7:00 PM", "7:00 PM", "COL", "WPG"),
+    ("Sun", "2024-04-21", "10:00 PM", "10:00 PM", "NSH", "VAN"),
+    ("Mon", "2024-04-22", "7:00 PM", "7:00 PM", "TOR", "BOS"),
+    ("Mon", "2024-04-22", "7:30 PM", "7:30 PM", "NYI", "CAR"),
+    ("Mon", "2024-04-22", "9:30 PM", "9:30 PM", "VGK", "DAL"),
+    ("Mon", "2024-04-22", "10:00 PM", "10:00 PM", "LAK", "EDM"),
+    ("Tue", "2024-04-23", "6:10 PM", "6:10 PM", "WSH", "NYR"),
+    ("Tue", "2024-04-23", "6:30 PM", "6:30 PM", "TBL", "FLA"),
+    ("Tue", "2024-04-23", "8:00 PM", "8:00 PM", "COL", "WPG"),
+    ("Tue", "2024-04-23", "9:00 PM", "9:00 PM", "NSH", "VAN"),
+    ("Wed", "2024-04-24", "5:00 PM", "5:00 PM", "TOR", "BOS"),
+    ("Wed", "2024-04-24", "8:00 PM", "8:00 PM", "LAK", "EDM"),
+    ("Wed", "2024-04-24", "7:30 PM", "7:30 PM", "VGK", "DAL"),
+    ("Thu", "2024-04-25", "6:30 PM", "6:30 PM", "FLA", "TBL"),
+    ("Thu", "2024-04-25", "7:30 PM", "7:30 PM", "CAR", "NYI"),
+    ("Fri", "2024-04-26", "3:00 PM", "3:00 PM", "NYR", "WSH"),
+    ("Fri", "2024-04-26", "7:00 PM", "7:00 PM", "WPG", "COL"),
+    ("Fri", "2024-04-26", "10:00 PM", "10:00 PM", "VAN", "NSH"),
+    ("Sat", "2024-04-27", "6:30 PM", "6:30 PM", "FLA", "TBL"),
+    ("Sat", "2024-04-27", "7:30 PM", "7:30 PM", "CAR", "NYI"),
+    ("Sat", "2024-04-27", "8:30 PM", "8:30 PM", "BOS", "TOR"),
+    ("Sat", "2024-04-27", "4:30 PM", "4:30 PM", "DAL", "VGK"),
+    ("Sun", "2024-04-28", "8:00 PM", "8:00 PM", "NYR", "WSH"),
+    ("Sun", "2024-04-28", "8:30 PM", "8:30 PM", "EDM", "LAK"),
+    ("Mon", "2024-04-29", "7:00 PM", "7:00 PM", "TBL", "FLA"),
+    ("Mon", "2024-04-29", "7:30 PM", "7:30 PM", "DAL", "VGK"),
+    ("Tue", "2024-04-30", "7:00 PM", "7:00 PM", "COL", "WPG"),
+    ("Tue", "2024-04-30", "10:00 PM", "10:00 PM", "NSH", "VAN"),
+    ("Tue", "2024-04-30", "7:30 PM", "7:30 PM", "NYI", "CAR"),
+    ("Tue", "2024-04-30", "8:30 PM", "8:30 PM", "TOR", "BOS"),
+    ("Wed", "2024-05-01", "6:30 PM", "6:30 PM", "VGK", "DAL"),
+    ("Wed", "2024-05-01", "8:30 PM", "8:30 PM", "LAK", "EDM"),
+    ("Thu", "2024-05-02", "7:00 PM", "7:00 PM", "BOS", "TOR"),
 ]
 
 # Create a DataFrame with the new row - ensure the structure matches schedule_2023
@@ -638,10 +675,18 @@ display(updated_schedule_2023)
 
 # COMMAND ----------
 
-# (updated_schedule_2023.write
-#     .format("delta")
-#     .mode("overwrite")  # Use "overwrite" if you want to replace the table
-#     .saveAsTable("dev.2023_24_official_nhl_schedule_by_day"))
+# schedule_2023 = schedule_2023.filter((col("DATE")!= "2024-04-27") & (col("AWAY")!="BOS"))
+
+# COMMAND ----------
+
+display(schedule_2023)
+
+# COMMAND ----------
+
+(updated_schedule_2023.write
+    .format("delta")
+    .mode("overwrite")  # Use "overwrite" if you want to replace the table
+    .saveAsTable("dev.2023_24_official_nhl_schedule_by_day"))
 
 # COMMAND ----------
 

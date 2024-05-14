@@ -3,6 +3,8 @@ import os
 import shutil
 import zipfile
 from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import *
 
 
 def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format, game_by_game=False):
@@ -51,3 +53,99 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
         )            
 
     return temp_path
+
+
+
+def select_rename_columns(
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+) -> DataFrame:
+    """
+    Selects and renames columns of a DataFrame based on input criteria.
+
+    Args:
+        df (DataFrame): The input DataFrame.
+        select_cols (list): A list of column names to select.
+        col_abrev (str): An abbreviation to add as a prefix to the column names.
+        situation (str): The situation criteria for filtering the DataFrame.
+        season (int, optional): The season for filtering the DataFrame (default: 2023).
+
+    Returns:
+        DataFrame: The modified DataFrame with selected and renamed columns.
+    """
+
+    df_filtered = (
+        df.filter((col("season") == 2023) & (col("situation") == situation))
+        .select(select_cols)
+        .withColumn("gameDate", col("gameDate").cast("string"))
+        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
+        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+        .withColumnRenamed("name", "shooterName")
+    )
+    player_stat_columns = df_filtered.columns
+    for column in player_stat_columns:
+        if column not in [
+            "playerId",
+            "season",
+            "shooterName",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ]:
+            if "I_F_" in column:
+                new_column = column.replace("I_F_", "")
+                df_filtered = df_filtered.withColumnRenamed(
+                    column, f"{col_abrev}{new_column}"
+                )
+            else:
+                df_filtered = df_filtered.withColumnRenamed(
+                    column, f"{col_abrev}{column}"
+                )
+
+    return df_filtered
+
+
+def select_rename_game_columns(
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+) -> DataFrame:
+    """
+    Selects and renames columns of a DataFrame (excluding 'name' and 'position' columns) based on input criteria.
+
+    Args:
+        df (DataFrame): The input DataFrame.
+        select_cols (list): A list of column names to select.
+        col_abrev (str): An abbreviation to add as a prefix to the column names.
+        situation (str): The situation criteria for filtering the DataFrame.
+        season (int, optional): The season for filtering the DataFrame (default: 2023).
+
+    Returns:
+        DataFrame: The modified DataFrame with selected and renamed columns.
+    """
+
+    df_filtered = (
+        df.filter((col("season") == 2023) & (col("situation") == situation))
+        .select(select_cols)
+        .drop("name", "position")
+        .withColumn("gameDate", col("gameDate").cast("string"))
+        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
+        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
+    )
+    game_stat_columns = df_filtered.columns
+    for column in game_stat_columns:
+        if column not in [
+            "situation",
+            "season",
+            "team",
+            "name",
+            "playerTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+            "opposingTeam",
+            "gameId",
+        ]:
+            df_filtered = df_filtered.withColumnRenamed(column, f"{col_abrev}{column}")
+            
+    return df_filtered

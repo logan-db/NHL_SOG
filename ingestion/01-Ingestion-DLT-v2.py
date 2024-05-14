@@ -15,7 +15,7 @@ import dlt
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql import DataFrame
-from utils.ingestionHelper import download_unzip_and_save_as_table
+from utils.ingestionHelper import download_unzip_and_save_as_table, select_rename_columns, select_rename_game_columns
 
 # COMMAND ----------
 
@@ -31,108 +31,13 @@ one_time_load = spark.conf.get("one_time_load").lower()
 
 # COMMAND ----------
 
-# DBTITLE 1,Define Helper Functions
-def select_rename_columns(
-    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
-) -> DataFrame:
-    """
-    Selects and renames columns of a DataFrame based on input criteria.
-
-    Args:
-        df (DataFrame): The input DataFrame.
-        select_cols (list): A list of column names to select.
-        col_abrev (str): An abbreviation to add as a prefix to the column names.
-        situation (str): The situation criteria for filtering the DataFrame.
-        season (int, optional): The season for filtering the DataFrame (default: 2023).
-
-    Returns:
-        DataFrame: The modified DataFrame with selected and renamed columns.
-    """
-
-    df_filtered = (
-        df.filter((col("season") == 2023) & (col("situation") == situation))
-        .select(select_cols)
-        .withColumn("gameDate", col("gameDate").cast("string"))
-        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
-        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
-        .withColumnRenamed("name", "shooterName")
-    )
-    player_stat_columns = df_filtered.columns
-    for column in player_stat_columns:
-        if column not in [
-            "playerId",
-            "season",
-            "shooterName",
-            "gameId",
-            "playerTeam",
-            "opposingTeam",
-            "home_or_away",
-            "gameDate",
-            "position",
-        ]:
-            if "I_F_" in column:
-                new_column = column.replace("I_F_", "")
-                df_filtered = df_filtered.withColumnRenamed(
-                    column, f"{col_abrev}{new_column}"
-                )
-            else:
-                df_filtered = df_filtered.withColumnRenamed(
-                    column, f"{col_abrev}{column}"
-                )
-
-    return df_filtered
-
-
-def select_rename_game_columns(
-    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
-) -> DataFrame:
-    """
-    Selects and renames columns of a DataFrame (excluding 'name' and 'position' columns) based on input criteria.
-
-    Args:
-        df (DataFrame): The input DataFrame.
-        select_cols (list): A list of column names to select.
-        col_abrev (str): An abbreviation to add as a prefix to the column names.
-        situation (str): The situation criteria for filtering the DataFrame.
-        season (int, optional): The season for filtering the DataFrame (default: 2023).
-
-    Returns:
-        DataFrame: The modified DataFrame with selected and renamed columns.
-    """
-
-    df_filtered = (
-        df.filter((col("season") == 2023) & (col("situation") == situation))
-        .select(select_cols)
-        .drop("name", "position")
-        .withColumn("gameDate", col("gameDate").cast("string"))
-        .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
-        .withColumn("gameDate", to_date(col("gameDate"), "yyyyMMdd"))
-    )
-    game_stat_columns = df_filtered.columns
-    for column in game_stat_columns:
-        if column not in [
-            "situation",
-            "season",
-            "team",
-            "name",
-            "playerTeam",
-            "home_or_away",
-            "gameDate",
-            "position",
-            "opposingTeam",
-            "gameId",
-        ]:
-            df_filtered = df_filtered.withColumnRenamed(column, f"{col_abrev}{column}")
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC #### Ingesting of Raw Data - Bronze
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_shots_2023
-@dlt.table(name="bronze_shots_2023", comment="Raw Ingested NHL data on Shots in 2023")
+# DBTITLE 1,bronze_shots_2023_v2
+@dlt.table(name="bronze_shots_2023_v2", comment="Raw Ingested NHL data on Shots in 2023")
 def ingest_shot_data():
     shots_file_path = download_unzip_and_save_as_table(
         shots_url, tmp_base_path, "shots_2023", file_format=".zip"
@@ -141,8 +46,8 @@ def ingest_shot_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_teams_2023
-@dlt.table(name="bronze_teams_2023", comment="Raw Ingested NHL data on Teams in 2023")
+# DBTITLE 1,bronze_teams_2023_v2
+@dlt.table(name="bronze_teams_2023_v2", comment="Raw Ingested NHL data on Teams in 2023")
 def ingest_teams_data():
     teams_file_path = download_unzip_and_save_as_table(
         teams_url, tmp_base_path, "teams_2023", file_format=".csv"
@@ -157,9 +62,9 @@ def ingest_teams_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_skaters_2023
+# DBTITLE 1,bronze_skaters_2023_v2
 @dlt.table(
-    name="bronze_skaters_2023", comment="Raw Ingested NHL data on skaters in 2023"
+    name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
 )
 def ingest_skaters_data():
     skaters_file_path = download_unzip_and_save_as_table(
@@ -188,8 +93,8 @@ def ingest_skaters_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_lines_2023
-@dlt.table(name="bronze_lines_2023", comment="Raw Ingested NHL data on lines in 2023")
+# DBTITLE 1,bronze_lines_2023_v2
+@dlt.table(name="bronze_lines_2023_v2", comment="Raw Ingested NHL data on lines in 2023")
 def ingest_lines_data():
     lines_file_path = download_unzip_and_save_as_table(
         lines_url, tmp_base_path, "lines_2023", file_format=".csv"
@@ -210,9 +115,9 @@ def ingest_lines_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_games_historical
+# DBTITLE 1,bronze_games_historical_v2
 @dlt.table(
-    name="bronze_games_historical",
+    name="bronze_games_historical_v2",
     comment="Raw Ingested NHL data on games from 2008 - Present",
     table_properties={"quality": "bronze"},
 )
@@ -229,9 +134,9 @@ def ingest_games_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_schedule_2023
+# DBTITLE 1,bronze_schedule_2023_v2
 @dlt.table(
-    name="bronze_schedule_2023",
+    name="bronze_schedule_2023_v2",
     table_properties={"quality": "bronze"},
 )
 def ingest_schedule_data():
@@ -240,15 +145,15 @@ def ingest_schedule_data():
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_player_game_stats
+# DBTITLE 1,bronze_player_game_stats_v2
 @dlt.table(
-    name="bronze_player_game_stats",
+    name="bronze_player_game_stats_v2",
     comment="Game by Game Stats for each player in the skaters table",
     table_properties={"quality": "bronze"},
 )
 def ingest_games_data():
     if one_time_load == "true":
-        skaters_2023_id = dlt.read("bronze_skaters_2023").select("playerId").distinct()
+        skaters_2023_id = dlt.read("bronze_skaters_2023_v2").select("playerId").distinct()
         print("Ingesting player game by game stats")
 
         for row in skaters_2023_id.collect():
@@ -292,7 +197,7 @@ def ingest_games_data():
 @dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
 def enrich_skaters_data():
     teams_2023_cleaned = (
-        dlt.read("bronze_teams_2023")
+        dlt.read("bronze_teams_2023_v2")
         .drop("team0", "team3", "position", "games_played", "icetime")
         .withColumnRenamed("name", "team")
     )
@@ -305,7 +210,7 @@ def enrich_skaters_data():
                 column, f"team_{column}"
             )
 
-    silver_skaters_enriched = dlt.read("bronze_skaters_2023").join(
+    silver_skaters_enriched = dlt.read("bronze_skaters_2023_v2").join(
         teams_2023_cleaned, ["team", "situation", "season"], how="left"
     )
 
@@ -380,16 +285,16 @@ def clean_games_data():
 
     # Call the function on the DataFrame
     game_stats_total = select_rename_game_columns(
-        dlt.read("bronze_games_historical"), select_game_cols, "game_Total_", "all", 2023
+        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_Total_", "all", 2023
     )
     game_stats_pp = select_rename_game_columns(
-        dlt.read("bronze_games_historical"), select_game_cols, "game_PP_", "5on4", 2023
+        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_PP_", "5on4", 2023
     )
     game_stats_pk = select_rename_game_columns(
-        dlt.read("bronze_games_historical"), select_game_cols, "game_PK_", "4on5", 2023
+        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_PK_", "4on5", 2023
     )
     game_stats_ev = select_rename_game_columns(
-        dlt.read("bronze_games_historical"), select_game_cols, "game_EV_", "5on5", 2023
+        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_EV_", "5on5", 2023
     )
 
     joined_game_stats = (
@@ -436,7 +341,7 @@ def clean_games_data():
 
     assert joined_game_stats.count() == game_stats_total.count()
 
-    return silver_games_historical
+    return joined_game_stats
 
 # COMMAND ----------
 
@@ -447,7 +352,7 @@ def clean_games_data():
 )
 def merge_games_data():
 
-    silver_games_schedule = dlt.read("bronze_schedule_2023").join(
+    silver_games_schedule = dlt.read("bronze_schedule_2023_v2").join(
         dlt.read("silver_games_historical_v2")
         .withColumn(
             "homeTeamCode",
@@ -516,7 +421,7 @@ def merge_games_data():
     skaters_team_game = (
         dlt.read("silver_games_historical_v2")
         .join(
-            dlt.read("silver_skaters_enriched").filter(col("situation") == "all"),
+            dlt.read("silver_skaters_enriched_v2").filter(col("situation") == "all"),
             ["team", "season"],
             how="inner",
         )
@@ -540,7 +445,7 @@ def merge_games_data():
 def clean_shots_data():
 
     shots_filtered = (
-        dlt.read("bronze_shots_2023")
+        dlt.read("bronze_shots_2023_v2")
         .select(
             "shotID",
             "game_id",
@@ -728,16 +633,16 @@ def aggregate_games_data():
 
     # Call the function on the DataFrame
     player_game_stats_total = select_rename_columns(
-        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_Total_", "all", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_Total_", "all", 2023
     )
     player_game_stats_pp = select_rename_columns(
-        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_PP_", "5on4", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4", 2023
     )
     player_game_stats_pk = select_rename_columns(
-        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_PK_", "4on5", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PK_", "4on5", 2023
     )
     player_game_stats_ev = select_rename_columns(
-        dlt.read("dev.bronze_player_game_stats"), select_cols, "player_EV_", "5on5", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_EV_", "5on5", 2023
     )
 
     joined_player_stats = (
@@ -786,7 +691,7 @@ def aggregate_games_data():
             ],
             "left",
         )
-    )
+    ).alias("joined_player_stats")
 
     assert player_game_stats_total.count() == joined_player_stats.count()
 
@@ -804,12 +709,12 @@ def aggregate_games_data():
         .join(
             joined_player_stats,
             how="left",
-            on=["team", "gameId", "season", "home_or_away"],
+            on=["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"],
         )
     )
 
     player_index_2023 = (
-        dlt.read("bronze_skaters_2023")
+        dlt.read("bronze_skaters_2023_v2")
         .select("playerId", "season", "team", "name")
         .filter(col("situation") == "all")
         .distinct()
@@ -830,7 +735,7 @@ def aggregate_games_data():
         .select("team", "playerId", "season", "name")
         .distinct()
         .withColumnRenamed("name", "shooterName")
-    )
+    ).alias("player_game_index_2023")
 
     silver_games_schedule = (
         dlt.read("silver_games_schedule_v2")

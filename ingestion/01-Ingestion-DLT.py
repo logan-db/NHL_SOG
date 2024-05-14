@@ -575,10 +575,10 @@ def aggregate_games_data():
             sum("evenStrengthShotsOnGoal").alias("player_EvenStrengthShotsInGame"),
             sum("goal").alias("player_GoalsInGame"),
             sum("shotWasOnGoal").alias("player_ShotsOnGoalInGame"),
-            # sum("shooterTimeOnIce").alias("player_totalTimeOnIceInGame"),
-            # sum("shooterTimeOnIceSinceFaceoff").alias(
-            #     "player_totalTimeOnIceSinceFaceoffInGame"
-            # ),
+            sum("shooterTimeOnIce").alias("player_totalTimeOnIceInGame"),
+            sum("shooterTimeOnIceSinceFaceoff").alias(
+                "player_totalTimeOnIceSinceFaceoffInGame"
+            ),
             mean("shotDistance").alias("player_avgShotDistanceInGame"),
             sum("shotOnEmptyNet").alias("player_ShotsOnEmptyNetInGame"),
             sum("shotRebound").alias("player_ShotsOnReboundsInGame"),

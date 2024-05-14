@@ -1,5 +1,5 @@
 # Databricks notebook source
-gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta")
+gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
 
 # COMMAND ----------
 
@@ -46,7 +46,6 @@ upcoming_games = (
                            & (col("playerGamesPlayedRolling") > 0) 
                            & (col("rolling_playerTotalTimeOnIceInGame") > 180)
                            & (col("gameDate") != "2024-01-17")
-                           & (col("gameDate") != "2024-04-24")
                            )
 )
 
@@ -55,15 +54,7 @@ display(upcoming_games)
 # COMMAND ----------
 
 
-assert model_remove_1st_and_upcoming_games.count() == model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count(), print(F"model_remove_1st_and_upcoming_games: {model_remove_1st_and_upcoming_games.count()} does not equal {model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()}")
-
-# COMMAND ----------
-
-display(model_remove_1st_and_upcoming_games.groupBy("playerId", "gameId").count().filter(col("count") > 1))
-
-# COMMAND ----------
-
-display(model_remove_1st_and_upcoming_games.filter(col("gameId")=="2023030124"))
+assert model_remove_1st_and_upcoming_games.count() == model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()
 
 # COMMAND ----------
 
@@ -75,19 +66,19 @@ fs = FeatureStoreClient()
 
 try:
   #drop table if exists
-  fs.drop_table(f'lr_nhl_demo.dev.SOG_features')
+  fs.drop_table(f'lr_nhl_demo.dev.SOG_features_v2')
 except:
   pass
 
 customer_feature_table = fs.create_table( 
-    name='lr_nhl_demo.dev.SOG_features', 
+    name='lr_nhl_demo.dev.SOG_features_v2', 
     primary_keys=['gameId', 'playerId'],
     schema=model_remove_1st_and_upcoming_games.schema, 
     description='Skater features' 
 )
 
 fs.write_table( 
-    name='lr_nhl_demo.dev.SOG_features', 
+    name='lr_nhl_demo.dev.SOG_features_v2', 
     df = model_remove_1st_and_upcoming_games, 
     mode = 'overwrite' 
 )

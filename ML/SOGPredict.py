@@ -1,4 +1,12 @@
 # Databricks notebook source
+# MAGIC %pip install --upgrade mlflow
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 import mlflow
 import os
 import requests
@@ -35,6 +43,10 @@ fs = FeatureStoreClient()
 sog_features = fs.read_table("lr_nhl_demo.dev.sog_features")
 
 gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta")
+
+# COMMAND ----------
+
+mlflow.set_registry_uri('databricks-uc')
 
 # COMMAND ----------
 
