@@ -9,6 +9,27 @@ from pyspark.sql.functions import *
 
 # COMMAND ----------
 
+# dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# from utils.ingestionHelper import download_unzip_and_save_as_table
+
+# url = "https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx"
+# schedule_file_path = download_unzip_and_save_as_table(
+#     url, "/Volumes/lr_nhl_demo/dev/", "schedule", file_format=".xlsx"
+# )
+# df = (
+#     spark.read.format("csv")
+#     .option("header", "true")
+#     .option("inferSchema", "true")
+#     .load(schedule_file_path)
+# )
+
+# display(df)
+
+# COMMAND ----------
+
 teams_2023 = spark.table("dev.bronze_teams_2023")
 shots_2023 = spark.table("dev.bronze_shots_2023")
 skaters_2023 = spark.table("dev.bronze_skaters_2023")

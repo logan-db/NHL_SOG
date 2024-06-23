@@ -15,7 +15,7 @@ import dlt
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql import DataFrame
-from utils.ingestionHelper import download_unzip_and_save_as_table, select_rename_columns, select_rename_game_columns
+from utils.ingestionHelper import download_unzip_and_save_as_table, select_rename_columns, select_rename_game_columns, get_day_of_week
 
 # COMMAND ----------
 
@@ -27,6 +27,7 @@ lines_url = spark.conf.get("base_download_url") + "lines.csv"
 games_url = spark.conf.get("games_download_url")
 tmp_base_path = spark.conf.get("tmp_base_path")
 player_games_url = spark.conf.get("player_games_url")
+player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
 
 # COMMAND ----------
@@ -37,28 +38,28 @@ one_time_load = spark.conf.get("one_time_load").lower()
 # COMMAND ----------
 
 # DBTITLE 1,bronze_shots_2023_v2
-@dlt.table(name="bronze_shots_2023_v2", comment="Raw Ingested NHL data on Shots in 2023")
-def ingest_shot_data():
-    shots_file_path = download_unzip_and_save_as_table(
-        shots_url, tmp_base_path, "shots_2023", file_format=".zip"
-    )
-    return spark.read.format("csv").option("header", "true").load(shots_file_path)
+# @dlt.table(name="bronze_shots_2023_v2", comment="Raw Ingested NHL data on Shots in 2023")
+# def ingest_shot_data():
+#     shots_file_path = download_unzip_and_save_as_table(
+#         shots_url, tmp_base_path, "shots_2023", file_format=".zip"
+#     )
+#     return spark.read.format("csv").option("header", "true").load(shots_file_path)
 
 # COMMAND ----------
 
 # DBTITLE 1,bronze_teams_2023_v2
-@dlt.table(name="bronze_teams_2023_v2", comment="Raw Ingested NHL data on Teams in 2023")
-def ingest_teams_data():
-    teams_file_path = download_unzip_and_save_as_table(
-        teams_url, tmp_base_path, "teams_2023", file_format=".csv"
-    )
-    return (
-        spark.read.format("csv")
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .load(teams_file_path)
-    )
-    # return spark.table("lr_nhl_demo.dev.bronze_teams_2023")
+# @dlt.table(name="bronze_teams_2023_v2", comment="Raw Ingested NHL data on Teams in 2023")
+# def ingest_teams_data():
+#     teams_file_path = download_unzip_and_save_as_table(
+#         teams_url, tmp_base_path, "teams_2023", file_format=".csv"
+#     )
+#     return (
+#         spark.read.format("csv")
+#         .option("header", "true")
+#         .option("inferSchema", "true")
+#         .load(teams_file_path)
+#     )
+#     # return spark.table("lr_nhl_demo.dev.bronze_teams_2023")
 
 # COMMAND ----------
 
@@ -94,24 +95,24 @@ def ingest_skaters_data():
 # COMMAND ----------
 
 # DBTITLE 1,bronze_lines_2023_v2
-@dlt.table(name="bronze_lines_2023_v2", comment="Raw Ingested NHL data on lines in 2023")
-def ingest_lines_data():
-    lines_file_path = download_unzip_and_save_as_table(
-        lines_url, tmp_base_path, "lines_2023", file_format=".csv"
-    )
-    # return (
-    #   spark.readStream.format("cloudFiles")
-    #     .option("cloudFiles.format", "csv")
-    #     .option("cloudFiles.inferColumnTypes", "true")
-    #     .option("header", "true")
-    #     .load(f"{tmp_base_path}lines_2023/")
-    #   )
-    return (
-        spark.read.format("csv")
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .load(lines_file_path)
-    )
+# @dlt.table(name="bronze_lines_2023_v2", comment="Raw Ingested NHL data on lines in 2023")
+# def ingest_lines_data():
+#     lines_file_path = download_unzip_and_save_as_table(
+#         lines_url, tmp_base_path, "lines_2023", file_format=".csv"
+#     )
+#     # return (
+#     #   spark.readStream.format("cloudFiles")
+#     #     .option("cloudFiles.format", "csv")
+#     #     .option("cloudFiles.inferColumnTypes", "true")
+#     #     .option("header", "true")
+#     #     .load(f"{tmp_base_path}lines_2023/")
+#     #   )
+#     return (
+#         spark.read.format("csv")
+#         .option("header", "true")
+#         .option("inferSchema", "true")
+#         .load(lines_file_path)
+#     )
 
 # COMMAND ----------
 
@@ -140,12 +141,16 @@ def ingest_games_data():
     table_properties={"quality": "bronze"},
 )
 def ingest_schedule_data():
-    # TO DO : make live
+    # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
     return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
 # COMMAND ----------
 
 # DBTITLE 1,bronze_player_game_stats_v2
+# @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
+# @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
+# @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
+# @dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
 @dlt.table(
     name="bronze_player_game_stats_v2",
     comment="Game by Game Stats for each player in the skaters table",
@@ -155,6 +160,11 @@ def ingest_games_data():
     if one_time_load == "true":
         skaters_2023_id = dlt.read("bronze_skaters_2023_v2").select("playerId").distinct()
         print("Ingesting player game by game stats")
+
+        # Get Playoff teams and players
+        playoff_teams_list = dlt.read("bronze_games_historical_v2").select("team").filter((col("playoffGame")==1) & (col("season")==2023)).distinct().collect()
+        playoff_teams = [row.team for row in playoff_teams_list]
+        playoff_skaters_2023_id = dlt.read("bronze_skaters_2023_v2").select("playerId").filter(col("team").isin(playoff_teams)).distinct()
 
         for row in skaters_2023_id.collect():
             playerId = str(row["playerId"])
@@ -166,12 +176,35 @@ def ingest_games_data():
                 game_by_game=True,
             )
 
-    return (
+        # Check if player is in Playoffs, if so bring playoff stats
+        if len(playoff_teams) > 0:
+            for row in playoff_skaters_2023_id.collect():
+                playoff_playerId = str(row["playerId"])
+                playoff_games_file_path = download_unzip_and_save_as_table(
+                    player_playoff_games_url + playoff_playerId + ".csv",
+                    tmp_base_path,
+                    playoff_playerId,
+                    file_format=".csv",
+                    game_by_game_playoffs=True,
+                )
+
+
+    regular_season_stats = (
         spark.read.format("csv")
         .option("header", "true")
         .option("inferSchema", "true")
         .load("/Volumes/lr_nhl_demo/dev/player_game_stats/*.csv")
-    )
+    ).filter(col("season") == 2023)
+
+    playoff_season_stats = (
+        spark.read.format("csv")
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .load("/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/*.csv")
+    ).filter(col("season") == 2023)
+
+    return regular_season_stats.union(playoff_season_stats)
+
 
 # COMMAND ----------
 
@@ -186,35 +219,35 @@ def ingest_games_data():
 # COMMAND ----------
 
 # DBTITLE 1,silver_skaters_enriched_v2
-@dlt.table(
-    name="silver_skaters_enriched_v2",
-    comment="Joined team and skaters data for 2023 season",
-    table_properties={"quality": "silver"},
-)
-@dlt.expect_or_drop("team is not null", "team IS NOT NULL")
-@dlt.expect_or_drop("season is not null", "season IS NOT NULL")
-@dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
-@dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
-def enrich_skaters_data():
-    teams_2023_cleaned = (
-        dlt.read("bronze_teams_2023_v2")
-        .drop("team0", "team3", "position", "games_played", "icetime")
-        .withColumnRenamed("name", "team")
-    )
+# @dlt.table(
+#     name="silver_skaters_enriched_v2",
+#     comment="Joined team and skaters data for 2023 season",
+#     table_properties={"quality": "silver"},
+# )
+# @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
+# @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
+# @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
+# @dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
+# def enrich_skaters_data():
+#     teams_2023_cleaned = (
+#         dlt.read("bronze_teams_2023_v2")
+#         .drop("team0", "team3", "position", "games_played", "icetime")
+#         .withColumnRenamed("name", "team")
+#     )
 
-    # Add 'team_' before each column name except for 'team' and 'player'
-    team_columns = teams_2023_cleaned.columns
-    for column in team_columns:
-        if column not in ["situation", "season", "team"]:
-            teams_2023_cleaned = teams_2023_cleaned.withColumnRenamed(
-                column, f"team_{column}"
-            )
+#     # Add 'team_' before each column name except for 'team' and 'player'
+#     team_columns = teams_2023_cleaned.columns
+#     for column in team_columns:
+#         if column not in ["situation", "season", "team"]:
+#             teams_2023_cleaned = teams_2023_cleaned.withColumnRenamed(
+#                 column, f"team_{column}"
+#             )
 
-    silver_skaters_enriched = dlt.read("bronze_skaters_2023_v2").join(
-        teams_2023_cleaned, ["team", "situation", "season"], how="left"
-    )
+#     silver_skaters_enriched = dlt.read("bronze_skaters_2023_v2").join(
+#         teams_2023_cleaned, ["team", "situation", "season"], how="left"
+#     )
 
-    return silver_skaters_enriched
+#     return silver_skaters_enriched
 
 # COMMAND ----------
 
@@ -402,160 +435,211 @@ def merge_games_data():
         )
     )
 
-    return (
-        silver_games_schedule.filter(col("gameId").isNotNull())
+    regular_season_schedule = (silver_games_schedule.filter(col("gameId").isNotNull())
         .unionAll(upcoming_final_clean)
         .orderBy(desc("DATE"))
     )
 
+    # Add logic to check if Playoffs, if so then add playoff games to schedule
+    # Get Max gameDate from final dataframe
+    max_reg_season_date = regular_season_schedule.filter(col("gameId").isNotNull()).select(max("gameDate")).first()[0]
+    print('Max gameDate from regular_season_schedule: {}'.format(max_reg_season_date))
+
+    playoff_games = (
+        dlt.read("silver_games_historical_v2").filter(col('gameDate') > max_reg_season_date)
+        .withColumn(
+            "DATE",
+            col("gameDate"),
+        )
+        .withColumn(
+            "homeTeamCode",
+            when(col("home_or_away") == "HOME", col("team")).otherwise(
+                col("opposingTeam")
+            ),
+        )
+        .withColumn(
+            "awayTeamCode",
+            when(col("home_or_away") == "AWAY", col("team")).otherwise(
+                col("opposingTeam")
+            ),
+        ).withColumn("season", lit(2023))
+        .withColumn(
+            "playerTeam",
+            when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
+        )
+        .withColumn(
+            "HOME",
+            when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(col("opposingTeam")),
+        )
+        .withColumn(
+            "AWAY",
+            when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(col("opposingTeam")),
+        )
+    )
+
+    columns_to_add = ['DAY', 'EASTERN', 'LOCAL']
+    for column in columns_to_add:
+        playoff_games = playoff_games.withColumn(column, lit(None))
+
+    if playoff_games:
+        print('Adding playoff games to schedule')
+        full_season_schedule = regular_season_schedule.unionByName(playoff_games)
+    else:
+        full_season_schedule = regular_season_schedule
+
+    # Add day of week and fill LOCAL/EASTERN cols if null with Deafult values
+    full_season_schedule_with_day = get_day_of_week(full_season_schedule, "DATE")
+
+    return full_season_schedule_with_day
+
 # COMMAND ----------
 
 # DBTITLE 1,silver_skaters_team_game_v2
-@dlt.table(
-    name="silver_skaters_team_game_v2",
-    # comment="Raw Ingested NHL data on games from 2008 - Present",
-    table_properties={"quality": "silver"},
-)
-def merge_games_data():
+# @dlt.table(
+#     name="silver_skaters_team_game_v2",
+#     # comment="Raw Ingested NHL data on games from 2008 - Present",
+#     table_properties={"quality": "silver"},
+# )
+# def merge_games_data():
 
-    skaters_team_game = (
-        dlt.read("silver_games_historical_v2")
-        .join(
-            dlt.read("silver_skaters_enriched_v2").filter(col("situation") == "all"),
-            ["team", "season"],
-            how="inner",
-        )
-        .withColumn("gameId", col("gameId").cast("string"))
-        .withColumn("playerId", col("playerId").cast("string"))
-        .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
-        .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
-    )
-    return skaters_team_game
+#     skaters_team_game = (
+#         dlt.read("silver_games_historical_v2")
+#         .join(
+#             dlt.read("silver_skaters_enriched_v2").filter(col("situation") == "all"),
+#             ["team", "season"],
+#             how="inner",
+#         )
+#         .withColumn("gameId", col("gameId").cast("string"))
+#         .withColumn("playerId", col("playerId").cast("string"))
+#         .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
+#         .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
+#     )
+#     return skaters_team_game
 
 # COMMAND ----------
 
 # DBTITLE 1,silver_shots_v2
-@dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
-@dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
-@dlt.table(
-    name="silver_shots_v2",
-    # comment="Raw Ingested NHL data on games from 2008 - Present",
-    table_properties={"quality": "silver"},
-)
-def clean_shots_data():
+# @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
+# @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
+# @dlt.table(
+#     name="silver_shots_v2",
+#     # comment="Raw Ingested NHL data on games from 2008 - Present",
+#     table_properties={"quality": "silver"},
+# )
+# def clean_shots_data():
 
-    shots_filtered = (
-        dlt.read("bronze_shots_2023_v2")
-        .select(
-            "shotID",
-            "game_id",
-            "teamCode",
-            "shooterName",
-            "shooterPlayerId",
-            "season",
-            "event",
-            "team",
-            "homeTeamCode",
-            "awayTeamCode",
-            "goalieIdForShot",
-            "goalieNameForShot",
-            "isPlayoffGame",
-            "lastEventTeam",
-            "location",
-            "goal",
-            # "goalieIdForShot",
-            # "goalieNameForShot",
-            "homeSkatersOnIce",
-            "awaySkatersOnIce",
-            "shooterTimeOnIce",
-            "shooterTimeOnIceSinceFaceoff",
-            "shotDistance",
-            "shotOnEmptyNet",
-            "shotRebound",
-            "shotRush",
-            "shotType",
-            "shotWasOnGoal",
-            "speedFromLastEvent",
-        )
-        .withColumn("shooterPlayerId", col("shooterPlayerId").cast("string"))
-        .withColumn("shooterPlayerId", regexp_replace("shooterPlayerId", "\\.0$", ""))
-        .withColumn("game_id", col("game_id").cast("string"))
-        .withColumn("game_id", regexp_replace("game_id", "\\.0$", ""))
-        .withColumn("game_id", concat_ws("0", "season", "game_id"))
-        .withColumn("goalieIdForShot", col("goalieIdForShot").cast("string"))
-        .withColumn("goalieIdForShot", regexp_replace("goalieIdForShot", "\\.0$", ""))
-        .withColumnRenamed("team", "home_or_away")
-        .withColumnsRenamed(
-            {
-                "game_id": "gameId",
-                "shooterPlayerId": "playerId",
-                # "team": "home_or_away",
-                "teamCode": "team",
-            }
-        )
-        .withColumn(
-            "isPowerPlay",
-            when(
-                (col("team") == col("homeTeamCode"))
-                & (col("homeSkatersOnIce") > col("awaySkatersOnIce")),
-                1,
-            )
-            .when(
-                (col("team") == col("awayTeamCode"))
-                & (col("homeSkatersOnIce") < col("awaySkatersOnIce")),
-                1,
-            )
-            .otherwise(0),
-        )
-        .withColumn(
-            "isPenaltyKill",
-            when(
-                (col("team") == col("homeTeamCode"))
-                & (col("homeSkatersOnIce") < col("awaySkatersOnIce")),
-                1,
-            )
-            .when(
-                (col("team") == col("awayTeamCode"))
-                & (col("homeSkatersOnIce") > col("awaySkatersOnIce")),
-                1,
-            )
-            .otherwise(0),
-        )
-        .withColumn(
-            "isEvenStrength",
-            when(
-                (col("team") == col("homeTeamCode"))
-                & (col("homeSkatersOnIce") == col("awaySkatersOnIce")),
-                1,
-            )
-            .when(
-                (col("team") == col("awayTeamCode"))
-                & (col("homeSkatersOnIce") == col("awaySkatersOnIce")),
-                1,
-            )
-            .otherwise(0),
-        )
-        .withColumn(
-            "powerPlayShotsOnGoal",
-            when((col("isPowerPlay") == 1) & (col("shotWasOnGoal") == 1), 1).otherwise(
-                0
-            ),
-        )
-        .withColumn(
-            "penaltyKillShotsOnGoal",
-            when(
-                (col("isPenaltyKill") == 1) & (col("shotWasOnGoal") == 1), 1
-            ).otherwise(0),
-        )
-        .withColumn(
-            "evenStrengthShotsOnGoal",
-            when(
-                (col("isEvenStrength") == 1) & (col("shotWasOnGoal") == 1), 1
-            ).otherwise(0),
-        )
-    )
+#     shots_filtered = (
+#         dlt.read("bronze_shots_2023_v2")
+#         .select(
+#             "shotID",
+#             "game_id",
+#             "teamCode",
+#             "shooterName",
+#             "shooterPlayerId",
+#             "season",
+#             "event",
+#             "team",
+#             "homeTeamCode",
+#             "awayTeamCode",
+#             "goalieIdForShot",
+#             "goalieNameForShot",
+#             "isPlayoffGame",
+#             "lastEventTeam",
+#             "location",
+#             "goal",
+#             # "goalieIdForShot",
+#             # "goalieNameForShot",
+#             "homeSkatersOnIce",
+#             "awaySkatersOnIce",
+#             "shooterTimeOnIce",
+#             "shooterTimeOnIceSinceFaceoff",
+#             "shotDistance",
+#             "shotOnEmptyNet",
+#             "shotRebound",
+#             "shotRush",
+#             "shotType",
+#             "shotWasOnGoal",
+#             "speedFromLastEvent",
+#         )
+#         .withColumn("shooterPlayerId", col("shooterPlayerId").cast("string"))
+#         .withColumn("shooterPlayerId", regexp_replace("shooterPlayerId", "\\.0$", ""))
+#         .withColumn("game_id", col("game_id").cast("string"))
+#         .withColumn("game_id", regexp_replace("game_id", "\\.0$", ""))
+#         .withColumn("game_id", concat_ws("0", "season", "game_id"))
+#         .withColumn("goalieIdForShot", col("goalieIdForShot").cast("string"))
+#         .withColumn("goalieIdForShot", regexp_replace("goalieIdForShot", "\\.0$", ""))
+#         .withColumnRenamed("team", "home_or_away")
+#         .withColumnsRenamed(
+#             {
+#                 "game_id": "gameId",
+#                 "shooterPlayerId": "playerId",
+#                 # "team": "home_or_away",
+#                 "teamCode": "team",
+#             }
+#         )
+#         .withColumn(
+#             "isPowerPlay",
+#             when(
+#                 (col("team") == col("homeTeamCode"))
+#                 & (col("homeSkatersOnIce") > col("awaySkatersOnIce")),
+#                 1,
+#             )
+#             .when(
+#                 (col("team") == col("awayTeamCode"))
+#                 & (col("homeSkatersOnIce") < col("awaySkatersOnIce")),
+#                 1,
+#             )
+#             .otherwise(0),
+#         )
+#         .withColumn(
+#             "isPenaltyKill",
+#             when(
+#                 (col("team") == col("homeTeamCode"))
+#                 & (col("homeSkatersOnIce") < col("awaySkatersOnIce")),
+#                 1,
+#             )
+#             .when(
+#                 (col("team") == col("awayTeamCode"))
+#                 & (col("homeSkatersOnIce") > col("awaySkatersOnIce")),
+#                 1,
+#             )
+#             .otherwise(0),
+#         )
+#         .withColumn(
+#             "isEvenStrength",
+#             when(
+#                 (col("team") == col("homeTeamCode"))
+#                 & (col("homeSkatersOnIce") == col("awaySkatersOnIce")),
+#                 1,
+#             )
+#             .when(
+#                 (col("team") == col("awayTeamCode"))
+#                 & (col("homeSkatersOnIce") == col("awaySkatersOnIce")),
+#                 1,
+#             )
+#             .otherwise(0),
+#         )
+#         .withColumn(
+#             "powerPlayShotsOnGoal",
+#             when((col("isPowerPlay") == 1) & (col("shotWasOnGoal") == 1), 1).otherwise(
+#                 0
+#             ),
+#         )
+#         .withColumn(
+#             "penaltyKillShotsOnGoal",
+#             when(
+#                 (col("isPenaltyKill") == 1) & (col("shotWasOnGoal") == 1), 1
+#             ).otherwise(0),
+#         )
+#         .withColumn(
+#             "evenStrengthShotsOnGoal",
+#             when(
+#                 (col("isEvenStrength") == 1) & (col("shotWasOnGoal") == 1), 1
+#             ).otherwise(0),
+#         )
+#     )
 
-    return shots_filtered
+#     return shots_filtered
 
 # COMMAND ----------
 

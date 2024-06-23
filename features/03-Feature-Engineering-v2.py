@@ -53,7 +53,6 @@ display(upcoming_games)
 
 # COMMAND ----------
 
-
 assert model_remove_1st_and_upcoming_games.count() == model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()
 
 # COMMAND ----------
@@ -74,7 +73,7 @@ customer_feature_table = fs.create_table(
     name='lr_nhl_demo.dev.SOG_features_v2', 
     primary_keys=['gameId', 'playerId'],
     schema=model_remove_1st_and_upcoming_games.schema, 
-    description='Skater features' 
+    description='Skater game by game features' 
 )
 
 fs.write_table( 

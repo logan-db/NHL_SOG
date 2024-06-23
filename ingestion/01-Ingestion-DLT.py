@@ -17,6 +17,10 @@ from pyspark.sql.window import Window
 from pyspark.sql import DataFrame
 from utils.ingestionHelper import download_unzip_and_save_as_table
 
+import requests
+import shutil
+import os
+
 # COMMAND ----------
 
 # DBTITLE 1,Code Set Up
@@ -140,8 +144,28 @@ def ingest_games_data():
     table_properties={"quality": "bronze"},
 )
 def ingest_schedule_data():
-    # TO DO : make live
+    # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
     return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
+
+# COMMAND ----------
+
+# DBTITLE 1,bronze_schedule_2023-LIVE
+# @dlt.table(
+#     name="bronze_schedule_2023",
+#     comment="Schedule data for REGULAR 2023-2024 season",
+#     table_properties={"quality": "bronze"},
+# )
+# def create_schedule_data():
+#     url = "https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx"
+#     schedule_file_path = download_unzip_and_save_as_table(
+#         url, tmp_base_path, "schedule", file_format=".xlsx"
+#     )
+#     return (
+#         spark.read.format("csv")
+#         .option("header", "true")
+#         .option("inferSchema", "true")
+#         .load(schedule_file_path)
+#     )
 
 # COMMAND ----------
 

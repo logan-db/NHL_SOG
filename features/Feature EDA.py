@@ -17,7 +17,7 @@ display(gold_model_data_v2)
 
 # COMMAND ----------
 
-dbutils.fs.refreshMounts()
+# dbutils.fs.refreshMounts()
 
 # COMMAND ----------
 

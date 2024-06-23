@@ -7,7 +7,7 @@ from pyspark.sql import DataFrame
 from pyspark.sql.functions import *
 
 
-def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format, game_by_game=False):
+def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format, game_by_game=False, game_by_game_playoffs=False):
     """
     Downloads a ZIP file from a URL, checks if it is a ZIP file, unzips it, and saves the contents as a table in DBFS storage.
 
@@ -34,23 +34,37 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
                 f"The file downloaded from {url} was a ZIP file and successfully copied to {tmp_base_path}."
             )
             temp_path = tmp_base_path + table_name + "/" + table_name + ".csv"
+
+    elif file_format == ".xlsx":
+        response = requests.get(url, stream=True)
+        with open(temp_path, "wb") as file:
+            shutil.copyfileobj(response.raw, file)
+
+        temp_path = '/Volumes/lr_nhl_demo/dev/schedule/schedule.xlsx'
+
     else:
         # Download the file
         if game_by_game:
             temp_path = tmp_base_path + "player_game_stats/" + table_name + file_format
-            
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            # Open the file in write mode with UTF-8 encoding
-            with open(temp_path, "w", encoding="utf-8") as f:
-                # Iterate over the response in text mode and write to the file
-                for chunk in r.iter_lines(decode_unicode=True):
-                    if chunk:  # filter out keep-alive new chunks
-                        f.write(chunk + '\n')
+        # Download the file
+        if game_by_game_playoffs:
+            temp_path = tmp_base_path + "player_game_stats_playoffs/" + table_name + file_format
 
-        print(
-            f"The file downloaded from {url} is not a ZIP file and successfully copied to {temp_path}."
-        )            
+        try:
+            with requests.get(url, stream=True) as r:
+                r.raise_for_status()
+                # Open the file in write mode with UTF-8 encoding
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    # Iterate over the response in text mode and write to the file
+                    for chunk in r.iter_lines(decode_unicode=True):
+                        if chunk:  # filter out keep-alive new chunks
+                            f.write(chunk + '\n')
+            print(
+                f"The file downloaded from {url} is not a ZIP file and successfully copied to {temp_path}."
+            )   
+
+        except Exception as e:
+            print(f"An error occurred: {str(e)}")          
 
     return temp_path
 
@@ -74,7 +88,7 @@ def select_rename_columns(
     """
 
     df_filtered = (
-        df.filter((col("season") == 2023) & (col("situation") == situation))
+        df.filter((col("season") == season) & (col("situation") == situation))
         .select(select_cols)
         .withColumn("gameDate", col("gameDate").cast("string"))
         .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
@@ -125,7 +139,7 @@ def select_rename_game_columns(
     """
 
     df_filtered = (
-        df.filter((col("season") == 2023) & (col("situation") == situation))
+        df.filter((col("season") == season) & (col("situation") == situation))
         .select(select_cols)
         .drop("name", "position")
         .withColumn("gameDate", col("gameDate").cast("string"))
@@ -149,3 +163,22 @@ def select_rename_game_columns(
             df_filtered = df_filtered.withColumnRenamed(column, f"{col_abrev}{column}")
             
     return df_filtered
+
+def get_day_of_week(df: DataFrame, date_column: str) -> DataFrame:
+    """
+    Adds a 'DAY' column to the DataFrame representing the day of the week based on the given date column.
+    If 'EASTERN' or 'LOCAL' columns are null, it replaces them with the default value '7:00 PM Default'.
+
+    Args:
+        df (DataFrame): The input DataFrame.
+        date_column (str): The name of the column representing the date.
+
+    Returns:
+        DataFrame: The modified DataFrame with the 'DAY' column and updated 'EASTERN' and 'LOCAL' columns.
+    """
+    
+    df_with_day = df.withColumn("DAY", date_format(date_column, "E"))
+    df_with_default_time = df_with_day.withColumn("EASTERN", when(col("EASTERN").isNull(), lit("7:00 PM Default")).otherwise(col("EASTERN")))
+    df_with_default_time = df_with_default_time.withColumn("LOCAL", when(col("LOCAL").isNull(), lit("7:00 PM Default")).otherwise(col("LOCAL")))
+
+    return df_with_default_time
