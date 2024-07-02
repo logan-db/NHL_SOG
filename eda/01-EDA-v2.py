@@ -32,12 +32,21 @@ silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
 silver_shots = spark.table("dev.silver_shots")
 silver_games_historical = spark.table("dev.silver_games_historical")
 silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
-gold_player_stats = spark.table("dev.gold_player_stats")
+gold_player_stats = spark.table("dev.gold_player_stats_v2")
 gold_game_stats = spark.table("dev.gold_game_stats")
 gold_model_data = spark.table("dev.gold_model_stats")
 gold_merged_stats = spark.table("dev.gold_merged_stats")
 gold_merged_stats_v2 = spark.table("dev.gold_merged_stats_v2")
 gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
+
+# COMMAND ----------
+
+spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.delta_player_game_stats_v2")
+player_game_stats_v2.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.delta_player_game_stats_v2")
+
+# COMMAND ----------
+
+display(gold_player_stats)
 
 # COMMAND ----------
 
