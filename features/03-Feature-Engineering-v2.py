@@ -16,14 +16,14 @@ import mlflow
 import databricks.automl_runtime
 
 # Identify numerical and categorical columns
-numerical_cols = gold_model_stats.select_dtypes(include=['int64', 'float64']).columns
+# numerical_cols = gold_model_stats.select_dtypes(include=['int64', 'float64']).columns
 # categorical_cols = df.select_dtypes(include=['object']).columns
 
 # Assuming `gold_model_stats` is your DataFrame
-categorical_cols = [f.name for f in gold_model_stats.schema.fields if isinstance(f.dataType, StringType)]
+# categorical_cols = [f.name for f in gold_model_stats.schema.fields if isinstance(f.dataType, StringType)]
 
 # Printing the list of categorical columns
-print(categorical_cols)
+# print(categorical_cols)
 
 # COMMAND ----------
 
@@ -32,32 +32,6 @@ import databricks.automl_runtime
 
 target_col = "player_ShotsOnGoalInGame"
 time_col = "gameDate"
-
-# COMMAND ----------
-
-# Preprocessing for numerical data
-numerical_transformer = Pipeline(steps=[
-    ('imputer', SimpleImputer(strategy='median')),
-    ('scaler', StandardScaler())
-])
-
-# Preprocessing for categorical data
-categorical_transformer = Pipeline(steps=[
-    ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-    ('onehot', OneHotEncoder(handle_unknown='ignore'))
-])
-
-# Combine preprocessing steps
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', numerical_transformer, numerical_cols),
-        ('cat', categorical_transformer, categorical_cols)
-    ])
-
-# Apply preprocessing
-X = gold_model_stats.drop('target', axis=1)
-y = gold_model_stats['target']
-X_preprocessed = preprocessor.fit_transform(X)
 
 # COMMAND ----------
 

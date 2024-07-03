@@ -10,8 +10,10 @@ from pyspark.sql.window import Window
 
 # COMMAND ----------
 
-predictSOG_upcoming = spark.table("dev.predictSOG_upcoming")
-predictSOG_hist = spark.table("dev.predictSOG_hist")
+target_col = "player_Total_shotsOnGoal"
+
+predictSOG_upcoming = spark.table("dev.predictSOG_upcoming_v2")
+predictSOG_hist = spark.table("dev.predictSOG_hist_v2")
 
 # COMMAND ----------
 
@@ -29,14 +31,14 @@ matchupWindowSpec = Window.partitionBy("playerTeam", "opposingTeam", "playerId")
 clean_prediction = (
     full_prediction.withColumn(
         "SOG_2+",
-        when(col("player_ShotsOnGoalInGame") >= 2, lit("Yes"))
-        .when(col("player_ShotsOnGoalInGame").isNull(), lit(None))
+        when(col(target_col) >= 2, lit("Yes"))
+        .when(col(target_col).isNull(), lit(None))
         .otherwise(lit("No")),
     )
     .withColumn(
         "SOG_3+",
-        when(col("player_ShotsOnGoalInGame") >= 3, lit("Yes"))
-        .when(col("player_ShotsOnGoalInGame").isNull(), lit(None))
+        when(col(target_col) >= 3, lit("Yes"))
+        .when(col(target_col).isNull(), lit(None))
         .otherwise(lit("No")),
     )
     .withColumn(
@@ -68,7 +70,7 @@ clean_prediction.count()
 
 # COMMAND ----------
 
-clean_prediction.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.clean_prediction")
+clean_prediction.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
 
 # COMMAND ----------
 
