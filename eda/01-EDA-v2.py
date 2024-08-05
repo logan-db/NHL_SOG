@@ -238,3 +238,9 @@ display(gold_model_data_v2.orderBy(desc(col('gameDate'))))
 # COMMAND ----------
 
 display(silver_games_schedule_v2.orderBy(desc("gameDate")))
+
+# COMMAND ----------
+
+# MAGIC %environment
+# MAGIC "client": "1"
+# MAGIC "base_environment": ""
