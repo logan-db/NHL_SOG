@@ -1,0 +1,12 @@
+# The main pipeline for nhlPredict
+resources:
+  pipelines:
+    nhlPredict_pipeline:
+      name: nhlPredict_pipeline
+      target: nhlPredict_${bundle.environment}
+      libraries:
+        - notebook:
+            path: ../src/01-Ingestion-DLT-v2.py
+
+      configuration:
+        bundle.sourcePath: /Workspace/${workspace.file_path}/src
