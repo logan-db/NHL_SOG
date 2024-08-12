@@ -1,6 +1,6 @@
 {
   "host": "https://e2-demo-field-eng.cloud.databricks.com/",
   "authType": "databricks-cli",
-  "databricksPath": "/Users/logan.rupert/.vscode/extensions/databricks.databricks-1.3.0-darwin-arm64/bin/databricks",
+  "databricksPath": "/Users/logan.rupert/.vscode/extensions/databricks.databricks-1.3.1-darwin-arm64/bin/databricks",
   "workspacePath": "/Users/logan.rupert@databricks.com/.ide/NHL_SOG-88f65f1b"
 }

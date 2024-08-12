@@ -1,13 +1,12 @@
 # The main job for nhlPredict.
 resources:
   jobs:
-    nhlPredict_job:
-      name: nhlPredict_job
-
+    NHL_to_Features_v2:
+      name: NHL-to-Features-v2
       schedule:
-        # Run every day at 8:37 AM
-        quartz_cron_expression: '44 37 8 * * ?'
-        timezone_id: Europe/Amsterdam
+        quartz_cron_expression: 31 0 12 * * ?
+        timezone_id: UTC
+        pause_status: PAUSED
 
       email_notifications:
         on_failure:
@@ -15,34 +14,104 @@ resources:
 
       tasks:
         - task_key: createVols
-          job_cluster_key: job_cluster
+          # job_cluster_key: job_cluster
           notebook_task:
             notebook_path: ../src/01-Ingestion-createVols.sql
         
-        - task_key: refresh_pipeline
+        # - task_key: refresh_pipeline
+        #   depends_on:
+        #     - task_key: createVols
+        #   pipeline_task:
+        #     pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
+        
+        - task_key: ingest_transform_job
           depends_on:
-            - task_key: createVols
+              - task_key: createVols
           pipeline_task:
             pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
-        
-        # - task_key: main_task
-        #   depends_on:
-        #     - task_key: refresh_pipeline
-        #   job_cluster_key: job_cluster
-        #   python_wheel_task:
-        #     package_name: nhlPredict
-        #     entry_point: main
-        #   libraries:
-        #     # By default we just include the .whl file generated for the nhlPredict package.
-        #     # See https://docs.databricks.com/dev-tools/bundles/library-dependencies.html
-        #     # for more information on how to add other libraries.
-        #     - whl: ../dist/*.whl
+            full_refresh: false
 
+        - task_key: Write_out_Delta_Tables
+          depends_on:
+            - task_key: ingest_transform_job
+          spark_python_task:
+            python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
+          environment_key: Default
+
+        - task_key: create_feature_table
+          depends_on:
+            - task_key: Write_out_Delta_Tables
+          notebook_task:
+            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/features/03-Feature-Engineering-v2
+            source: WORKSPACE
+          job_cluster_key: LR-ML
+
+        - task_key: re_train_model
+          depends_on:
+            - task_key: create_feature_table
+          condition_task:
+            op: EQUAL_TO
+            left: train_model
+            right: "true"
+
+        - task_key: train_model
+          depends_on:
+            - task_key: re_train_model
+              outcome: "true"
+          notebook_task:
+            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/features/Predict_SOG_v2-Manual
+            source: WORKSPACE
+            
+        - task_key: register_model
+          depends_on:
+            - task_key: train_model
+          notebook_task:
+            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/ML/registerModel
+            source: WORKSPACE
+        - task_key: predictSOG
+          depends_on:
+            - task_key: register_model
+            - task_key: re_train_model
+              outcome: "false"
+          notebook_task:
+            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/ML/SOGPredict
+            source: WORKSPACE
+          job_cluster_key: LR-ML
+        - task_key: BI_Prep
+          depends_on:
+            - task_key: predictSOG
+          notebook_task:
+            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/BI/05-Prep-Predicton-Data
+            source: WORKSPACE
+        - task_key: genie_prep
+          depends_on:
+            - task_key: predictSOG
+          notebook_task:
+            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/genie/Prep Genie Data
+            source: WORKSPACE
       job_clusters:
-        - job_cluster_key: job_cluster
+        - job_cluster_key: LR-ML
           new_cluster:
-            spark_version: 13.3.x-scala2.12
+            cluster_name: ""
+            spark_version: 14.3.x-cpu-ml-scala2.12
+            aws_attributes:
+              first_on_demand: 1
+              availability: SPOT_WITH_FALLBACK
+              zone_id: us-west-2a
+              spot_bid_price_percent: 100
+              ebs_volume_count: 0
             node_type_id: i3.xlarge
+            enable_elastic_disk: false
+            data_security_mode: SINGLE_USER
+            runtime_engine: STANDARD
             autoscale:
-                min_workers: 1
-                max_workers: 4
+              min_workers: 2
+              max_workers: 8
+      parameters:
+        - name: catalog
+          default: lr_nhl_demo.dev
+      environments:
+        - environment_key: Default
+          spec:
+            client: "1"
+

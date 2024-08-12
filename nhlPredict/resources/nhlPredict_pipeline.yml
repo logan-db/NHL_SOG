@@ -6,7 +6,7 @@ resources:
       target: nhlPredict_${bundle.environment}
       libraries:
         - notebook:
-            path: ../src/01-Ingestion-DLT-v2.py
+            path: /Repos/logan.rupert@databricks.com/NHL_SOG/ingestion/01-Ingestion-DLT-v2.py
 
       configuration:
         bundle.sourcePath: /Workspace/${workspace.file_path}/src
