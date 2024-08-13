@@ -8,21 +8,15 @@ resources:
         timezone_id: UTC
         pause_status: PAUSED
 
-      email_notifications:
-        on_failure:
-          - logan.rupert@databricks.com
+      # email_notifications:
+      #   on_failure:
+      #     - logan.rupert@databricks.com
 
       tasks:
         - task_key: createVols
           # job_cluster_key: job_cluster
           notebook_task:
             notebook_path: ../src/01-Ingestion-createVols.sql
-        
-        # - task_key: refresh_pipeline
-        #   depends_on:
-        #     - task_key: createVols
-        #   pipeline_task:
-        #     pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
         
         - task_key: ingest_transform_job
           depends_on:
