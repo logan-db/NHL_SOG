@@ -12,10 +12,16 @@
 # DBTITLE 1,Imports
 # Imports
 import dlt
+import glob
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql import DataFrame
-from utils.ingestionHelper import download_unzip_and_save_as_table, select_rename_columns, select_rename_game_columns, get_day_of_week
+from utils.ingestionHelper import (
+    download_unzip_and_save_as_table,
+    select_rename_columns,
+    select_rename_game_columns,
+    get_day_of_week,
+)
 
 # COMMAND ----------
 
@@ -63,6 +69,7 @@ one_time_load = spark.conf.get("one_time_load").lower()
 
 # COMMAND ----------
 
+
 # DBTITLE 1,bronze_skaters_2023_v2
 @dlt.table(
     name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
@@ -92,6 +99,7 @@ def ingest_skaters_data():
 
     return skaters_df
 
+
 # COMMAND ----------
 
 # DBTITLE 1,bronze_lines_2023_v2
@@ -116,6 +124,7 @@ def ingest_skaters_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,bronze_games_historical_v2
 @dlt.table(
     name="bronze_games_historical_v2",
@@ -133,7 +142,9 @@ def ingest_games_data():
         .load(games_file_path)
     )
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,bronze_schedule_2023_v2
 @dlt.table(
@@ -144,7 +155,9 @@ def ingest_schedule_data():
     # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
     return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,bronze_player_game_stats_v2
 # @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
@@ -158,13 +171,26 @@ def ingest_schedule_data():
 )
 def ingest_games_data():
     if one_time_load == "true":
-        skaters_2023_id = dlt.read("bronze_skaters_2023_v2").select("playerId").distinct()
+        skaters_2023_id = (
+            dlt.read("bronze_skaters_2023_v2").select("playerId").distinct()
+        )
         print("Ingesting player game by game stats")
 
         # Get Playoff teams and players
-        playoff_teams_list = dlt.read("bronze_games_historical_v2").select("team").filter((col("playoffGame")==1) & (col("season")==2023)).distinct().collect()
+        playoff_teams_list = (
+            dlt.read("bronze_games_historical_v2")
+            .select("team")
+            .filter((col("playoffGame") == 1) & (col("season") == 2023))
+            .distinct()
+            .collect()
+        )
         playoff_teams = [row.team for row in playoff_teams_list]
-        playoff_skaters_2023_id = dlt.read("bronze_skaters_2023_v2").select("playerId").filter(col("team").isin(playoff_teams)).distinct()
+        playoff_skaters_2023_id = (
+            dlt.read("bronze_skaters_2023_v2")
+            .select("playerId")
+            .filter(col("team").isin(playoff_teams))
+            .distinct()
+        )
 
         for row in skaters_2023_id.collect():
             playerId = str(row["playerId"])
@@ -188,20 +214,36 @@ def ingest_games_data():
                     game_by_game_playoffs=True,
                 )
 
+    regular_season_stats_path = "/Volumes/lr_nhl_demo/dev/player_game_stats/*.csv"
+    playoff_season_stats_path = (
+        "/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/*.csv"
+    )
 
-    regular_season_stats = (
-        spark.read.format("csv")
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .load("/Volumes/lr_nhl_demo/dev/player_game_stats/*.csv")
-    ).filter(col("season") == 2023)
+    # Check for CSV files
+    reg_csv_files = glob.glob(regular_season_stats_path)
+    playoff_csv_files = glob.glob(playoff_season_stats_path)
 
-    playoff_season_stats = (
-        spark.read.format("csv")
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .load("/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/*.csv")
-    ).filter(col("season") == 2023)
+    if reg_csv_files:
+        regular_season_stats = (
+            spark.read.format("csv")
+            .option("header", "true")
+            .option("inferSchema", "true")
+            .load(regular_season_stats_path)
+        ).filter(col("season") == 2023)
+    else:
+        print("No CSV files found for Regular Season. Skipping...")
+        regular_season_stats = spark.createDataFrame()
+
+    if playoff_csv_files:
+        playoff_season_stats = (
+            spark.read.format("csv")
+            .option("header", "true")
+            .option("inferSchema", "true")
+            .load(playoff_season_stats_path)
+        ).filter(col("season") == 2023)
+    else:
+        print("No CSV files found for Playoffs. Skipping...")
+        playoff_season_stats = spark.createDataFrame()
 
     return regular_season_stats.union(playoff_season_stats)
 
@@ -250,6 +292,7 @@ def ingest_games_data():
 #     return silver_skaters_enriched
 
 # COMMAND ----------
+
 
 # DBTITLE 1,silver_games_historical_v2
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
@@ -318,16 +361,32 @@ def clean_games_data():
 
     # Call the function on the DataFrame
     game_stats_total = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_Total_", "all", 2023
+        dlt.read("bronze_games_historical_v2"),
+        select_game_cols,
+        "game_Total_",
+        "all",
+        2023,
     )
     game_stats_pp = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_PP_", "5on4", 2023
+        dlt.read("bronze_games_historical_v2"),
+        select_game_cols,
+        "game_PP_",
+        "5on4",
+        2023,
     )
     game_stats_pk = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_PK_", "4on5", 2023
+        dlt.read("bronze_games_historical_v2"),
+        select_game_cols,
+        "game_PK_",
+        "4on5",
+        2023,
     )
     game_stats_ev = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"), select_game_cols, "game_EV_", "5on5", 2023
+        dlt.read("bronze_games_historical_v2"),
+        select_game_cols,
+        "game_EV_",
+        "5on5",
+        2023,
     )
 
     joined_game_stats = (
@@ -376,7 +435,9 @@ def clean_games_data():
 
     return joined_game_stats
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,silver_games_schedule_v2
 @dlt.table(
@@ -435,18 +496,24 @@ def merge_games_data():
         )
     )
 
-    regular_season_schedule = (silver_games_schedule.filter(col("gameId").isNotNull())
+    regular_season_schedule = (
+        silver_games_schedule.filter(col("gameId").isNotNull())
         .unionAll(upcoming_final_clean)
         .orderBy(desc("DATE"))
     )
 
     # Add logic to check if Playoffs, if so then add playoff games to schedule
     # Get Max gameDate from final dataframe
-    max_reg_season_date = regular_season_schedule.filter(col("gameId").isNotNull()).select(max("gameDate")).first()[0]
-    print('Max gameDate from regular_season_schedule: {}'.format(max_reg_season_date))
+    max_reg_season_date = (
+        regular_season_schedule.filter(col("gameId").isNotNull())
+        .select(max("gameDate"))
+        .first()[0]
+    )
+    print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
 
     playoff_games = (
-        dlt.read("silver_games_historical_v2").filter(col('gameDate') > max_reg_season_date)
+        dlt.read("silver_games_historical_v2")
+        .filter(col("gameDate") > max_reg_season_date)
         .withColumn(
             "DATE",
             col("gameDate"),
@@ -462,27 +529,32 @@ def merge_games_data():
             when(col("home_or_away") == "AWAY", col("team")).otherwise(
                 col("opposingTeam")
             ),
-        ).withColumn("season", lit(2023))
+        )
+        .withColumn("season", lit(2023))
         .withColumn(
             "playerTeam",
             when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
         )
         .withColumn(
             "HOME",
-            when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(col("opposingTeam")),
+            when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(
+                col("opposingTeam")
+            ),
         )
         .withColumn(
             "AWAY",
-            when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(col("opposingTeam")),
+            when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(
+                col("opposingTeam")
+            ),
         )
     )
 
-    columns_to_add = ['DAY', 'EASTERN', 'LOCAL']
+    columns_to_add = ["DAY", "EASTERN", "LOCAL"]
     for column in columns_to_add:
         playoff_games = playoff_games.withColumn(column, lit(None))
 
     if playoff_games:
-        print('Adding playoff games to schedule')
+        print("Adding playoff games to schedule")
         full_season_schedule = regular_season_schedule.unionByName(playoff_games)
     else:
         full_season_schedule = regular_season_schedule
@@ -491,6 +563,7 @@ def merge_games_data():
     full_season_schedule_with_day = get_day_of_week(full_season_schedule, "DATE")
 
     return full_season_schedule_with_day
+
 
 # COMMAND ----------
 
@@ -648,6 +721,7 @@ def merge_games_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,gold_player_stats_v2
 # @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 # @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
@@ -717,7 +791,11 @@ def aggregate_games_data():
 
     # Call the function on the DataFrame
     player_game_stats_total = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_Total_", "all", 2023
+        dlt.read("bronze_player_game_stats_v2"),
+        select_cols,
+        "player_Total_",
+        "all",
+        2023,
     )
     player_game_stats_pp = select_rename_columns(
         dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4", 2023
@@ -793,7 +871,14 @@ def aggregate_games_data():
         .join(
             joined_player_stats,
             how="left",
-            on=["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"],
+            on=[
+                "playerTeam",
+                "gameId",
+                "gameDate",
+                "opposingTeam",
+                "season",
+                "home_or_away",
+            ],
         )
     )
 
@@ -1004,7 +1089,9 @@ def aggregate_games_data():
 
     return gold_player_stats
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_game_stats_v2
 @dlt.table(
@@ -1138,7 +1225,9 @@ def window_gold_game_data():
 
     return gold_game_stats
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_merged_stats_v2
 @dlt.table(
@@ -1218,12 +1307,14 @@ def merge_player_game_stats():
 
     schedule_shots_reordered = schedule_shots.select(
         *reorder_list,
-        *[col for col in schedule_shots.columns if col not in reorder_list]
+        *[col for col in schedule_shots.columns if col not in reorder_list],
     )
 
     return schedule_shots_reordered
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_model_stats_v2
 @dlt.table(
@@ -1284,7 +1375,7 @@ def make_model_ready():
         *keep_column_exprs,
         sum(col("player_Total_icetime"))
         .over(timeOnIceWindowSpec)
-        .alias("rolling_playerTotalTimeOnIceInGame")
+        .alias("rolling_playerTotalTimeOnIceInGame"),
     )
 
     return gold_model_data
