@@ -4,9 +4,20 @@ resources:
     nhlPredict_pipeline:
       name: nhlPredict_pipeline
       target: nhlPredict_${bundle.environment}
+      continuous: false
+      channel: PREVIEW
+      photon: true
       libraries:
         - notebook:
-            path: /Repos/logan.rupert@databricks.com/NHL_SOG/ingestion/01-Ingestion-DLT-v2.py
-
+            path: /Repos/logan.rupert@databricks.com/NHL_SOG/ingestion/01-Ingestion-DLT-v2
+      serverless: true
+      catalog: lr_nhl_demo
       configuration:
         bundle.sourcePath: /Workspace/${workspace.file_path}/src
+        tmp_base_path: /Volumes/lr_nhl_demo/dev/
+        base_shots_download_url: https://peter-tanner.com/moneypuck/downloads/
+        base_download_url: https://moneypuck.com/moneypuck/playerData/seasonSummary/2023/regular/
+        games_download_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv
+        player_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/regular/skaters/
+        one_time_load: false
+        player_playoff_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/playoffs/skaters/
