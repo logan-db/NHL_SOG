@@ -12,6 +12,11 @@
 # DBTITLE 1,Imports
 # Imports
 import dlt
+
+import sys
+
+sys.path.append(spark.conf.get("bundle.sourcePath", "."))
+
 import glob
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
@@ -232,7 +237,11 @@ def ingest_games_data():
         ).filter(col("season") == 2023)
     else:
         print("No CSV files found for Regular Season. Skipping...")
-        regular_season_stats = spark.createDataFrame()
+        regular_season_stats = (
+            spark.read.format("csv")
+            .options(header="true")
+            .load("/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv")
+        )
 
     if playoff_csv_files:
         playoff_season_stats = (
@@ -243,7 +252,11 @@ def ingest_games_data():
         ).filter(col("season") == 2023)
     else:
         print("No CSV files found for Playoffs. Skipping...")
-        playoff_season_stats = spark.createDataFrame()
+        playoff_season_stats = (
+            spark.read.format("csv")
+            .options(header="true")
+            .load("/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv")
+        )
 
     return regular_season_stats.union(playoff_season_stats)
 

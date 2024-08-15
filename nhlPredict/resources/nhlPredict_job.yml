@@ -13,14 +13,14 @@ resources:
       #     - logan.rupert@databricks.com
 
       tasks:
-        - task_key: createVols
-          # job_cluster_key: job_cluster
-          notebook_task:
-            notebook_path: ../src/01-Ingestion-createVols.sql
+        # - task_key: createVols
+        #   # job_cluster_key: job_cluster
+        #   notebook_task:
+        #     notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
         
         - task_key: ingest_transform_job
-          depends_on:
-              - task_key: createVols
+          # depends_on:
+          #     - task_key: createVols
           pipeline_task:
             pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
             full_refresh: false
@@ -29,14 +29,15 @@ resources:
           depends_on:
             - task_key: ingest_transform_job
           spark_python_task:
-            python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
+            # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
+            python_file: ../src/transformation/solidify_gold_tables_v2.py
           environment_key: Default
 
         - task_key: create_feature_table
           depends_on:
             - task_key: Write_out_Delta_Tables
           notebook_task:
-            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/features/03-Feature-Engineering-v2
+            notebook_path: ../src/features/03-Feature-Engineering-v2.py
             source: WORKSPACE
           job_cluster_key: LR-ML
 
@@ -53,14 +54,14 @@ resources:
             - task_key: re_train_model
               outcome: "true"
           notebook_task:
-            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/features/Predict_SOG_v2-Manual
+            notebook_path: ../src/features/Predict_SOG_v2-Manual.ipynb
             source: WORKSPACE
             
         - task_key: register_model
           depends_on:
             - task_key: train_model
           notebook_task:
-            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/ML/registerModel
+            notebook_path: ../src/ML/registerModel.py
             source: WORKSPACE
         - task_key: predictSOG
           depends_on:
@@ -68,20 +69,20 @@ resources:
             - task_key: re_train_model
               outcome: "false"
           notebook_task:
-            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/ML/SOGPredict
+            notebook_path: ../src/ML/SOGPredict.py
             source: WORKSPACE
           job_cluster_key: LR-ML
         - task_key: BI_Prep
           depends_on:
             - task_key: predictSOG
           notebook_task:
-            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/BI/05-Prep-Predicton-Data
+            notebook_path: ../src/BI/05-Prep-Predicton-Data.py
             source: WORKSPACE
         - task_key: genie_prep
           depends_on:
             - task_key: predictSOG
           notebook_task:
-            notebook_path: /Repos/logan.rupert@databricks.com/NHL_SOG/genie/Prep Genie Data
+            notebook_path: ../src/genie/Prep Genie Data.py
             source: WORKSPACE
       job_clusters:
         - job_cluster_key: LR-ML
