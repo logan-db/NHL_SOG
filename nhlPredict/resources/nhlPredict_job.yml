@@ -46,7 +46,7 @@ resources:
             - task_key: create_feature_table
           condition_task:
             op: EQUAL_TO
-            left: train_model
+            left: "{{tasks.create_feature_table.values.train_model}}"
             right: "true"
 
         - task_key: train_model

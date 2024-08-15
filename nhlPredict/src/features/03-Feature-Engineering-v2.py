@@ -37,72 +37,81 @@ time_col = "gameDate"
 
 from pyspark.sql import functions as F
 
-min_player_matchup_played_rolling = gold_model_stats.agg(F.min("playerGamesPlayedRolling")).collect()[0][0]
+min_player_matchup_played_rolling = gold_model_stats.agg(
+    F.min("playerGamesPlayedRolling")
+).collect()[0][0]
 min_player_matchup_played_rolling
 
 # COMMAND ----------
 
-display(
-  gold_model_stats.filter(col("playerMatchupPlayedRolling")==0)
-)
+display(gold_model_stats.filter(col("playerMatchupPlayedRolling") == 0))
 
 # COMMAND ----------
 
-display(
-  gold_model_stats.filter(col("gameId").isNull())
-)
+display(gold_model_stats.filter(col("gameId").isNull()))
 
 # COMMAND ----------
 
-model_remove_1st_and_upcoming_games = (
-  gold_model_stats.filter((col("gameId").isNotNull()) & (col("playerGamesPlayedRolling") > 0) & (col("rolling_playerTotalTimeOnIceInGame") > 180))
+model_remove_1st_and_upcoming_games = gold_model_stats.filter(
+    (col("gameId").isNotNull())
+    & (col("playerGamesPlayedRolling") > 0)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
 )
 
 model_remove_1st_and_upcoming_games.count()
 
 # COMMAND ----------
 
-upcoming_games = (
-  gold_model_stats.filter((col("gameId").isNull())
-                           & (col("playerGamesPlayedRolling") > 0) 
-                           & (col("rolling_playerTotalTimeOnIceInGame") > 180)
-                           & (col("gameDate") != "2024-01-17")
-                           )
+upcoming_games = gold_model_stats.filter(
+    (col("gameId").isNull())
+    & (col("playerGamesPlayedRolling") > 0)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("gameDate") != "2024-01-17")
 )
 
 display(upcoming_games)
 
 # COMMAND ----------
 
-assert model_remove_1st_and_upcoming_games.count() == model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()
+assert (
+    model_remove_1st_and_upcoming_games.count()
+    == model_remove_1st_and_upcoming_games.select("gameId", "playerId")
+    .distinct()
+    .count()
+)
 
 # COMMAND ----------
 
-from databricks.feature_store import FeatureStoreClient 
+from databricks.feature_store import FeatureStoreClient
 
-# customer_features_df = compute_customer_features(df) 
+# customer_features_df = compute_customer_features(df)
 
-fs = FeatureStoreClient() 
+fs = FeatureStoreClient()
 
 try:
-  #drop table if exists
-  fs.drop_table(f'lr_nhl_demo.dev.SOG_features_v2')
+    # drop table if exists
+    fs.drop_table(f"lr_nhl_demo.dev.SOG_features_v2")
 except:
-  pass
+    pass
 
-customer_feature_table = fs.create_table( 
-    name='lr_nhl_demo.dev.SOG_features_v2', 
-    primary_keys=['gameId', 'playerId'],
-    schema=model_remove_1st_and_upcoming_games.schema, 
-    description='Skater game by game features' 
+customer_feature_table = fs.create_table(
+    name="lr_nhl_demo.dev.SOG_features_v2",
+    primary_keys=["gameId", "playerId"],
+    schema=model_remove_1st_and_upcoming_games.schema,
+    description="Skater game by game features",
 )
 
-fs.write_table( 
-    name='lr_nhl_demo.dev.SOG_features_v2', 
-    df = model_remove_1st_and_upcoming_games, 
-    mode = 'overwrite' 
+fs.write_table(
+    name="lr_nhl_demo.dev.SOG_features_v2",
+    df=model_remove_1st_and_upcoming_games,
+    mode="overwrite",
 )
 
 # COMMAND ----------
 
 
+# COMMAND ----------
+# Set training task condition to true/false for next pipeline steps
+dbutils.jobs.taskValues.set(key="train_model", value="true")
+
+# COMMAND ----------
