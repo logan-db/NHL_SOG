@@ -22,6 +22,8 @@ CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.schedule;
 
 CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.player_game_stats;
 
+CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.player_game_stats_playoffs;
+
 -- COMMAND ----------
 
 
