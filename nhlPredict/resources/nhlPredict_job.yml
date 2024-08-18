@@ -8,9 +8,9 @@ resources:
         timezone_id: UTC
         pause_status: PAUSED
 
-      # email_notifications:
-      #   on_failure:
-      #     - logan.rupert@databricks.com
+      email_notifications:
+        on_failure:
+          - logan.rupert@databricks.com
 
       tasks:
         - task_key: createVols
@@ -70,6 +70,7 @@ resources:
             - task_key: register_model
             - task_key: re_train_model
               outcome: "false"
+          run_if: AT_LEAST_ONE_SUCCESS
           notebook_task:
             notebook_path: ../src/ML/SOGPredict_v2.py
             source: WORKSPACE
@@ -93,7 +94,7 @@ resources:
         - job_cluster_key: LR-ML
           new_cluster:
             cluster_name: ""
-            spark_version: 14.3.x-cpu-ml-scala2.12
+            spark_version: 15.3.x-cpu-ml-scala2.12
             aws_attributes:
               first_on_demand: 1
               availability: SPOT_WITH_FALLBACK
@@ -101,7 +102,7 @@ resources:
               spot_bid_price_percent: 100
               ebs_volume_count: 0
             node_type_id: i3.xlarge
-            enable_elastic_disk: false
+            enable_elastic_disk: true
             data_security_mode: SINGLE_USER
             runtime_engine: STANDARD
             autoscale:

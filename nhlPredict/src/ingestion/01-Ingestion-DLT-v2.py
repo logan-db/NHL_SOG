@@ -75,6 +75,7 @@ one_time_load = spark.conf.get("one_time_load").lower()
 
 # COMMAND ----------
 
+
 # DBTITLE 1,bronze_skaters_2023_v2
 @dlt.table(
     name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
@@ -104,6 +105,7 @@ def ingest_skaters_data():
 
     return skaters_df
 
+
 # COMMAND ----------
 
 # DBTITLE 1,bronze_lines_2023_v2
@@ -128,6 +130,7 @@ def ingest_skaters_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,bronze_games_historical_v2
 @dlt.table(
     name="bronze_games_historical_v2",
@@ -145,7 +148,9 @@ def ingest_games_data():
         .load(games_file_path)
     )
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,bronze_schedule_2023_v2
 @dlt.table(
@@ -166,6 +171,7 @@ def ingest_schedule_data():
 #     return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
 # COMMAND ----------
+
 
 # DBTITLE 1,bronze_player_game_stats_v2
 # @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
@@ -263,6 +269,7 @@ def ingest_games_data():
 
     return regular_season_stats.union(playoff_season_stats)
 
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -308,6 +315,7 @@ def ingest_games_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,city_abv_UDF
 # UDF to map city to abbreviation
 def city_to_abbreviation(city_name):
@@ -317,6 +325,7 @@ def city_to_abbreviation(city_name):
 city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
 
 # COMMAND ----------
+
 
 # DBTITLE 1,silver_schedule_2023_v2
 @dlt.expect_or_drop("TEAM_ABV is not null", "TEAM_ABV IS NOT NULL")
@@ -354,13 +363,13 @@ def clean_schedule_data():
     )
 
     # Filter to get only the first row in each partition
-    df_result = df_with_row_number.filter(col("row_number") == 1).drop(
-        "row_number"
-    )
+    df_result = df_with_row_number.filter(col("row_number") == 1).drop("row_number")
 
     return df_result
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,silver_games_historical_v2
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
@@ -503,7 +512,9 @@ def clean_games_data():
 
     return joined_game_stats
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,silver_games_schedule_v2
 @dlt.table(
@@ -511,26 +522,30 @@ def clean_games_data():
     table_properties={"quality": "silver"},
 )
 def merge_games_data():
-    silver_games_schedule = dlt.read("silver_schedule_2023_v2").drop("TEAM_ABV").join(
-        dlt.read("silver_games_historical_v2")
-        .withColumn(
-            "homeTeamCode",
-            when(col("home_or_away") == "HOME", col("team")).otherwise(
-                col("opposingTeam")
+    silver_games_schedule = (
+        dlt.read("silver_schedule_2023_v2")
+        .drop("TEAM_ABV")
+        .join(
+            dlt.read("silver_games_historical_v2")
+            .withColumn(
+                "homeTeamCode",
+                when(col("home_or_away") == "HOME", col("team")).otherwise(
+                    col("opposingTeam")
+                ),
+            )
+            .withColumn(
+                "awayTeamCode",
+                when(col("home_or_away") == "AWAY", col("team")).otherwise(
+                    col("opposingTeam")
+                ),
             ),
+            how="outer",
+            on=[
+                col("homeTeamCode") == col("HOME"),
+                col("awayTeamCode") == col("AWAY"),
+                col("gameDate") == col("DATE"),
+            ],
         )
-        .withColumn(
-            "awayTeamCode",
-            when(col("home_or_away") == "AWAY", col("team")).otherwise(
-                col("opposingTeam")
-            ),
-        ),
-        how="left",
-        on=[
-            col("homeTeamCode") == col("HOME"),
-            col("awayTeamCode") == col("AWAY"),
-            col("gameDate") == col("DATE"),
-        ],
     )
 
     home_silver_games_schedule = silver_games_schedule.filter(
@@ -618,7 +633,7 @@ def merge_games_data():
     for column in columns_to_add:
         playoff_games = playoff_games.withColumn(column, lit(None))
 
-    if playoff_games:
+    if playoff_games.count() > 0:
         print("Adding playoff games to schedule")
         full_season_schedule = regular_season_schedule.unionByName(playoff_games)
     else:
@@ -628,6 +643,7 @@ def merge_games_data():
     full_season_schedule_with_day = get_day_of_week(full_season_schedule, "DATE")
 
     return full_season_schedule_with_day
+
 
 # COMMAND ----------
 
@@ -784,6 +800,7 @@ def merge_games_data():
 # MAGIC #### Aggregations - Gold
 
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_player_stats_v2
 # @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
@@ -1154,7 +1171,9 @@ def aggregate_games_data():
 
     return gold_player_stats
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_game_stats_v2
 @dlt.table(
@@ -1287,7 +1306,9 @@ def window_gold_game_data():
 
     return gold_game_stats
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_merged_stats_v2
 @dlt.table(
@@ -1371,7 +1392,9 @@ def merge_player_game_stats():
 
     return schedule_shots_reordered
 
+
 # COMMAND ----------
+
 
 # DBTITLE 1,gold_model_stats_v2
 @dlt.table(
