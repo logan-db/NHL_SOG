@@ -88,7 +88,7 @@ len(upcoming_games.columns)
 target_col = "player_Total_shotsOnGoal"
 
 preprocess_model_name = "lr_nhl_demo.dev.preprocess_model"
-preprocess_model_version = 3
+preprocess_model_version = 1
 
 preprocess_model_uri=f"models:/{preprocess_model_name}/{preprocess_model_version}"
 preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
@@ -98,14 +98,15 @@ mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
 # COMMAND ----------
 
 # DBTITLE 1,Run preprocess model on
-target_col = "player_Total_shotsOnGoal"
+# target_col = "player_Total_shotsOnGoal"
 
-preprocess_model_name = "lr_nhl_demo.dev.preprocess_model"
-preprocess_model_version = 3
+# preprocess_model_name = "lr_nhl_demo.dev.preprocess_model"
+# preprocess_model_version = 1
 
-preprocess_model_uri=f"models:/{preprocess_model_name}/{preprocess_model_version}"
-preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+# preprocess_model_uri=f"models:/{preprocess_model_name}/{preprocess_model_version}"
+# preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 
+from sklearn import set_config
 set_config(transform_output="pandas")
 
 # Convert df_loaded to Pandas DataFrame
@@ -223,5 +224,4 @@ print("R-squared (R2):", r2)
 display(predict_games_df)
 
 # COMMAND ----------
-
 

@@ -109,9 +109,10 @@ fs.write_table(
 
 # COMMAND ----------
 
+train_model_param = dbutils.widgets.get("train_model_param").lower()
 
-# COMMAND ----------
-# Set training task condition to true/false for next pipeline steps
-dbutils.jobs.taskValues.set(key="train_model", value="true")
-
-# COMMAND ----------
+if train_model_param == "true":
+    # Set training task condition to true/false for next pipeline steps
+    dbutils.jobs.taskValues.set(key="train_model", value="true")
+else:
+    dbutils.jobs.taskValues.set(key="train_model", value="false")

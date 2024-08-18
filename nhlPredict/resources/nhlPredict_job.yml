@@ -13,14 +13,13 @@ resources:
       #     - logan.rupert@databricks.com
 
       tasks:
-        # - task_key: createVols
-        #   # job_cluster_key: job_cluster
-        #   notebook_task:
-        #     notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
+        - task_key: createVols
+          notebook_task:
+            notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
         
         - task_key: ingest_transform_job
-          # depends_on:
-          #     - task_key: createVols
+          depends_on:
+              - task_key: createVols
           pipeline_task:
             pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
             full_refresh: false
@@ -54,8 +53,9 @@ resources:
             - task_key: re_train_model
               outcome: "true"
           notebook_task:
-            notebook_path: ../src/features/Predict_SOG_v2-Manual.ipynb
+            notebook_path: ../src/features/Predict_SOG_v2-Manual.py
             source: WORKSPACE
+          job_cluster_key: LR-ML
             
         - task_key: register_model
           depends_on:
@@ -63,27 +63,32 @@ resources:
           notebook_task:
             notebook_path: ../src/ML/registerModel.py
             source: WORKSPACE
+          job_cluster_key: LR-ML
+
         - task_key: predictSOG
           depends_on:
             - task_key: register_model
             - task_key: re_train_model
               outcome: "false"
           notebook_task:
-            notebook_path: ../src/ML/SOGPredict.py
+            notebook_path: ../src/ML/SOGPredict_v2.py
             source: WORKSPACE
           job_cluster_key: LR-ML
+
         - task_key: BI_Prep
           depends_on:
             - task_key: predictSOG
           notebook_task:
             notebook_path: ../src/BI/05-Prep-Predicton-Data.py
             source: WORKSPACE
+
         - task_key: genie_prep
           depends_on:
             - task_key: predictSOG
           notebook_task:
             notebook_path: ../src/genie/Prep Genie Data.py
             source: WORKSPACE
+            
       job_clusters:
         - job_cluster_key: LR-ML
           new_cluster:
@@ -105,6 +110,8 @@ resources:
       parameters:
         - name: catalog
           default: lr_nhl_demo.dev
+        - name: train_model_param
+          default: false
       environments:
         - environment_key: Default
           spec:

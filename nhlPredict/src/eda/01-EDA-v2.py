@@ -25,6 +25,7 @@ player_game_stats_v2 = spark.table("dev.bronze_player_game_stats_v2")
 bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
 
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
+schedule_2024 = spark.table("dev.2024_25_official_nhl_schedule_by_day")
 silver_games_schedule = spark.table("dev.silver_games_schedule")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
 
@@ -38,6 +39,91 @@ gold_model_data = spark.table("dev.gold_model_stats")
 gold_merged_stats = spark.table("dev.gold_merged_stats")
 gold_merged_stats_v2 = spark.table("dev.gold_merged_stats_v2")
 gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
+
+# COMMAND ----------
+
+display(silver_games_schedule_v2)
+
+# COMMAND ----------
+
+display(schedule_2023)
+
+# COMMAND ----------
+
+nhl_team_city_to_abbreviation = {
+    "Anaheim": "ANA",
+    "Boston": "BOS",
+    "Buffalo": "BUF",
+    "Carolina": "CAR",
+    "Columbus": "CBJ",
+    "Calgary": "CGY",
+    "Chicago": "CHI",
+    "Colorado": "COL",
+    "Dallas": "DAL",
+    "Detroit": "DET",
+    "Edmonton": "EDM",
+    "Florida": "FLA",
+    "Los Angeles": "LAK",
+    "Minnesota": "MIN",
+    "Montreal": "MTL",
+    "New Jersey": "NJD",
+    "Nashville": "NSH",
+    "N.Y. Islanders": "NYI",
+    "N.Y. Rangers": "NYR",
+    "Ottawa": "OTT",
+    "Philadelphia": "PHI",
+    "Pittsburgh": "PIT",
+    "Seattle": "SEA",
+    "San Jose": "SJS",
+    "St. Louis": "STL",
+    "Tampa Bay": "TBL",
+    "Toronto": "TOR",
+    "Vancouver": "VAN",
+    "Vegas": "VGK",
+    "Winnipeg": "WPG",
+    "Washington": "WSH",
+    "Utah": "UTA"
+}
+
+# COMMAND ----------
+
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StringType
+
+# UDF to map city to abbreviation
+def city_to_abbreviation(city_name):
+    return nhl_team_city_to_abbreviation.get(city_name, "Unknown")
+
+city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
+
+# Apply the UDF to the "HOME" column
+schedule_remapped = schedule_2024.withColumn("HOME", city_to_abbreviation_udf("HOME")).withColumn("AWAY", city_to_abbreviation_udf("AWAY")).withColumn("DAY",regexp_replace("DAY", "\\.", ""))
+
+display(schedule_remapped)
+
+# COMMAND ----------
+
+from pyspark.sql.functions import current_date, col
+from pyspark.sql.window import Window
+from pyspark.sql.functions import row_number
+
+
+# Filter rows where DATE is greater than or equal to the current date
+home_schedule_2024 = schedule_2024.filter(col('DATE') >= current_date()).withColumn('TEAM', col('HOME'))
+away_schedule_2024 = schedule_2024.filter(col('DATE') >= current_date()).withColumn('TEAM', col('AWAY'))
+full_schedule_2024 = home_schedule_2024.union(away_schedule_2024)
+
+# Define a window specification
+window_spec = Window.partitionBy('TEAM').orderBy('DATE')
+
+# Add a row number to each row within the partition
+df_with_row_number = full_schedule_2024.withColumn('row_number', row_number().over(window_spec))
+
+# Filter to get only the first row in each partition
+df_result = df_with_row_number.filter(col('row_number') == 1).drop('row_number')
+
+# Show the result
+display(df_result)
 
 # COMMAND ----------
 
@@ -238,9 +324,3 @@ display(gold_model_data_v2.orderBy(desc(col('gameDate'))))
 # COMMAND ----------
 
 display(silver_games_schedule_v2.orderBy(desc("gameDate")))
-
-# COMMAND ----------
-
-# MAGIC %environment
-# MAGIC "client": "1"
-# MAGIC "base_environment": ""

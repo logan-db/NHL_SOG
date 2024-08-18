@@ -74,10 +74,3 @@ clean_prediction.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_dem
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-# MAGIC %environment
-# MAGIC "client": "1"
-# MAGIC "base_environment": ""

@@ -6,7 +6,7 @@ resources:
       target: ${bundle.environment}
       continuous: false
       channel: PREVIEW
-      photon: true
+      photon: false
       libraries:
         - notebook:
             path: ../src/ingestion/01-Ingestion-DLT-v2.py

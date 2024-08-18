@@ -27,6 +27,7 @@ from utils.ingestionHelper import (
     select_rename_game_columns,
     get_day_of_week,
 )
+from utils.nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
 # COMMAND ----------
 
@@ -40,11 +41,6 @@ tmp_base_path = spark.conf.get("tmp_base_path")
 player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
-
-# COMMAND ----------
-
-spark.conf.set("spark.databricks.photon.scan.enabled", "false")
-spark.conf.set("spark.sql.parquet.enableVectorizedReader", "false")
 
 # COMMAND ----------
 
@@ -79,7 +75,6 @@ spark.conf.set("spark.sql.parquet.enableVectorizedReader", "false")
 
 # COMMAND ----------
 
-
 # DBTITLE 1,bronze_skaters_2023_v2
 @dlt.table(
     name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
@@ -109,7 +104,6 @@ def ingest_skaters_data():
 
     return skaters_df
 
-
 # COMMAND ----------
 
 # DBTITLE 1,bronze_lines_2023_v2
@@ -134,7 +128,6 @@ def ingest_skaters_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,bronze_games_historical_v2
 @dlt.table(
     name="bronze_games_historical_v2",
@@ -152,9 +145,7 @@ def ingest_games_data():
         .load(games_file_path)
     )
 
-
 # COMMAND ----------
-
 
 # DBTITLE 1,bronze_schedule_2023_v2
 @dlt.table(
@@ -163,11 +154,18 @@ def ingest_games_data():
 )
 def ingest_schedule_data():
     # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
-    return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
+    return spark.table("lr_nhl_demo.dev.2024_25_official_nhl_schedule_by_day")
 
+
+# @dlt.table(
+#     name="bronze_schedule_2023_v2",
+#     table_properties={"quality": "bronze"},
+# )
+# def ingest_schedule_data():
+#     # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
+#     return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
 # COMMAND ----------
-
 
 # DBTITLE 1,bronze_player_game_stats_v2
 # @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
@@ -265,7 +263,6 @@ def ingest_games_data():
 
     return regular_season_stats.union(playoff_season_stats)
 
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -311,6 +308,59 @@ def ingest_games_data():
 
 # COMMAND ----------
 
+# DBTITLE 1,city_abv_UDF
+# UDF to map city to abbreviation
+def city_to_abbreviation(city_name):
+    return nhl_team_city_to_abbreviation.get(city_name, "Unknown")
+
+
+city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
+
+# COMMAND ----------
+
+# DBTITLE 1,silver_schedule_2023_v2
+@dlt.expect_or_drop("TEAM_ABV is not null", "TEAM_ABV IS NOT NULL")
+@dlt.expect_or_drop("TEAM_ABV is not Unknown", "TEAM_ABV <> 'Unknown'")
+@dlt.expect_or_drop("DATE is not null", "DATE IS NOT NULL")
+@dlt.table(
+    name="silver_schedule_2023_v2",
+    # comment="Raw Ingested NHL data on games from 2008 - Present",
+    table_properties={"quality": "silver"},
+)
+def clean_schedule_data():
+    # Apply the UDF to the "HOME" column
+    schedule_remapped = (
+        dlt.read("bronze_schedule_2023_v2")
+        .withColumn("HOME", city_to_abbreviation_udf("HOME"))
+        .withColumn("AWAY", city_to_abbreviation_udf("AWAY"))
+        .withColumn("DAY", regexp_replace("DAY", "\\.", ""))
+    )
+
+    # Filter rows where DATE is greater than or equal to the current date
+    home_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
+        "TEAM_ABV", col("HOME")
+    )
+    away_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
+        "TEAM_ABV", col("AWAY")
+    )
+    full_schedule = home_schedule.union(away_schedule)
+
+    # Define a window specification
+    window_spec = Window.partitionBy("TEAM_ABV").orderBy("DATE")
+
+    # Add a row number to each row within the partition
+    df_with_row_number = full_schedule.withColumn(
+        "row_number", row_number().over(window_spec)
+    )
+
+    # Filter to get only the first row in each partition
+    df_result = df_with_row_number.filter(col("row_number") == 1).drop(
+        "row_number"
+    )
+
+    return df_result
+
+# COMMAND ----------
 
 # DBTITLE 1,silver_games_historical_v2
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
@@ -453,9 +503,7 @@ def clean_games_data():
 
     return joined_game_stats
 
-
 # COMMAND ----------
-
 
 # DBTITLE 1,silver_games_schedule_v2
 @dlt.table(
@@ -463,8 +511,7 @@ def clean_games_data():
     table_properties={"quality": "silver"},
 )
 def merge_games_data():
-
-    silver_games_schedule = dlt.read("bronze_schedule_2023_v2").join(
+    silver_games_schedule = dlt.read("silver_schedule_2023_v2").drop("TEAM_ABV").join(
         dlt.read("silver_games_historical_v2")
         .withColumn(
             "homeTeamCode",
@@ -581,7 +628,6 @@ def merge_games_data():
     full_season_schedule_with_day = get_day_of_week(full_season_schedule, "DATE")
 
     return full_season_schedule_with_day
-
 
 # COMMAND ----------
 
@@ -739,7 +785,6 @@ def merge_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,gold_player_stats_v2
 # @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 # @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
@@ -749,7 +794,6 @@ def merge_games_data():
     table_properties={"quality": "gold"},
 )
 def aggregate_games_data():
-
     select_cols = [
         "playerId",
         "season",
@@ -873,9 +917,9 @@ def aggregate_games_data():
         )
     ).alias("joined_player_stats")
 
-    # assert player_game_stats_total.count() == joined_player_stats.count(), print(
-    #     f"player_game_stats_total: {player_game_stats_total.count()} does NOT equal joined_player_stats: {joined_player_stats.count()}"
-    # )
+    assert player_game_stats_total.count() == joined_player_stats.count(), print(
+        f"player_game_stats_total: {player_game_stats_total.count()} does NOT equal joined_player_stats: {joined_player_stats.count()}"
+    )
     print("Assert for gold_player_stats_v2 passed")
 
     gold_shots_date = (
@@ -1110,9 +1154,7 @@ def aggregate_games_data():
 
     return gold_player_stats
 
-
 # COMMAND ----------
-
 
 # DBTITLE 1,gold_game_stats_v2
 @dlt.table(
@@ -1121,7 +1163,6 @@ def aggregate_games_data():
     table_properties={"quality": "gold"},
 )
 def window_gold_game_data():
-
     # Define Windows (team last games, and team last matchups)
     windowSpec = Window.partitionBy("playerTeam").orderBy(col("gameDate"))
     last3WindowSpec = windowSpec.rowsBetween(-2, 0)
@@ -1246,9 +1287,7 @@ def window_gold_game_data():
 
     return gold_game_stats
 
-
 # COMMAND ----------
-
 
 # DBTITLE 1,gold_merged_stats_v2
 @dlt.table(
@@ -1257,7 +1296,6 @@ def window_gold_game_data():
     table_properties={"quality": "gold"},
 )
 def merge_player_game_stats():
-
     gold_player_stats = dlt.read("gold_player_stats_v2").alias("gold_player_stats")
     gold_game_stats = dlt.read("gold_game_stats_v2").alias("gold_game_stats")
     # schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
@@ -1333,9 +1371,7 @@ def merge_player_game_stats():
 
     return schedule_shots_reordered
 
-
 # COMMAND ----------
-
 
 # DBTITLE 1,gold_model_stats_v2
 @dlt.table(
@@ -1344,7 +1380,6 @@ def merge_player_game_stats():
     table_properties={"quality": "gold"},
 )
 def make_model_ready():
-
     gold_model_data = dlt.read("gold_merged_stats_v2")
 
     reorder_list = [

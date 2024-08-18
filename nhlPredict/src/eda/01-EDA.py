@@ -1599,4 +1599,3 @@ display(gold_model_data)
 
 # COMMAND ----------
 
-

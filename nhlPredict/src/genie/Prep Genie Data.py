@@ -302,10 +302,3 @@ test_json.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.t
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-# MAGIC %environment
-# MAGIC "client": "1"
-# MAGIC "base_environment": ""
