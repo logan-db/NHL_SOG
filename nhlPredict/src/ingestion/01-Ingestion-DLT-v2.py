@@ -557,7 +557,7 @@ def merge_games_data():
 
     upcoming_final_clean = (
         home_silver_games_schedule.union(away_silver_games_schedule)
-        .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
+        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
         .withColumn(
             "gameDate",
             when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
@@ -610,7 +610,7 @@ def merge_games_data():
                 col("opposingTeam")
             ),
         )
-        .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
+        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
         .withColumn(
             "playerTeam",
             when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
@@ -1112,15 +1112,15 @@ def aggregate_games_data():
         col(c) for c in gold_shots_date_count.columns
     ]  # Start with all existing columns
     player_avg_exprs = {
-        col_name: median(col(col_name)).over(
+        col_name: round(median(col(col_name)).over(
             Window.partitionBy("playerId", "playerTeam")
-        )
+        ), 2)
         for col_name in columns_to_iterate
     }
     playerMatch_avg_exprs = {
-        col_name: median(col(col_name)).over(
+        col_name: round(median(col(col_name)).over(
             Window.partitionBy("playerId", "playerTeam", "opposingTeam")
-        )
+        ), 2)
         for col_name in columns_to_iterate
     }
 
@@ -1130,37 +1130,37 @@ def aggregate_games_data():
         column_exprs += [
             when(
                 col("playerGamesPlayedRolling") > 1,
-                lag(col(column_name)).over(windowSpec),
+                round(lag(col(column_name)).over(windowSpec), 2),
             )
             .otherwise(player_avg)
             .alias(f"previous_{column_name}"),
             when(
                 col("playerGamesPlayedRolling") > 3,
-                avg(col(column_name)).over(last3WindowSpec),
+                round(avg(col(column_name)).over(last3WindowSpec), 2),
             )
-            .otherwise(player_avg)
+            .otherwise(round(player_avg, 2))
             .alias(f"average_{column_name}_last_3_games"),
             when(
                 col("playerGamesPlayedRolling") > 7,
-                avg(col(column_name)).over(last7WindowSpec),
+                round(avg(col(column_name)).over(last7WindowSpec), 2),
             )
             .otherwise(player_avg)
             .alias(f"average_{column_name}_last_7_games"),
             when(
                 col("playerMatchupPlayedRolling") > 1,
-                lag(col(column_name)).over(matchupWindowSpec),
+                round(lag(col(column_name)).over(matchupWindowSpec), 2),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_previous_{column_name}"),
             when(
                 col("playerMatchupPlayedRolling") > 3,
-                avg(col(column_name)).over(matchupLast3WindowSpec),
+                round(avg(col(column_name)).over(matchupLast3WindowSpec), 2),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_average_{column_name}_last_3_games"),
             when(
                 col("playerMatchupPlayedRolling") > 7,
-                avg(col(column_name)).over(matchupLast7WindowSpec),
+                round(avg(col(column_name)).over(matchupLast7WindowSpec), 2),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_average_{column_name}_last_7_games"),
@@ -1244,13 +1244,13 @@ def window_gold_game_data():
         col(c) for c in gold_games_count.columns
     ]  # Start with all existing columns
     game_avg_exprs = {
-        col_name: median(col(col_name)).over(Window.partitionBy("playerTeam"))
+        col_name: round(median(col(col_name)).over(Window.partitionBy("playerTeam")), 2)
         for col_name in columns_to_iterate
     }
     matchup_avg_exprs = {
-        col_name: median(col(col_name)).over(
+        col_name: round(median(col(col_name)).over(
             Window.partitionBy("playerTeam", "opposingTeam")
-        )
+        ), 2)
         for col_name in columns_to_iterate
     }
 
@@ -1260,37 +1260,37 @@ def window_gold_game_data():
         column_exprs += [
             when(
                 col("teamGamesPlayedRolling") > 1,
-                lag(col(column_name)).over(windowSpec),
+                round(lag(col(column_name)).over(windowSpec), 2),
             )
             .otherwise(game_avg)
             .alias(f"previous_{column_name}"),
             when(
                 col("teamGamesPlayedRolling") > 3,
-                avg(col(column_name)).over(last3WindowSpec),
+                round(avg(col(column_name)).over(last3WindowSpec), 2),
             )
             .otherwise(game_avg)
             .alias(f"average_{column_name}_last_3_games"),
             when(
                 col("teamGamesPlayedRolling") > 7,
-                avg(col(column_name)).over(last7WindowSpec),
+                round(avg(col(column_name)).over(last7WindowSpec), 2),
             )
             .otherwise(game_avg)
             .alias(f"average_{column_name}_last_7_games"),
             when(
                 col("teamMatchupPlayedRolling") > 1,
-                lag(col(column_name)).over(matchupWindowSpec),
+                round(lag(col(column_name)).over(matchupWindowSpec), 2),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_previous_{column_name}"),
             when(
                 col("teamMatchupPlayedRolling") > 3,
-                avg(col(column_name)).over(matchupLast3WindowSpec),
+                round(avg(col(column_name)).over(matchupLast3WindowSpec), 2),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_average_{column_name}_last_3_games"),
             when(
                 col("teamMatchupPlayedRolling") > 7,
-                avg(col(column_name)).over(matchupLast7WindowSpec),
+                round(avg(col(column_name)).over(matchupLast7WindowSpec), 2),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_average_{column_name}_last_7_games"),
@@ -1452,7 +1452,7 @@ def make_model_ready():
     # Apply all column expressions at once using select
     gold_model_data = gold_model_data.select(
         *keep_column_exprs,
-        sum(col("player_Total_icetime"))
+        round(sum(col("player_Total_icetime")), 2)
         .over(timeOnIceWindowSpec)
         .alias("rolling_playerTotalTimeOnIceInGame"),
     )

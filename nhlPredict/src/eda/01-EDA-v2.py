@@ -43,6 +43,27 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
+merged_games = gold_player_stats.filter(
+    (col("gameId").isNull())
+    & (col("playerGamesPlayedRolling") > 0)
+    & (col("gameDate") != "2024-01-17")
+)
+
+display(merged_games.orderBy("gameDate", "shooterName"))
+
+# COMMAND ----------
+
+upcoming_games = gold_model_data_v2.filter(
+    (col("gameId").isNull())
+    & (col("playerGamesPlayedRolling") > 0)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("gameDate") != "2024-01-17")
+)
+
+display(upcoming_games.orderBy("gameDate", "shooterName"))
+
+# COMMAND ----------
+
 display(schedule_2023)
 
 # COMMAND ----------
@@ -161,7 +182,7 @@ away_silver_games_schedule = silver_games_schedule.filter(
 
 upcoming_final_clean = (
     home_silver_games_schedule.union(away_silver_games_schedule)
-    .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
+    .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
     .withColumn(
         "gameDate",
         when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
@@ -207,7 +228,7 @@ playoff_games = (
         "awayTeamCode",
         when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
     )
-    .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
+    .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
     .withColumn(
         "playerTeam",
         when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),

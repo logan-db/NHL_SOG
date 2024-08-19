@@ -17,6 +17,14 @@ predictSOG_hist = spark.table("dev.predictSOG_hist_v2")
 
 # COMMAND ----------
 
+display(predictSOG_upcoming.orderBy("gameDate", "shooterName"))
+
+# COMMAND ----------
+
+display(predictSOG_hist.orderBy("gameDate", "shooterName"))
+
+# COMMAND ----------
+
 full_prediction = predictSOG_hist.unionAll(predictSOG_upcoming).orderBy(
     desc("gameDate")
 )
@@ -73,4 +81,5 @@ clean_prediction.count()
 clean_prediction.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
 
 # COMMAND ----------
+
 
