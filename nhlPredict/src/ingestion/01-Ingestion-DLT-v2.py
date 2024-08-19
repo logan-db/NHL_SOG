@@ -75,8 +75,8 @@ one_time_load = spark.conf.get("one_time_load").lower()
 
 # COMMAND ----------
 
-
 # DBTITLE 1,bronze_skaters_2023_v2
+
 @dlt.table(
     name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
 )
@@ -130,8 +130,8 @@ def ingest_skaters_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,bronze_games_historical_v2
+
 @dlt.table(
     name="bronze_games_historical_v2",
     comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -151,8 +151,8 @@ def ingest_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,bronze_schedule_2023_v2
+
 @dlt.table(
     name="bronze_schedule_2023_v2",
     table_properties={"quality": "bronze"},
@@ -172,8 +172,8 @@ def ingest_schedule_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,bronze_player_game_stats_v2
+
 # @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
 # @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
 # @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
@@ -194,7 +194,7 @@ def ingest_games_data():
         playoff_teams_list = (
             dlt.read("bronze_games_historical_v2")
             .select("team")
-            .filter((col("playoffGame") == 1) & (col("season") == 2023))
+            .filter((col("playoffGame") == 1) & (col("season").isin([2023, 2024]))
             .distinct()
             .collect()
         )
@@ -243,7 +243,7 @@ def ingest_games_data():
             .option("header", "true")
             .option("inferSchema", "true")
             .load(regular_season_stats_path)
-        ).filter(col("season") == 2023)
+        ).filter(col("season").isin([2023, 2024]))
     else:
         print("No CSV files found for Regular Season. Skipping...")
         regular_season_stats = (
@@ -258,7 +258,7 @@ def ingest_games_data():
             .option("header", "true")
             .option("inferSchema", "true")
             .load(playoff_season_stats_path)
-        ).filter(col("season") == 2023)
+        ).filter(col("season").isin([2023, 2024])
     else:
         print("No CSV files found for Playoffs. Skipping...")
         playoff_season_stats = (
@@ -315,8 +315,8 @@ def ingest_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,city_abv_UDF
+
 # UDF to map city to abbreviation
 def city_to_abbreviation(city_name):
     return nhl_team_city_to_abbreviation.get(city_name, "Unknown")
@@ -326,8 +326,8 @@ city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
 
 # COMMAND ----------
 
-
 # DBTITLE 1,silver_schedule_2023_v2
+
 @dlt.expect_or_drop("TEAM_ABV is not null", "TEAM_ABV IS NOT NULL")
 @dlt.expect_or_drop("TEAM_ABV is not Unknown", "TEAM_ABV <> 'Unknown'")
 @dlt.expect_or_drop("DATE is not null", "DATE IS NOT NULL")
@@ -370,8 +370,8 @@ def clean_schedule_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,silver_games_historical_v2
+
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 @dlt.table(
     name="silver_games_historical_v2",
@@ -515,8 +515,8 @@ def clean_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,silver_games_schedule_v2
+
 @dlt.table(
     name="silver_games_schedule_v2",
     table_properties={"quality": "silver"},
@@ -557,7 +557,7 @@ def merge_games_data():
 
     upcoming_final_clean = (
         home_silver_games_schedule.union(away_silver_games_schedule)
-        .withColumn("season", lit(2023))
+        .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
         .withColumn(
             "gameDate",
             when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
@@ -610,7 +610,7 @@ def merge_games_data():
                 col("opposingTeam")
             ),
         )
-        .withColumn("season", lit(2023))
+        .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
         .withColumn(
             "playerTeam",
             when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
@@ -801,8 +801,8 @@ def merge_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,gold_player_stats_v2
+
 # @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 # @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
@@ -1174,8 +1174,8 @@ def aggregate_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,gold_game_stats_v2
+
 @dlt.table(
     name="gold_game_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -1309,8 +1309,8 @@ def window_gold_game_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,gold_merged_stats_v2
+
 @dlt.table(
     name="gold_merged_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -1395,8 +1395,8 @@ def merge_player_game_stats():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,gold_model_stats_v2
+
 @dlt.table(
     name="gold_model_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",

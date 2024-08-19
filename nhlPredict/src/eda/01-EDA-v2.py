@@ -43,110 +43,6 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
-silver_games_schedule = silver_schedule_2023_v2.drop("TEAM_ABV").join(
-    silver_games_historical_v2.withColumn(
-        "homeTeamCode",
-        when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
-    ).withColumn(
-        "awayTeamCode",
-        when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
-    ),
-    how="outer",
-    on=[
-        col("homeTeamCode") == col("HOME"),
-        col("awayTeamCode") == col("AWAY"),
-        col("gameDate") == col("DATE"),
-    ],
-)
-
-home_silver_games_schedule = silver_games_schedule.filter(
-    col("gameId").isNull()
-).withColumn("team", col("HOME"))
-away_silver_games_schedule = silver_games_schedule.filter(
-    col("gameId").isNull()
-).withColumn("team", col("AWAY"))
-
-upcoming_final_clean = (
-    home_silver_games_schedule.union(away_silver_games_schedule)
-    .withColumn("season", lit(2023))
-    .withColumn(
-        "gameDate",
-        when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
-    )
-    .withColumn(
-        "playerTeam",
-        when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
-    )
-    .withColumn(
-        "opposingTeam",
-        when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME")),
-    )
-    .withColumn(
-        "home_or_away",
-        when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY")),
-    )
-)
-
-regular_season_schedule = (
-    silver_games_schedule.filter(col("gameId").isNotNull())
-    .unionAll(upcoming_final_clean)
-    .orderBy(desc("DATE"))
-)
-
-max_reg_season_date = (
-    regular_season_schedule.filter(col("gameId").isNotNull())
-    .select(max("gameDate"))
-    .first()[0]
-)
-print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
-
-playoff_games = (
-    silver_games_historical_v2.filter(col("gameDate") > max_reg_season_date)
-    .withColumn(
-        "DATE",
-        col("gameDate"),
-    )
-    .withColumn(
-        "homeTeamCode",
-        when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
-    )
-    .withColumn(
-        "awayTeamCode",
-        when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
-    )
-    .withColumn("season", lit(2023))
-    .withColumn(
-        "playerTeam",
-        when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
-    )
-    .withColumn(
-        "HOME",
-        when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(
-            col("opposingTeam")
-        ),
-    )
-    .withColumn(
-        "AWAY",
-        when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(
-            col("opposingTeam")
-        ),
-    )
-)
-
-columns_to_add = ["DAY", "EASTERN", "LOCAL"]
-for column in columns_to_add:
-    playoff_games = playoff_games.withColumn(column, lit(None))
-
-if playoff_games.count() > 0:
-    print("Adding playoff games to schedule")
-    full_season_schedule = regular_season_schedule.unionByName(playoff_games)
-else:
-    full_season_schedule = regular_season_schedule
-
-display(full_season_schedule)
-
-# COMMAND ----------
-
 display(schedule_2023)
 
 # COMMAND ----------
@@ -216,16 +112,16 @@ from pyspark.sql.functions import row_number
 
 
 # Filter rows where DATE is greater than or equal to the current date
-home_schedule_2024 = schedule_2024.filter(col("DATE") >= current_date()).withColumn(
-    "TEAM", col("HOME")
+home_schedule_2024 = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
+    "TEAM_ABV", col("HOME")
 )
-away_schedule_2024 = schedule_2024.filter(col("DATE") >= current_date()).withColumn(
-    "TEAM", col("AWAY")
+away_schedule_2024 = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
+    "TEAM_ABV", col("AWAY")
 )
 full_schedule_2024 = home_schedule_2024.union(away_schedule_2024)
 
 # Define a window specification
-window_spec = Window.partitionBy("TEAM").orderBy("DATE")
+window_spec = Window.partitionBy("TEAM_ABV").orderBy("DATE")
 
 # Add a row number to each row within the partition
 df_with_row_number = full_schedule_2024.withColumn(
@@ -233,17 +129,121 @@ df_with_row_number = full_schedule_2024.withColumn(
 )
 
 # Filter to get only the first row in each partition
-df_result = df_with_row_number.filter(col("row_number") == 1).drop("row_number")
+schedule_next_game = df_with_row_number.filter(col("row_number") == 1).drop("row_number")
 
 # Show the result
-display(df_result)
+display(schedule_next_game)
 
 # COMMAND ----------
 
-spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.delta_player_game_stats_v2")
-player_game_stats_v2.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.delta_player_game_stats_v2"
+silver_games_schedule = schedule_next_game.drop("TEAM_ABV").join(
+    silver_games_historical_v2.withColumn(
+        "homeTeamCode",
+        when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
+    ).withColumn(
+        "awayTeamCode",
+        when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
+    ),
+    how="outer",
+    on=[
+        col("homeTeamCode") == col("HOME"),
+        col("awayTeamCode") == col("AWAY"),
+        col("gameDate") == col("DATE"),
+    ],
 )
+
+home_silver_games_schedule = silver_games_schedule.filter(
+    col("gameId").isNull()
+).withColumn("team", col("HOME"))
+away_silver_games_schedule = silver_games_schedule.filter(
+    col("gameId").isNull()
+).withColumn("team", col("AWAY"))
+
+upcoming_final_clean = (
+    home_silver_games_schedule.union(away_silver_games_schedule)
+    .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
+    .withColumn(
+        "gameDate",
+        when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
+    )
+    .withColumn(
+        "playerTeam",
+        when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
+    )
+    .withColumn(
+        "opposingTeam",
+        when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME")),
+    )
+    .withColumn(
+        "home_or_away",
+        when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY")),
+    )
+)
+
+regular_season_schedule = (
+    silver_games_schedule.filter(col("gameId").isNotNull())
+    .unionAll(upcoming_final_clean)
+    .orderBy(desc("DATE"))
+)
+
+max_reg_season_date = (
+    regular_season_schedule.filter(col("gameId").isNotNull())
+    .select(max("gameDate"))
+    .first()[0]
+)
+print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
+
+playoff_games = (
+    silver_games_historical_v2.filter(col("gameDate") > max_reg_season_date)
+    .withColumn(
+        "DATE",
+        col("gameDate"),
+    )
+    .withColumn(
+        "homeTeamCode",
+        when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
+    )
+    .withColumn(
+        "awayTeamCode",
+        when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
+    )
+    .withColumn("season", when(col("gameDate") < to_date(lit("2024-10-12")), lit(2023)).otherwise(lit(2024)))
+    .withColumn(
+        "playerTeam",
+        when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
+    )
+    .withColumn(
+        "HOME",
+        when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(
+            col("opposingTeam")
+        ),
+    )
+    .withColumn(
+        "AWAY",
+        when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(
+            col("opposingTeam")
+        ),
+    )
+)
+
+columns_to_add = ["DAY", "EASTERN", "LOCAL"]
+for column in columns_to_add:
+    playoff_games = playoff_games.withColumn(column, lit(None))
+
+if playoff_games.count() > 0:
+    print("Adding playoff games to schedule")
+    full_season_schedule = regular_season_schedule.unionByName(playoff_games)
+else:
+    full_season_schedule = regular_season_schedule
+
+display(full_season_schedule.orderBy(desc("gameDate"), "team"))
+
+# COMMAND ----------
+
+# spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.delta_player_game_stats_v2")
+# player_game_stats_v2.write.format("delta").mode("overwrite").saveAsTable(
+#     "lr_nhl_demo.dev.delta_player_game_stats_v2"
+# )
 
 # COMMAND ----------
 
