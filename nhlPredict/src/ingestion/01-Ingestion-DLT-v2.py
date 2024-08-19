@@ -194,7 +194,7 @@ def ingest_games_data():
         playoff_teams_list = (
             dlt.read("bronze_games_historical_v2")
             .select("team")
-            .filter((col("playoffGame") == 1) & (col("season").isin([2023, 2024]))
+            .filter((col("playoffGame") == 1) & (col("season").isin([2023, 2024])))
             .distinct()
             .collect()
         )
@@ -249,7 +249,7 @@ def ingest_games_data():
         regular_season_stats = (
             spark.read.format("csv")
             .options(header="true")
-            .load("/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv")
+            .load("/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv") # fix this to not be static file
         )
 
     if playoff_csv_files:
@@ -258,7 +258,7 @@ def ingest_games_data():
             .option("header", "true")
             .option("inferSchema", "true")
             .load(playoff_season_stats_path)
-        ).filter(col("season").isin([2023, 2024])
+        ).filter(col("season").isin([2023, 2024]))
     else:
         print("No CSV files found for Playoffs. Skipping...")
         playoff_season_stats = (
@@ -803,8 +803,7 @@ def merge_games_data():
 
 # DBTITLE 1,gold_player_stats_v2
 
-# @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
-# @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
+@dlt.expect_or_fail("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
     name="gold_player_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -969,7 +968,12 @@ def aggregate_games_data():
         .select("playerId", "season", "team", "name")
         .filter(col("situation") == "all")
         .distinct()
-    )
+        .unionByName(
+            dlt.read("bronze_skaters_2023_v2").select("playerId", "season", "team", "name")
+            .filter(col("situation") == "all")
+            .withColumn("season", lit(2024))
+            .distinct()
+        ))
 
     player_game_index_2023 = (
         dlt.read("silver_games_schedule_v2")
@@ -1452,8 +1456,8 @@ def make_model_ready():
     # Apply all column expressions at once using select
     gold_model_data = gold_model_data.select(
         *keep_column_exprs,
-        round(sum(col("player_Total_icetime")), 2)
-        .over(timeOnIceWindowSpec)
+        round(sum(col("player_Total_icetime"))
+        .over(timeOnIceWindowSpec), 2)
         .alias("rolling_playerTotalTimeOnIceInGame"),
     )
 

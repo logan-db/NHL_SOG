@@ -16,7 +16,7 @@ from pyspark.sql.functions import *
 
 teams_2023 = spark.table("dev.bronze_teams_2023")
 shots_2023 = spark.table("dev.bronze_shots_2023")
-skaters_2023 = spark.table("dev.bronze_skaters_2023")
+skaters_2023 = spark.table("dev.bronze_skaters_2023_v2")
 lines_2023 = spark.table("dev.bronze_lines_2023")
 games = spark.table("dev.bronze_games_historical")
 games_v2 = spark.table("dev.bronze_games_historical_v2")
@@ -43,24 +43,54 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
-merged_games = gold_player_stats.filter(
-    (col("gameId").isNull())
-    & (col("playerGamesPlayedRolling") > 0)
-    & (col("gameDate") != "2024-01-17")
-)
+# Checking for uniqueness of gameId and shooterName in gold_model_data_v2
+unique_check = gold_model_data_v2.groupBy("gameId", "shooterName").agg(count("*").alias("count")).filter("count > 1")
 
-display(merged_games.orderBy("gameDate", "shooterName"))
+display(unique_check)
+
+# Assert that there are no duplicate records
+assert unique_check.count() == 0, f"{unique_check.count()} Duplicate records found in gold_model_data_v2"
 
 # COMMAND ----------
 
 upcoming_games = gold_model_data_v2.filter(
     (col("gameId").isNull())
-    & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    # & (col("playerGamesPlayedRolling") > 0)
+    # & (col("rolling_playerTotalTimeOnIceInGame") > 180)
     & (col("gameDate") != "2024-01-17")
 )
 
 display(upcoming_games.orderBy("gameDate", "shooterName"))
+
+# COMMAND ----------
+
+player_index_2023 = (skaters_2023
+        .select("playerId", "season", "team", "name")
+        .filter(col("situation") == "all")
+        .unionByName(
+            skaters_2023.select("playerId", "season", "team", "name")
+            .filter(col("situation") == "all")
+            .withColumn("season", lit(2024))
+            .distinct()
+        ))
+
+test = (silver_games_schedule_v2
+ .select(
+            "team",
+            "gameId",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        )
+        .join(player_index_2023, how="left", on=["team", "season"])
+        .select("team", "playerId", "season", "name")
+        .distinct()
+        .withColumnRenamed("name", "shooterName")
+    ).alias("player_game_index_2023")
+
+display(test.orderBy(desc('season')))
 
 # COMMAND ----------
 
