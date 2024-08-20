@@ -12,12 +12,11 @@
 # DBTITLE 1,Imports
 # Imports
 import dlt
-
 import sys
-
 sys.path.append(spark.conf.get("bundle.sourcePath", "."))
 
 import glob
+from datetime import date
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql import DataFrame
@@ -41,6 +40,7 @@ tmp_base_path = spark.conf.get("tmp_base_path")
 player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
+season_list = spark.conf.get("season_list")
 
 # COMMAND ----------
 
@@ -243,7 +243,7 @@ def ingest_games_data():
             .option("header", "true")
             .option("inferSchema", "true")
             .load(regular_season_stats_path)
-        ).filter(col("season").isin([2023, 2024]))
+        ).filter(col("season").isin(season_list))
     else:
         print("No CSV files found for Regular Season. Skipping...")
         regular_season_stats = (
@@ -258,7 +258,7 @@ def ingest_games_data():
             .option("header", "true")
             .option("inferSchema", "true")
             .load(playoff_season_stats_path)
-        ).filter(col("season").isin([2023, 2024]))
+        ).filter(col("season").isin(season_list))
     else:
         print("No CSV files found for Playoffs. Skipping...")
         playoff_season_stats = (
@@ -442,28 +442,28 @@ def clean_games_data():
         select_game_cols,
         "game_Total_",
         "all",
-        2023,
+        season_list,
     )
     game_stats_pp = select_rename_game_columns(
         dlt.read("bronze_games_historical_v2"),
         select_game_cols,
         "game_PP_",
         "5on4",
-        2023,
+        season_list,
     )
     game_stats_pk = select_rename_game_columns(
         dlt.read("bronze_games_historical_v2"),
         select_game_cols,
         "game_PK_",
         "4on5",
-        2023,
+        season_list,
     )
     game_stats_ev = select_rename_game_columns(
         dlt.read("bronze_games_historical_v2"),
         select_game_cols,
         "game_EV_",
         "5on5",
-        2023,
+        season_list,
     )
 
     joined_game_stats = (
@@ -557,7 +557,7 @@ def merge_games_data():
 
     upcoming_final_clean = (
         home_silver_games_schedule.union(away_silver_games_schedule)
-        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
+        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024))) # change this when adding previous seasons
         .withColumn(
             "gameDate",
             when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
@@ -610,7 +610,7 @@ def merge_games_data():
                 col("opposingTeam")
             ),
         )
-        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
+        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024))) # change this when adding previous seasons
         .withColumn(
             "playerTeam",
             when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
@@ -873,16 +873,15 @@ def aggregate_games_data():
         select_cols,
         "player_Total_",
         "all",
-        2023,
     )
     player_game_stats_pp = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4"
     )
     player_game_stats_pk = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PK_", "4on5", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PK_", "4on5"
     )
     player_game_stats_ev = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_EV_", "5on5", 2023
+        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_EV_", "5on5"
     )
 
     joined_player_stats = (
@@ -963,17 +962,28 @@ def aggregate_games_data():
         )
     )
 
-    player_index_2023 = (
-        dlt.read("bronze_skaters_2023_v2")
-        .select("playerId", "season", "team", "name")
-        .filter(col("situation") == "all")
-        .distinct()
-        .unionByName(
-            dlt.read("bronze_skaters_2023_v2").select("playerId", "season", "team", "name")
+    # Convert current_date to datetime.date object
+    current_date = date.today()
+
+    if current_date <= dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]:
+        player_index_2023 = (
+            dlt.read("bronze_skaters_2023_v2")
+            .select("playerId", "season", "team", "name")
             .filter(col("situation") == "all")
-            .withColumn("season", lit(2024))
             .distinct()
-        ))
+            .unionByName(
+                dlt.read("bronze_skaters_2023_v2").select("playerId", "season", "team", "name")
+                .filter(col("situation") == "all")
+                .withColumn("season", lit(2024))
+                .distinct()
+            ))
+    else:
+        player_index_2023 = (
+            dlt.read("bronze_skaters_2023_v2")
+            .select("playerId", "season", "team", "name")
+            .filter(col("situation") == "all")
+            .distinct()
+        )
 
     player_game_index_2023 = (
         dlt.read("silver_games_schedule_v2")
@@ -1048,9 +1058,6 @@ def aggregate_games_data():
         )
         .drop("index_season", "index_team", "index_shooterName", "index_playerId")
     )
-
-    #        .withColumn("isHome", when(col("playerTeam") == col("HOME"), lit(1)).otherwise(lit(0))) \
-    #        .withColumn("isPlayoffGame", lit(0))
 
     # Define Windows (player last games, and players last matchups)
     windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(
@@ -1359,7 +1366,7 @@ def merge_player_game_stats():
         .withColumn(
             "isPlayoffGame",
             when(
-                (col("season") == 2023) & (col("gameDate") < "04-19-2024"), lit(0)
+                (col("season") == 2023) & (col("gameDate") < "04-19-2024"), lit(0) # change this when adding previous seasons
             ).otherwise(lit(1)),
         )
     )

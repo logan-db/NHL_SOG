@@ -44,7 +44,7 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 # COMMAND ----------
 
 # Checking for uniqueness of gameId and shooterName in gold_model_data_v2
-unique_check = gold_model_data_v2.groupBy("gameId", "shooterName").agg(count("*").alias("count")).filter("count > 1")
+unique_check = gold_model_data_v2.groupBy("gameId", "shooterName", "season").agg(count("*").alias("count")).filter("count > 1")
 
 display(unique_check)
 
@@ -64,15 +64,26 @@ display(upcoming_games.orderBy("gameDate", "shooterName"))
 
 # COMMAND ----------
 
-player_index_2023 = (skaters_2023
-        .select("playerId", "season", "team", "name")
-        .filter(col("situation") == "all")
-        .unionByName(
-            skaters_2023.select("playerId", "season", "team", "name")
+from datetime import date
+
+# Convert current_date to datetime.date object
+current_date = date.today()
+
+if current_date <= schedule_2024.select(min("DATE")).first()[0]:
+    player_index_2023 = (skaters_2023
+            .select("playerId", "season", "team", "name")
             .filter(col("situation") == "all")
-            .withColumn("season", lit(2024))
-            .distinct()
-        ))
+            .unionByName(
+                skaters_2023.select("playerId", "season", "team", "name")
+                .filter(col("situation") == "all")
+                .withColumn("season", lit(2024))
+                .distinct()
+            ))
+else:
+    player_index_2023 = (skaters_2023
+            .select("playerId", "season", "team", "name")
+            .filter(col("situation") == "all")
+    )
 
 test = (silver_games_schedule_v2
  .select(
@@ -92,9 +103,17 @@ test = (silver_games_schedule_v2
 
 display(test.orderBy(desc('season')))
 
+# Checking for uniqueness of gameId and shooterName in gold_model_data_v2
+unique_test_check = test.groupBy("playerId", "shooterName", "season").agg(count("*").alias("count")).filter("count > 1")
+
+display(unique_test_check)
+
+# Assert that there are no duplicate records
+assert unique_test_check.count() == 0, f"{unique_test_check.count()} Duplicate records found in unique_test_check"
+
 # COMMAND ----------
 
-display(schedule_2023)
+display(schedule_2024)
 
 # COMMAND ----------
 

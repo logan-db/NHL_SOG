@@ -71,7 +71,7 @@ def download_unzip_and_save_as_table(url, tmp_base_path, table_name, file_format
 
 
 def select_rename_columns(
-    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str
 ) -> DataFrame:
     """
     Selects and renames columns of a DataFrame based on input criteria.
@@ -81,14 +81,13 @@ def select_rename_columns(
         select_cols (list): A list of column names to select.
         col_abrev (str): An abbreviation to add as a prefix to the column names.
         situation (str): The situation criteria for filtering the DataFrame.
-        season (int, optional): The season for filtering the DataFrame (default: 2023).
 
     Returns:
         DataFrame: The modified DataFrame with selected and renamed columns.
     """
 
     df_filtered = (
-        df.filter((col("season") == season) & (col("situation") == situation))
+        df.filter(col("situation") == situation)
         .select(select_cols)
         .withColumn("gameDate", col("gameDate").cast("string"))
         .withColumn("gameDate", regexp_replace("gameDate", "\\.0$", ""))
@@ -122,7 +121,7 @@ def select_rename_columns(
 
 
 def select_rename_game_columns(
-    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: int = 2023
+    df: DataFrame, select_cols: list, col_abrev: str, situation: str, season: list = [2023, 2024]
 ) -> DataFrame:
     """
     Selects and renames columns of a DataFrame (excluding 'name' and 'position' columns) based on input criteria.
@@ -132,14 +131,14 @@ def select_rename_game_columns(
         select_cols (list): A list of column names to select.
         col_abrev (str): An abbreviation to add as a prefix to the column names.
         situation (str): The situation criteria for filtering the DataFrame.
-        season (int, optional): The season for filtering the DataFrame (default: 2023).
+        season (list, optional): The season for filtering the DataFrame (default: [2023, 2024]).
 
     Returns:
         DataFrame: The modified DataFrame with selected and renamed columns.
     """
 
     df_filtered = (
-        df.filter((col("season") == season) & (col("situation") == situation))
+        df.filter((col("season").isin(season)) & (col("situation") == situation))
         .select(select_cols)
         .drop("name", "position")
         .withColumn("gameDate", col("gameDate").cast("string"))
