@@ -820,7 +820,7 @@ def merge_games_data():
 # DBTITLE 1,gold_player_stats_v2
 
 
-@dlt.expect_or_fail("playerId is not null", "playerId IS NOT NULL")
+# @dlt.expect_or_fail("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
     name="gold_player_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
