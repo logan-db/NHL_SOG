@@ -13,6 +13,7 @@
 # Imports
 import dlt
 import sys
+
 sys.path.append(spark.conf.get("bundle.sourcePath", "."))
 
 import glob
@@ -40,8 +41,7 @@ tmp_base_path = spark.conf.get("tmp_base_path")
 player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
-season_list = spark.conf.get("season_list")
-
+season_list = [2023, 2024]
 # COMMAND ----------
 
 # MAGIC %md
@@ -76,6 +76,7 @@ season_list = spark.conf.get("season_list")
 # COMMAND ----------
 
 # DBTITLE 1,bronze_skaters_2023_v2
+
 
 @dlt.table(
     name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
@@ -132,6 +133,7 @@ def ingest_skaters_data():
 
 # DBTITLE 1,bronze_games_historical_v2
 
+
 @dlt.table(
     name="bronze_games_historical_v2",
     comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -153,6 +155,7 @@ def ingest_games_data():
 
 # DBTITLE 1,bronze_schedule_2023_v2
 
+
 @dlt.table(
     name="bronze_schedule_2023_v2",
     table_properties={"quality": "bronze"},
@@ -173,6 +176,7 @@ def ingest_schedule_data():
 # COMMAND ----------
 
 # DBTITLE 1,bronze_player_game_stats_v2
+
 
 # @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
 # @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
@@ -249,7 +253,9 @@ def ingest_games_data():
         regular_season_stats = (
             spark.read.format("csv")
             .options(header="true")
-            .load("/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv") # fix this to not be static file
+            .load(
+                "/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv"
+            )  # fix this to not be static file
         )
 
     if playoff_csv_files:
@@ -317,6 +323,7 @@ def ingest_games_data():
 
 # DBTITLE 1,city_abv_UDF
 
+
 # UDF to map city to abbreviation
 def city_to_abbreviation(city_name):
     return nhl_team_city_to_abbreviation.get(city_name, "Unknown")
@@ -327,6 +334,7 @@ city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
 # COMMAND ----------
 
 # DBTITLE 1,silver_schedule_2023_v2
+
 
 @dlt.expect_or_drop("TEAM_ABV is not null", "TEAM_ABV IS NOT NULL")
 @dlt.expect_or_drop("TEAM_ABV is not Unknown", "TEAM_ABV <> 'Unknown'")
@@ -371,6 +379,7 @@ def clean_schedule_data():
 # COMMAND ----------
 
 # DBTITLE 1,silver_games_historical_v2
+
 
 @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 @dlt.table(
@@ -517,6 +526,7 @@ def clean_games_data():
 
 # DBTITLE 1,silver_games_schedule_v2
 
+
 @dlt.table(
     name="silver_games_schedule_v2",
     table_properties={"quality": "silver"},
@@ -557,7 +567,10 @@ def merge_games_data():
 
     upcoming_final_clean = (
         home_silver_games_schedule.union(away_silver_games_schedule)
-        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024))) # change this when adding previous seasons
+        .withColumn(
+            "season",
+            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)),
+        )  # change this when adding previous seasons
         .withColumn(
             "gameDate",
             when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
@@ -610,7 +623,10 @@ def merge_games_data():
                 col("opposingTeam")
             ),
         )
-        .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024))) # change this when adding previous seasons
+        .withColumn(
+            "season",
+            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)),
+        )  # change this when adding previous seasons
         .withColumn(
             "playerTeam",
             when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
@@ -803,6 +819,7 @@ def merge_games_data():
 
 # DBTITLE 1,gold_player_stats_v2
 
+
 @dlt.expect_or_fail("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
     name="gold_player_stats_v2",
@@ -965,18 +982,24 @@ def aggregate_games_data():
     # Convert current_date to datetime.date object
     current_date = date.today()
 
-    if current_date <= dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]:
+    if (
+        current_date
+        <= date(2024, 10, 4)
+        # <= dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]
+    ):
         player_index_2023 = (
             dlt.read("bronze_skaters_2023_v2")
             .select("playerId", "season", "team", "name")
             .filter(col("situation") == "all")
             .distinct()
             .unionByName(
-                dlt.read("bronze_skaters_2023_v2").select("playerId", "season", "team", "name")
+                dlt.read("bronze_skaters_2023_v2")
+                .select("playerId", "season", "team", "name")
                 .filter(col("situation") == "all")
                 .withColumn("season", lit(2024))
                 .distinct()
-            ))
+            )
+        )
     else:
         player_index_2023 = (
             dlt.read("bronze_skaters_2023_v2")
@@ -1123,15 +1146,18 @@ def aggregate_games_data():
         col(c) for c in gold_shots_date_count.columns
     ]  # Start with all existing columns
     player_avg_exprs = {
-        col_name: round(median(col(col_name)).over(
-            Window.partitionBy("playerId", "playerTeam")
-        ), 2)
+        col_name: round(
+            median(col(col_name)).over(Window.partitionBy("playerId", "playerTeam")), 2
+        )
         for col_name in columns_to_iterate
     }
     playerMatch_avg_exprs = {
-        col_name: round(median(col(col_name)).over(
-            Window.partitionBy("playerId", "playerTeam", "opposingTeam")
-        ), 2)
+        col_name: round(
+            median(col(col_name)).over(
+                Window.partitionBy("playerId", "playerTeam", "opposingTeam")
+            ),
+            2,
+        )
         for col_name in columns_to_iterate
     }
 
@@ -1186,6 +1212,7 @@ def aggregate_games_data():
 # COMMAND ----------
 
 # DBTITLE 1,gold_game_stats_v2
+
 
 @dlt.table(
     name="gold_game_stats_v2",
@@ -1259,9 +1286,12 @@ def window_gold_game_data():
         for col_name in columns_to_iterate
     }
     matchup_avg_exprs = {
-        col_name: round(median(col(col_name)).over(
-            Window.partitionBy("playerTeam", "opposingTeam")
-        ), 2)
+        col_name: round(
+            median(col(col_name)).over(
+                Window.partitionBy("playerTeam", "opposingTeam")
+            ),
+            2,
+        )
         for col_name in columns_to_iterate
     }
 
@@ -1322,6 +1352,7 @@ def window_gold_game_data():
 
 # DBTITLE 1,gold_merged_stats_v2
 
+
 @dlt.table(
     name="gold_merged_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -1366,7 +1397,8 @@ def merge_player_game_stats():
         .withColumn(
             "isPlayoffGame",
             when(
-                (col("season") == 2023) & (col("gameDate") < "04-19-2024"), lit(0) # change this when adding previous seasons
+                (col("season") == 2023) & (col("gameDate") < "04-19-2024"),
+                lit(0),  # change this when adding previous seasons
             ).otherwise(lit(1)),
         )
     )
@@ -1407,6 +1439,7 @@ def merge_player_game_stats():
 # COMMAND ----------
 
 # DBTITLE 1,gold_model_stats_v2
+
 
 @dlt.table(
     name="gold_model_stats_v2",
@@ -1463,9 +1496,9 @@ def make_model_ready():
     # Apply all column expressions at once using select
     gold_model_data = gold_model_data.select(
         *keep_column_exprs,
-        round(sum(col("player_Total_icetime"))
-        .over(timeOnIceWindowSpec), 2)
-        .alias("rolling_playerTotalTimeOnIceInGame"),
+        round(sum(col("player_Total_icetime")).over(timeOnIceWindowSpec), 2).alias(
+            "rolling_playerTotalTimeOnIceInGame"
+        ),
     )
 
     return gold_model_data

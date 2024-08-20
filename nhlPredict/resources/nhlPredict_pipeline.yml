@@ -20,5 +20,7 @@ resources:
         games_download_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv
         player_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/regular/skaters/
         one_time_load: true
-        season_list: [2023, 2024]
+        # season_list:
+        #   - 2023
+        #   - 2024
         player_playoff_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/playoffs/skaters/
