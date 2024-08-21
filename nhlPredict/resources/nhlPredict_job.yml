@@ -53,7 +53,7 @@ resources:
             - task_key: re_train_model
               outcome: "true"
           notebook_task:
-            notebook_path: ../src/features/Predict_SOG_v2-Manual.py
+            notebook_path: ../src/ML/model_training/Predict_SOG_v2-Manual.py
             source: WORKSPACE
           job_cluster_key: LR-ML
             

@@ -253,7 +253,6 @@ print("Root Mean Squared Error (RMSE):", rmse)
 print("Mean Absolute Error (MAE):", mae)
 print("R-squared (R2):", r2)
 
-
 # Mean Squared Error (MSE): 0.7850475988527374
 # Root Mean Squared Error (RMSE): 0.7850475988527374
 # Mean Absolute Error (MAE): 0.5529505596528552
