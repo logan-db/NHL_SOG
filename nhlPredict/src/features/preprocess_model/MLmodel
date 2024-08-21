@@ -10,7 +10,7 @@ flavors:
     python_version: 3.11.0
 mlflow_version: 2.11.3
 model_size_bytes: 3383866
-model_uuid: 6d6eb7cc13094f4792b8e85d48c3693c
+model_uuid: fe0dc884bc7d4b49ae74d7115ddfd8f2
 saved_input_example_info:
   artifact_path: input_example.json
   pandas_orient: split
@@ -2143,4 +2143,4 @@ signature:
     "required": true}, {"type": "double", "name": "indexer__previous_opposingTeam",
     "required": true}]'
   params: null
-utc_time_created: '2024-08-21 16:27:55.476355'
+utc_time_created: '2024-08-21 17:46:57.479519'
