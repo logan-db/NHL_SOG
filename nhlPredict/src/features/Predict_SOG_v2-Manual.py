@@ -9,7 +9,6 @@
 # COMMAND ----------
 
 import mlflow
-import databricks.automl_runtime
 
 target_col = "player_Total_shotsOnGoal"
 time_col = "gameDate"
@@ -21,8 +20,6 @@ time_col = "gameDate"
 
 # COMMAND ----------
 
-import os
-import uuid
 import shutil
 import pandas as pd
 
@@ -63,9 +60,16 @@ display(df_loaded.head(5))
 
 # COMMAND ----------
 
-from pyspark.sql.types import StringType
-
-cols_to_remove = ["DAY", "HOME", "AWAY", "gameId", "playerId", "shooterName", "home_or_away", time_col]
+cols_to_remove = [
+    "DAY",
+    "HOME",
+    "AWAY",
+    "gameId",
+    "playerId",
+    "shooterName",
+    "home_or_away",
+    time_col,
+]
 
 # Identify numerical and categorical columns
 numerical_cols = [
@@ -128,7 +132,6 @@ target_col in numerical_cols
 
 # COMMAND ----------
 
-from pandas import Timestamp
 from sklearn.pipeline import Pipeline
 
 from databricks.automl_runtime.sklearn import DatetimeImputer
@@ -172,7 +175,10 @@ bool_pipeline = Pipeline(
     steps=[
         ("cast_type", FunctionTransformer(lambda df: df.astype(object))),
         ("imputers", ColumnTransformer(bool_imputers, remainder="passthrough")),
-        ("onehot", SklearnOneHotEncoder(sparse=False, handle_unknown="ignore", drop="first")),
+        (
+            "onehot",
+            SklearnOneHotEncoder(sparse=False, handle_unknown="ignore", drop="first"),
+        ),
     ]
 )
 
@@ -229,7 +235,9 @@ print(categorical_cols)
 categorical_cols_value_counts = {}
 
 for col in categorical_cols:
-    value_counts = spark.sql(f"SELECT COUNT(DISTINCT {col}) as count FROM lr_nhl_demo.dev.gold_model_stats_delta_v2").toPandas()
+    value_counts = spark.sql(
+        f"SELECT COUNT(DISTINCT {col}) as count FROM lr_nhl_demo.dev.gold_model_stats_delta_v2"
+    ).toPandas()
     categorical_cols_value_counts[col] = value_counts
 
 categorical_cols_value_counts
@@ -245,6 +253,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.pipeline import Pipeline
 
+
 class CategoricalIndexer(BaseEstimator, TransformerMixin):
     def __init__(self, categorical_cols):
         self.categorical_cols = categorical_cols
@@ -252,7 +261,9 @@ class CategoricalIndexer(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         for col in self.categorical_cols:
-            encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+            encoder = OrdinalEncoder(
+                handle_unknown="use_encoded_value", unknown_value=-1
+            )
             encoder.fit(X[[col]])
             self.encoders[col] = encoder
         return self
@@ -264,11 +275,11 @@ class CategoricalIndexer(BaseEstimator, TransformerMixin):
         return X_copy
 
 
-team_categorical_cols = ['playerTeam', 'previous_opposingTeam', 'opposingTeam']
+team_categorical_cols = ["playerTeam", "previous_opposingTeam", "opposingTeam"]
 
 indexer_pipeline = Pipeline(
     steps=[
-        ('categorical_indexer', CategoricalIndexer(team_categorical_cols)),
+        ("categorical_indexer", CategoricalIndexer(team_categorical_cols)),
     ]
 )
 
@@ -290,7 +301,7 @@ one_hot_pipeline = Pipeline(
     ]
 )
 
-categorical_one_hot_transformers = [("onehot", one_hot_pipeline, ['position'])]
+categorical_one_hot_transformers = [("onehot", one_hot_pipeline, ["position"])]
 
 # COMMAND ----------
 
@@ -345,6 +356,7 @@ import pandas as pd
 from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.ensemble import RandomForestRegressor
 
+
 class FeatureImportanceSelector(BaseEstimator, TransformerMixin):
     def __init__(self, model, n_features):
         self.model = model
@@ -352,10 +364,10 @@ class FeatureImportanceSelector(BaseEstimator, TransformerMixin):
         self.feature_names_in_ = None
 
     def fit(self, X, y=None):
-        self.feature_names_in_ = X.columns if hasattr(X, 'columns') else None
+        self.feature_names_in_ = X.columns if hasattr(X, "columns") else None
         self.model.fit(X, y)
         self.importances_ = self.model.feature_importances_
-        self.indices_ = np.argsort(self.importances_)[-self.n_features:]
+        self.indices_ = np.argsort(self.importances_)[-self.n_features :]
         return self
 
     def transform(self, X):
@@ -367,12 +379,15 @@ class FeatureImportanceSelector(BaseEstimator, TransformerMixin):
         if self.feature_names_in_ is not None:
             return np.array(self.feature_names_in_)[self.indices_]
         else:
-            return np.array([f'feature_{i}' for i in range(len(self.indices_))])
+            return np.array([f"feature_{i}" for i in range(len(self.indices_))])
 
-        
+
 rf_pipeline = Pipeline(
     steps=[
-        ("rf_selector", FeatureImportanceSelector(RandomForestRegressor(), n_features=200)),
+        (
+            "rf_selector",
+            FeatureImportanceSelector(RandomForestRegressor(), n_features=200),
+        ),
     ]
 )
 
@@ -396,7 +411,7 @@ feature_union = FeatureUnion(
 # MAGIC - Test (20% of the dataset used to report the true performance of the model on an unseen dataset)
 # MAGIC
 # MAGIC `_automl_split_col_0000` contains the information of which set a given row belongs to.
-# MAGIC We use this column to split the dataset into the above 3 sets. 
+# MAGIC We use this column to split the dataset into the above 3 sets.
 # MAGIC The column should not be used for training so it is dropped after split is done.
 # MAGIC
 # MAGIC Given that `gameDate` is provided as the `time_col`, the data is split based on time order,
@@ -415,10 +430,14 @@ X = df_loaded_pd.drop([target_col], axis=1)
 y = df_loaded_pd[target_col]
 
 # Split the data into train and test datasets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
 # Split the train dataset into train and validation datasets
-X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_train, y_train, test_size=0.25, random_state=42
+)
 
 # COMMAND ----------
 
@@ -462,7 +481,12 @@ X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.
 # COMMAND ----------
 
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.feature_selection import SelectFromModel, SelectKBest, mutual_info_classif, RFE
+from sklearn.feature_selection import (
+    SelectFromModel,
+    SelectKBest,
+    mutual_info_classif,
+    RFE,
+)
 from sklearn.linear_model import LogisticRegression
 from databricks.automl_runtime.sklearn.column_selector import ColumnSelector
 
@@ -470,14 +494,15 @@ import lightgbm
 from lightgbm import LGBMRegressor
 
 from sklearn import set_config
+
 set_config(transform_output="pandas")
 
 # Now create the FeatureUnion with fitted pipelines
 # feature_union = FeatureUnion(
 #     [
-        # ("mi_pipeline", ColumnSelector(columns=mi_pipeline.named_steps['selector'].get_feature_names_out())),
-        # ("rfe_pipeline", ColumnSelector(columns=rfe_pipeline.named_steps['selector'].get_feature_names_out())),
-        # ("rf_pipeline", ColumnSelector(columns=SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)).get_feature_names_out())),
+# ("mi_pipeline", ColumnSelector(columns=mi_pipeline.named_steps['selector'].get_feature_names_out())),
+# ("rfe_pipeline", ColumnSelector(columns=rfe_pipeline.named_steps['selector'].get_feature_names_out())),
+# ("rf_pipeline", ColumnSelector(columns=SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)).get_feature_names_out())),
 #     ]
 # )
 
@@ -496,7 +521,10 @@ features_pipeline = Pipeline(
     [
         ("column_selector", col_selector),
         ("preprocessor", preprocessor),
-        ("feature_selector", SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42))),
+        (
+            "feature_selector",
+            SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
+        ),
     ]
 )
 
@@ -533,7 +561,7 @@ processed_X_train
 # COMMAND ----------
 
 # Get selected columns
-selected_columns = features_pipeline.named_steps['feature_selector'].get_support()
+selected_columns = features_pipeline.named_steps["feature_selector"].get_support()
 print("Selected feature names count:", len(selected_columns))
 
 # TO DO: convert X_train below to be the preprocessed dataset
@@ -575,6 +603,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import SelectFromModel
 import joblib
 
+
 class PreprocessModel(PythonModel):
     def __init__(self, pipeline):
         self.pipeline = pipeline
@@ -585,12 +614,16 @@ class PreprocessModel(PythonModel):
     def predict(self, context, model_input):
         return self.pipeline.transform(model_input)
 
+
 # Create the preprocessing pipeline
 preprocess_pipeline = Pipeline(
     [
         ("column_selector", col_selector),
         ("preprocessor", preprocessor),
-        ("feature_selector", SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42))),
+        (
+            "feature_selector",
+            SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
+        ),
     ]
 )
 
@@ -606,15 +639,15 @@ with mlflow.start_run() as run:
         path="preprocess_model",
         python_model=pyfunc_preprocess_model,
         input_example=X_train.iloc[:5],
-        signature=infer_signature(X_train, preprocess_pipeline.transform(X_train))
+        signature=infer_signature(X_train, preprocess_pipeline.transform(X_train)),
     )
-    
+
     # Log the model
     mlflow.pyfunc.log_model(
         artifact_path="preprocess_model",
         python_model=pyfunc_preprocess_model,
         input_example=X_train.iloc[:5],
-        signature=infer_signature(X_train, preprocess_pipeline.transform(X_train))
+        signature=infer_signature(X_train, preprocess_pipeline.transform(X_train)),
     )
 
 # Load the saved model
@@ -675,7 +708,9 @@ if not pandas_lib_exists:
 
     with open(f"{tmp_dir}/requirements.txt", "w") as f:
         f.write("\n".join(venv_libs))
-    client.log_artifact(run_id=run_id, local_path=venv_file_path, artifact_path="preprocess_model")
+    client.log_artifact(
+        run_id=run_id, local_path=venv_file_path, artifact_path="preprocess_model"
+    )
 
 shutil.rmtree(tmp_dir)
 
@@ -692,7 +727,7 @@ mlflow.register_model(preprocess_model_uri, "lr_nhl_demo.dev.preprocess_model")
 preprocess_model_name = "lr_nhl_demo.dev.preprocess_model"
 preprocess_model_version = 1
 
-preprocess_model_uri=f"models:/{preprocess_model_name}/{preprocess_model_version}"
+preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
 preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 
 # COMMAND ----------
@@ -710,6 +745,7 @@ from mlflow.models import Model, infer_signature, ModelSignature
 from mlflow.pyfunc import PyFuncModel
 from mlflow import pyfunc
 from hyperopt import hp, tpe, fmin, STATUS_OK, SparkTrials
+
 
 def objective(params):
     with mlflow.start_run(experiment_id="2824690123542843") as mlflow_run:
@@ -794,6 +830,7 @@ def objective(params):
             "model": model,
             "run": mlflow_run,
         }
+
 
 X_train_processed
 
@@ -982,12 +1019,14 @@ if shap_enabled:
     ).fillna(mode)
 
     # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
-    example = X_val_processed.sample(n=min(100, X_val_processed.shape[0]), random_state=729986891).fillna(
-        mode
-    )
+    example = X_val_processed.sample(
+        n=min(100, X_val_processed.shape[0]), random_state=729986891
+    ).fillna(mode)
 
     # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
-    predict = lambda x: model.predict(pd.DataFrame(x, columns=X_train_processed.columns))
+    predict = lambda x: model.predict(
+        pd.DataFrame(x, columns=X_train_processed.columns)
+    )
     explainer = KernelExplainer(predict, train_sample, link="identity")
     shap_values = explainer.shap_values(example, l1_reg=False, nsamples=500)
     summary_plot(shap_values, example)
@@ -1032,4 +1071,3 @@ if shap_enabled:
 print(f"runs:/{ mlflow_run.info.run_id }/model")
 
 # COMMAND ----------
-

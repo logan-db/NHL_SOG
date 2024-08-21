@@ -5,15 +5,10 @@ gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
 # COMMAND ----------
 
 # DBTITLE 1,Imports and Int/Str columns
-from pyspark.sql.functions import col
-from pyspark.sql.types import StringType
-import pandas as pd
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
+
 import mlflow
-import databricks.automl_runtime
+from pyspark.sql import functions as F
+from databricks.feature_store import FeatureStoreClient
 
 # Identify numerical and categorical columns
 # numerical_cols = gold_model_stats.select_dtypes(include=['int64', 'float64']).columns
@@ -27,15 +22,10 @@ import databricks.automl_runtime
 
 # COMMAND ----------
 
-import mlflow
-import databricks.automl_runtime
-
 target_col = "player_ShotsOnGoalInGame"
 time_col = "gameDate"
 
 # COMMAND ----------
-
-from pyspark.sql import functions as F
 
 min_player_matchup_played_rolling = gold_model_stats.agg(
     F.min("playerGamesPlayedRolling")
@@ -44,18 +34,18 @@ min_player_matchup_played_rolling
 
 # COMMAND ----------
 
-display(gold_model_stats.filter(col("playerMatchupPlayedRolling") == 0))
+display(gold_model_stats.filter(F.col("playerMatchupPlayedRolling") == 0))
 
 # COMMAND ----------
 
-display(gold_model_stats.filter(col("gameId").isNull()))
+display(gold_model_stats.filter(F.col("gameId").isNull()))
 
 # COMMAND ----------
 
 model_remove_1st_and_upcoming_games = gold_model_stats.filter(
-    (col("gameId").isNotNull())
-    & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    (F.col("gameId").isNotNull())
+    & (F.col("playerGamesPlayedRolling") > 0)
+    & (F.col("rolling_playerTotalTimeOnIceInGame") > 180)
 )
 
 model_remove_1st_and_upcoming_games.count()
@@ -63,10 +53,10 @@ model_remove_1st_and_upcoming_games.count()
 # COMMAND ----------
 
 upcoming_games = gold_model_stats.filter(
-    (col("gameId").isNull())
-    & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
-    & (col("gameDate") != "2024-01-17")
+    (F.col("gameId").isNull())
+    & (F.col("playerGamesPlayedRolling") > 0)
+    & (F.col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (F.col("gameDate") != "2024-01-17")
 )
 
 display(upcoming_games)
@@ -81,8 +71,6 @@ assert (
 )
 
 # COMMAND ----------
-
-from databricks.feature_store import FeatureStoreClient
 
 # customer_features_df = compute_customer_features(df)
 
