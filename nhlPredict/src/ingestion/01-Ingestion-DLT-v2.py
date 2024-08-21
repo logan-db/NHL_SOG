@@ -44,7 +44,7 @@ one_time_load = spark.conf.get("one_time_load").lower()
 season_list = [2023, 2024]
 
 # Get current date
-current_date = date.today()
+today_date = date.today()
 
 # COMMAND ----------
 
@@ -528,40 +528,38 @@ def clean_games_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,silver_games_schedule_v2
 @dlt.table(
     name="silver_games_schedule_v2",
     table_properties={"quality": "silver"},
 )
 def merge_games_data():
-    silver_games_schedule = (
-        dlt.read("silver_schedule_2023_v2")
-        .join(
-            dlt.read("silver_games_historical_v2")
-            .withColumn(
-                "homeTeamCode",
-                when(col("home_or_away") == "HOME", col("team")).otherwise(
-                    col("opposingTeam")
-                ),
-            )
-            .withColumn(
-                "awayTeamCode",
-                when(col("home_or_away") == "AWAY", col("team")).otherwise(
-                    col("opposingTeam")
-                ),
+    silver_games_schedule = dlt.read("silver_schedule_2023_v2").join(
+        dlt.read("silver_games_historical_v2")
+        .withColumn(
+            "homeTeamCode",
+            when(col("home_or_away") == "HOME", col("team")).otherwise(
+                col("opposingTeam")
             ),
-            how="outer",
-            on=[
-                col("homeTeamCode") == col("HOME"),
-                col("awayTeamCode") == col("AWAY"),
-                col("gameDate") == col("DATE"),
-            ],
         )
+        .withColumn(
+            "awayTeamCode",
+            when(col("home_or_away") == "AWAY", col("team")).otherwise(
+                col("opposingTeam")
+            ),
+        ),
+        how="outer",
+        on=[
+            col("homeTeamCode") == col("HOME"),
+            col("awayTeamCode") == col("AWAY"),
+            col("gameDate") == col("DATE"),
+        ],
     )
 
     upcoming_final_clean = (
         silver_games_schedule.filter(col("gameId").isNull())
-        .withColumn('team', col("TEAM_ABV"))
+        .withColumn("team", col("TEAM_ABV"))
         .withColumn(
             "season",
             when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)),
@@ -975,9 +973,9 @@ def aggregate_games_data():
             ],
         )
     )
-    
+
     if (
-        current_date
+        today_date
         <= date(2024, 10, 4)
         # <= dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]
     ):
