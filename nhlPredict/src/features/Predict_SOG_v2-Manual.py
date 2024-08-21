@@ -26,7 +26,7 @@ import pandas as pd
 df_loaded = spark.table("lr_nhl_demo.dev.SOG_features_v2")
 
 # Preview data
-display(df_loaded.head(5))
+display(df_loaded.limit(5))
 
 # COMMAND ----------
 
@@ -549,6 +549,7 @@ set_config(transform_output="pandas")
 
 features_pipeline.fit(X_train, y_train)
 
+
 # COMMAND ----------
 
 processed_X_train = features_pipeline.transform(X_train)
@@ -594,6 +595,7 @@ help(LGBMRegressor)
 
 # DBTITLE 1,log preprocessing pipeline
 import mlflow
+import os
 from mlflow.models import Model, infer_signature, ModelSignature
 from mlflow.pyfunc import PythonModel
 import sklearn
@@ -633,6 +635,27 @@ pyfunc_preprocess_model = PreprocessModel(preprocess_pipeline)
 # Fit the model
 pyfunc_preprocess_model.fit(X_train, y_train)
 
+# Get the current working directory
+cwd = os.getcwd()
+
+# Specify the file name
+file_name = 'preprocess_model'
+
+# Create the full file path by joining the current working directory with the file name
+path = os.path.join(cwd, file_name)
+
+# Check if the directory exists
+if os.path.exists(path):
+    # Check if the path is a directory
+    if os.path.isdir(path):
+        # Remove the directory and its contents
+        shutil.rmtree(path)
+        print(f"The directory '{path}' and its contents have been deleted.")
+    else:
+        print(f"The path '{path}' is not a directory.")
+else:
+    print(f"The directory '{path}' does not exist.")
+
 # Save the model using MLflow
 with mlflow.start_run() as run:
     mlflow.pyfunc.save_model(
@@ -657,7 +680,6 @@ loaded_model = mlflow.pyfunc.load_model("preprocess_model")
 X_val_processed = loaded_model.predict(X_val)
 X_train_processed = loaded_model.predict(X_train)
 X_test_processed = loaded_model.predict(X_test)
-
 
 # COMMAND ----------
 
@@ -724,8 +746,18 @@ mlflow.register_model(preprocess_model_uri, "lr_nhl_demo.dev.preprocess_model")
 
 # COMMAND ----------
 
-preprocess_model_name = "lr_nhl_demo.dev.preprocess_model"
-preprocess_model_version = 1
+# Set as Champion based on max version
+client = mlflow.tracking.MlflowClient()
+model_version_infos = client.search_model_versions("name = 'lr_nhl_demo.dev.preprocess_model'")
+new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
+client.set_registered_model_alias("lr_nhl_demo.dev.preprocess_model", "champion", new_model_version)
+
+pp_champion_version = client.get_model_version_by_alias(
+    "lr_nhl_demo.dev.preprocess_model", "champion"
+)
+
+preprocess_model_name = pp_champion_version.name
+preprocess_model_version = pp_champion_version.version
 
 preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
 preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
@@ -740,17 +772,36 @@ X_train_processed
 
 # COMMAND ----------
 
+X_train_processed_UC = mlflow.data.load_delta(table_name="lr_nhl_demo.dev.X_train_processed", version="0")
+X_train_processed_UC_PD = X_train_processed_UC.df.toPandas()
+
+X_train_processed_UC_PD
+
+# COMMAND ----------
+
+X_train_processed_UC_PD
+
+# COMMAND ----------
+
 import mlflow
 from mlflow.models import Model, infer_signature, ModelSignature
 from mlflow.pyfunc import PyFuncModel
 from mlflow import pyfunc
 from hyperopt import hp, tpe, fmin, STATUS_OK, SparkTrials
+import pyspark.pandas as ps
 
+# Write X_train_processed to Unity Catalog for lineage tracking
+ps.from_pandas(X_train_processed).to_table("lr_nhl_demo.dev.X_train_processed", mode="overwrite")
+print("Writing X_train_processed to UC!")
+
+# Load a Unity Catalog table, train a model, and log the input table
+print("Loading X_train_processed_UC")
+X_train_processed_UC = mlflow.data.load_delta(table_name="lr_nhl_demo.dev.X_train_processed", version="0")
+X_train_processed_UC_PD = X_train_processed_UC.df.toPandas()
 
 def objective(params):
-    with mlflow.start_run(experiment_id="2824690123542843") as mlflow_run:
+    with mlflow.start_run(experiment_id="634720160613016") as mlflow_run:
         lgbmr_regressor = LGBMRegressor(**params)
-
         model = Pipeline(
             [
                 ("regressor", lgbmr_regressor),
@@ -772,6 +823,7 @@ def objective(params):
             ],
             regressor__eval_set=[(X_val_processed, y_val)],
         )
+        # mlflow.log_input(X_train_processed_UC_PD, "training_data")
 
         # Log metrics for the training set
         mlflow_model = Model()
@@ -857,18 +909,21 @@ X_train_processed
 
 # COMMAND ----------
 
+from hyperopt.pyll.base import scope
+
+# Define the search space
 space = {
-    "colsample_bytree": 0.6587254729574785,
-    "lambda_l1": 0.18965542130830132,
-    "lambda_l2": 1.9402892441576718,
-    "learning_rate": 0.02517876184843777,
-    "max_bin": 29,
-    "max_depth": 8,
-    "min_child_samples": 140,
-    "n_estimators": 287,
-    "num_leaves": 166,
-    "subsample": 0.7501639626721491,
-    "random_state": 729986891,
+    "colsample_bytree": hp.uniform("colsample_bytree", 0.5, 1.0),
+    "lambda_l1": hp.loguniform("lambda_l1", -5, 0),  # loguniform for positive values
+    "lambda_l2": hp.loguniform("lambda_l2", -5, 2),  # loguniform for positive values
+    "learning_rate": hp.loguniform("learning_rate", -5, -1),  # loguniform for small positive values
+    "max_bin": scope.int(hp.quniform("max_bin", 20, 100, 1)),  # integer values
+    "max_depth": scope.int(hp.quniform("max_depth", 3, 15, 1)),  # integer values
+    "min_child_samples": scope.int(hp.quniform("min_child_samples", 20, 200, 1)),  # integer values
+    "n_estimators": scope.int(hp.quniform("n_estimators", 100, 500, 1)),  # integer values
+    "num_leaves": scope.int(hp.quniform("num_leaves", 31, 255, 1)),  # integer values
+    "subsample": hp.uniform("subsample", 0.5, 1.0),
+    "random_state": 729986891,  # Fixed value, not part of the search space
 }
 
 # COMMAND ----------
@@ -899,7 +954,7 @@ fmin(
     objective,
     space=space,
     algo=tpe.suggest,
-    max_evals=12,  # Increase this when widening the hyperparameter search space.
+    max_evals=25,  # Increase this when widening the hyperparameter search space.
     trials=trials,
 )
 
@@ -1069,5 +1124,3 @@ if shap_enabled:
 
 # model_uri for the generated model
 print(f"runs:/{ mlflow_run.info.run_id }/model")
-
-# COMMAND ----------

@@ -43,29 +43,19 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
-min_date = bronze_schedule_2023_v2.select(min("DATE")).first()[0]
-min_date
-
-from datetime import date
-
-# Convert current_date to datetime.date object
-current_date = date.today()
-current_date
-min_date
-
-# COMMAND ----------
-
-display(silver_games_historical_v2)
-
-# COMMAND ----------
-
 # Checking for uniqueness of gameId and shooterName in gold_model_data_v2
-unique_check = gold_model_data_v2.groupBy("gameId", "shooterName", "season").agg(count("*").alias("count")).filter("count > 1")
+unique_check = gold_model_data_v2.groupBy("gameId", "playerId", "season").agg(count("*").alias("count")).filter("count > 1")
 
 display(unique_check)
 
 # Assert that there are no duplicate records
 assert unique_check.count() == 0, f"{unique_check.count()} Duplicate records found in gold_model_data_v2"
+
+# COMMAND ----------
+
+display(
+  gold_model_data_v2.filter((col("gameId") == '2023020516') & (col("shooterName") == 'Sebastian Aho'))
+)
 
 # COMMAND ----------
 
