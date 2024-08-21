@@ -43,6 +43,22 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
+min_date = bronze_schedule_2023_v2.select(min("DATE")).first()[0]
+min_date
+
+from datetime import date
+
+# Convert current_date to datetime.date object
+current_date = date.today()
+current_date
+min_date
+
+# COMMAND ----------
+
+display(silver_games_historical_v2)
+
+# COMMAND ----------
+
 # Checking for uniqueness of gameId and shooterName in gold_model_data_v2
 unique_check = gold_model_data_v2.groupBy("gameId", "shooterName", "season").agg(count("*").alias("count")).filter("count > 1")
 
@@ -110,10 +126,6 @@ display(unique_test_check)
 
 # Assert that there are no duplicate records
 assert unique_test_check.count() == 0, f"{unique_test_check.count()} Duplicate records found in unique_test_check"
-
-# COMMAND ----------
-
-display(schedule_2024)
 
 # COMMAND ----------
 
@@ -206,7 +218,7 @@ display(schedule_next_game)
 
 # COMMAND ----------
 
-silver_games_schedule = schedule_next_game.drop("TEAM_ABV").join(
+silver_games_schedule = schedule_next_game.join(
     silver_games_historical_v2.withColumn(
         "homeTeamCode",
         when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
@@ -222,15 +234,18 @@ silver_games_schedule = schedule_next_game.drop("TEAM_ABV").join(
     ],
 )
 
-home_silver_games_schedule = silver_games_schedule.filter(
-    col("gameId").isNull()
-).withColumn("team", col("HOME"))
-away_silver_games_schedule = silver_games_schedule.filter(
-    col("gameId").isNull()
-).withColumn("team", col("AWAY"))
+
+# home_silver_games_schedule = silver_games_schedule.filter(
+#     col("gameId").isNull()
+# ).withColumn("team", col("HOME"))
+# away_silver_games_schedule = silver_games_schedule.filter(
+#     col("gameId").isNull()
+# ).withColumn("team", col("AWAY"))
 
 upcoming_final_clean = (
-    home_silver_games_schedule.union(away_silver_games_schedule)
+    # home_silver_games_schedule.union(away_silver_games_schedule)
+    silver_games_schedule.filter(col("gameId").isNull())
+    .withColumn('team', col("TEAM_ABV"))
     .withColumn("season", when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)))
     .withColumn(
         "gameDate",
@@ -248,10 +263,12 @@ upcoming_final_clean = (
         "home_or_away",
         when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY")),
     )
+    .drop("TEAM_ABV")
 )
 
 regular_season_schedule = (
     silver_games_schedule.filter(col("gameId").isNotNull())
+    .drop("TEAM_ABV")
     .unionAll(upcoming_final_clean)
     .orderBy(desc("DATE"))
 )
@@ -310,6 +327,16 @@ display(full_season_schedule.orderBy(desc("gameDate"), "team"))
 
 # COMMAND ----------
 
+# Checking for uniqueness of gameId and shooterName in full_season_schedule
+unique_check = full_season_schedule.groupBy("gameId", "season", "team").agg(count("*").alias("count")).filter("count > 1")
+
+display(unique_check)
+
+# Assert that there are no duplicate records
+assert unique_check.count() == 0, f"{unique_check.count()} Duplicate records found in full_season_schedule"
+
+# COMMAND ----------
+
 # spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.delta_player_game_stats_v2")
 # player_game_stats_v2.write.format("delta").mode("overwrite").saveAsTable(
 #     "lr_nhl_demo.dev.delta_player_game_stats_v2"
@@ -317,7 +344,7 @@ display(full_season_schedule.orderBy(desc("gameDate"), "team"))
 
 # COMMAND ----------
 
-display(gold_player_stats)
+display(silver_games_historical_v2.orderBy(desc('gameDate')))
 
 # COMMAND ----------
 

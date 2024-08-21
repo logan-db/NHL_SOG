@@ -42,6 +42,10 @@ player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
 season_list = [2023, 2024]
+
+# Get current date
+current_date = date.today()
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -360,7 +364,7 @@ def clean_schedule_data():
     away_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
         "TEAM_ABV", col("AWAY")
     )
-    full_schedule = home_schedule.union(away_schedule)
+    full_schedule = home_schedule.unionAll(away_schedule)
 
     # Define a window specification
     window_spec = Window.partitionBy("TEAM_ABV").orderBy("DATE")
@@ -525,8 +529,6 @@ def clean_games_data():
 # COMMAND ----------
 
 # DBTITLE 1,silver_games_schedule_v2
-
-
 @dlt.table(
     name="silver_games_schedule_v2",
     table_properties={"quality": "silver"},
@@ -534,7 +536,6 @@ def clean_games_data():
 def merge_games_data():
     silver_games_schedule = (
         dlt.read("silver_schedule_2023_v2")
-        .drop("TEAM_ABV")
         .join(
             dlt.read("silver_games_historical_v2")
             .withColumn(
@@ -558,15 +559,9 @@ def merge_games_data():
         )
     )
 
-    home_silver_games_schedule = silver_games_schedule.filter(
-        col("gameId").isNull()
-    ).withColumn("team", col("HOME"))
-    away_silver_games_schedule = silver_games_schedule.filter(
-        col("gameId").isNull()
-    ).withColumn("team", col("AWAY"))
-
     upcoming_final_clean = (
-        home_silver_games_schedule.union(away_silver_games_schedule)
+        silver_games_schedule.filter(col("gameId").isNull())
+        .withColumn('team', col("TEAM_ABV"))
         .withColumn(
             "season",
             when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)),
@@ -587,10 +582,12 @@ def merge_games_data():
             "home_or_away",
             when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY")),
         )
+        .drop("TEAM_ABV")
     )
 
     regular_season_schedule = (
         silver_games_schedule.filter(col("gameId").isNotNull())
+        .drop("TEAM_ABV")
         .unionAll(upcoming_final_clean)
         .orderBy(desc("DATE"))
     )
@@ -978,10 +975,7 @@ def aggregate_games_data():
             ],
         )
     )
-
-    # Convert current_date to datetime.date object
-    current_date = date.today()
-
+    
     if (
         current_date
         <= date(2024, 10, 4)
