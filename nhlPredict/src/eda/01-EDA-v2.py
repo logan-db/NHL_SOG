@@ -181,7 +181,11 @@ display(grouped_df.filter(col('teamGamesPlayedRolling')==14).orderBy("gameDate",
 
 # COMMAND ----------
 
-display(gold_model_data_v2.select(*[col for col in gold_model_data_v2.columns if 'Rolling' in col]))
+display(gold_game_stats_v2)
+
+# COMMAND ----------
+
+display(gold_game_stats_v2.select(*[col for col in gold_game_stats_v2.columns if 'opp' in col]))
 
 # COMMAND ----------
 

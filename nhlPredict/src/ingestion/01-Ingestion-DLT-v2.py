@@ -1590,6 +1590,7 @@ def make_model_ready():
             or column_name.startswith("previous")
             or column_name.startswith("average")
             or column_name.startswith("matchup")
+            or column_name.startswith("opponent")
         ):
             keep_column_exprs.append(col(column_name))
 
