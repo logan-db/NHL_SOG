@@ -1487,7 +1487,7 @@ def window_gold_game_data():
     else:
         print(f"Max Season for rankings: {max_season}")
 
-    # # Group by playerTeam and season
+    # Group by playerTeam and season
     grouped_df = (
         pk_norm_filled.filter(col("season") == max_season)
         .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling")
@@ -1497,7 +1497,7 @@ def window_gold_game_data():
     )
 
     # Define the window specification for rolling sum
-    window_spec = (
+    group_window_spec = (
         Window.partitionBy("playerTeam")
         .orderBy("teamGamesPlayedRolling")
         .rowsBetween(Window.unboundedPreceding, Window.currentRow)
@@ -1507,15 +1507,18 @@ def window_gold_game_data():
         rolling_column = f"rolling_{column}"
         rank_column = f"rank_rolling_{column}"
         grouped_df = grouped_df.withColumn(
-            rolling_column, sum(f"sum_{column}").over(window_spec)
+            rolling_column, sum(f"sum_{column}").over(group_window_spec)
         )
 
         # Define the window specification
-        window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
+        rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
             desc(rolling_column)
         )
-        grouped_df = grouped_df.withColumn(rank_column, dense_rank().over(window_spec))
+        grouped_df = grouped_df.withColumn(
+            rank_column, dense_rank().over(rank_window_spec)
+        )
 
+    # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
     return grouped_df
 
 
