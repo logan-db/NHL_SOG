@@ -45,6 +45,7 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 # COMMAND ----------
 
 from pyspark.sql.functions import col, round, when
+from pyspark.sql.window import Window
 
 pk_norm = (gold_game_stats_v2
            .withColumn("previous_game_PP_goalsForPerPenalty", 
@@ -139,9 +140,9 @@ columns_to_rank = [
 ]
 
 # Get the maximum season
-max_season = pk_norm_filled.select(F.max("season")).collect()[0][0]
+max_season = pk_norm_filled.select(max("season")).collect()[0][0]
 
-count_rows = pk_norm_filled.filter((F.col("season") == max_season) & (F.col("gameId").isNotNull())).groupBy("playerTeam", "season").count().select(F.min("count")).collect()[0][0]
+count_rows = pk_norm_filled.filter((col("season") == max_season) & (col("gameId").isNotNull())).groupBy("playerTeam", "season").count().select(min("count")).collect()[0][0]
 
 if count_rows is None or count_rows < 7:
     max_season = 2023
@@ -152,32 +153,42 @@ else:
 # # Group by playerTeam and season
 grouped_df = (pk_norm_filled.filter(col("season") == max_season)
 .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling").agg(
-    *[F.sum(column).alias(f"sum_{column}") for column in columns_to_rank],
+    *[sum(column).alias(f"sum_{column}") for column in columns_to_rank],
 )
 )
-
-# Define the window specification for rolling sum
-window_spec = Window.partitionBy("playerTeam").orderBy("teamGamesPlayedRolling").rowsBetween(Window.unboundedPreceding, Window.currentRow)
 
 # Calculate the rolling sum for each column in columns_to_rank
 # grouped_df = pk_norm_filled.filter(col("season") == max_season)
 
 for column in columns_to_rank:
+    rolling_window_spec = Window.partitionBy("playerTeam").orderBy("teamGamesPlayedRolling").rowsBetween(Window.unboundedPreceding, 0)
     rolling_column = f"rolling_{column}"
     rank_column = f"rank_rolling_{column}"
     grouped_df = grouped_df.withColumn(
         rolling_column,
-        F.sum(f"sum_{column}").over(window_spec)
+        when(col("teamGamesPlayedRolling") == 1, col(f"sum_{column}"))
+         .otherwise(sum(f"sum_{column}").over(rolling_window_spec))
     )
-
     # Define the window specification
-    window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(F.desc(rolling_column))
+    rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(desc(rolling_column))
     grouped_df = grouped_df.withColumn(
     rank_column,
-    F.dense_rank().over(window_spec)
+    dense_rank().over(rank_window_spec)
     )
 
-display(grouped_df.filter(col('teamGamesPlayedRolling')==14).orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+# display(grouped_df.filter(col('teamGamesPlayedRolling')==14).orderBy(desc("gameDate"), "playerTeam", "teamGamesPlayedRolling"))
+
+display(grouped_df.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+
+# COMMAND ----------
+
+display(
+  gold_game_stats_v2.join(grouped_df, how="left", on=["gameDate", "playerTeam", "season"]).orderBy(desc('gameDate'), 'playerTeam')
+)
+
+# COMMAND ----------
+
+grouped_df.count()
 
 # COMMAND ----------
 
@@ -649,7 +660,7 @@ from pyspark.sql.functions import date_format, when, col, lit
 
 
 def get_day_of_week(df, date_column):
-    df_with_day = df.withColumn("DAY", date_format(date_column, "E"))
+    df_with_day = dwithColumn("DAY", date_format(date_column, "E"))
     df_with_default_time = df_with_day.withColumn(
         "EASTERN",
         when(col("EASTERN").isNull(), lit("7:00 PM Default")).otherwise(col("EASTERN")),
