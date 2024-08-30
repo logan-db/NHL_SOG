@@ -1,13 +1,4 @@
 # Databricks notebook source
-# MAGIC %md
-# MAGIC # LightGBM Regressor training
-# MAGIC - This is an auto-generated notebook.
-# MAGIC - To reproduce these results, attach this notebook to a cluster with runtime version **14.3.x-cpu-ml-scala2.12**, and rerun it.
-# MAGIC - Compare trials in the [MLflow experiment](#mlflow/experiments/2824690123542843).
-# MAGIC - Clone this notebook into your project folder by selecting **File > Clone** in the notebook toolbar.
-
-# COMMAND ----------
-
 import mlflow
 
 target_col = "player_Total_shotsOnGoal"
@@ -517,31 +508,65 @@ set_config(transform_output="pandas")
 # )
 
 # Create the full pipeline
+# features_pipeline = Pipeline(
+#     [
+#         ("column_selector", col_selector),
+#         ("preprocessor", preprocessor),
+#         (
+#             "feature_selector",
+#             SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
+#         ),
+#     ]
+# )
+
 features_pipeline = Pipeline(
     [
-        ("column_selector", col_selector),
-        ("preprocessor", preprocessor),
-        (
-            "feature_selector",
-            SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
-        ),
+        ('column_selector', col_selector),
+        ('preprocessor', preprocessor),
+        ('feature_selection_rfe', RFE(estimator=RandomForestClassifier(), n_features_to_select=100, step=10)),
+        ('feature_selection_kbest', SelectKBest(score_func=mutual_info_classif, k=75)),
+        ('feature_selection_rfr', SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)))
     ]
 )
 
-model = Pipeline(
-    [
-        ("regressor", LGBMRegressor()),
-    ]
-)
-# rf = features_pipeline.fit(X_train, y_train)
-# print(rf.feature_importances_)
+# COMMAND ----------
 
-# model = SelectFromModel(rf, prefit=True)
-# feature_idx = model.get_support()
-# feature_name = X_train.columns[feature_idx]
-# feature_name
+# DBTITLE 1,feature selection testing
+from sklearn.pipeline import Pipeline
+from sklearn.feature_selection import RFE, RFECV
+from lightgbm import LGBMRegressor
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.datasets import make_regression
+from sklearn.model_selection import RepeatedKFold
 
-# Fit the full pipeline
+# Initialize the LGBMRegressor
+lgbm = LGBMRegressor(random_state=42)
+
+# Set up RFECV
+rfecv = RFECV(estimator=lgbm, step=20, cv=RepeatedKFold(n_splits=3, n_repeats=2, random_state=42), scoring='neg_mean_squared_error', min_features_to_select=100, verbose=1)
+
+# Create a pipeline with RFECV
+pipeline_rfecv = Pipeline([
+    ('column_selector', col_selector),
+    ('preprocessor', preprocessor),
+    ('feature_selection_rfecv', rfecv),
+    ('model', lgbm)
+])
+
+# COMMAND ----------
+
+# DBTITLE 1,feature selection testing
+set_config(transform_output="pandas")
+
+# Fit the RFECV pipeline
+pipeline_rfecv.fit(X_train, y_train)
+
+# Evaluate the RFECV pipeline
+rfecv_score = cross_val_score(pipeline_rfecv, X_train, y_train, cv=5, scoring='neg_mean_squared_error')
+print("RFECV pipeline score:", rfecv_score.mean())
+
+# Get the number of features selected by RFECV
+print("Optimal number of features selected by RFECV:", rfecv.n_features_)
 
 # COMMAND ----------
 
@@ -556,13 +581,10 @@ processed_X_train = features_pipeline.transform(X_train)
 
 processed_X_train
 
-## Fit the regressor
-# model.fit(processed_X_train, y_train)
-
 # COMMAND ----------
 
 # Get selected columns
-selected_columns = features_pipeline.named_steps["feature_selector"].get_support()
+selected_columns = features_pipeline.named_steps["feature_selection_rfr"].get_support()
 print("Selected feature names count:", len(selected_columns))
 
 # TO DO: convert X_train below to be the preprocessed dataset
@@ -1013,6 +1035,32 @@ display(
 
 set_config(display="diagram")
 model
+
+# COMMAND ----------
+
+# Retrain the best model with the best hyperparameters on the FULL dataset
+# # Retrieve the best model and parameters
+# best_trial = trials.best_trial['result']
+# best_model_type = best_trial['model']
+# best_params = best_trial['params']
+
+# # Retrain the best model on the full dataset
+# X_full = ...  # Combine your training, validation, and test sets
+# y_full = ...  # Combine your target values
+
+# with mlflow.start_run(experiment_id="634720160613016") as final_run:
+#     # Set tags for the final run
+#     mlflow.set_tag("model_type", best_model_type)
+#     mlflow.set_tag("experiment", "final_model_training")
+
+#     # Retrain the model
+#     final_model = Pipeline([('regressor', best_model_type)])
+#     final_model.fit(X_full, y_full)
+
+#     # Log the final model
+#     mlflow.sklearn.log_model(final_model, "final_model")
+
+#     print(f"Final model trained with best parameters: {best_params}")
 
 # COMMAND ----------
 

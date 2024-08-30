@@ -1,4 +1,27 @@
 # Databricks notebook source
+databricks_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None) 
+token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None) 
+
+# COMMAND ----------
+
+databricks_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None) 
+token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None) 
+
+repo_headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+# COMMAND ----------
+
+repo_url = f'{databricks_url}/api/2.0/repos?path_prefix=/Workspace/Users/logan.rupert@databricks.com/NHL_SOG'
+
+import requests
+repo_response = requests.request(method='GET', headers=repo_headers, url=repo_url)
+
+if repo_response.status_code != 200:
+    raise Exception(f'Request failed with status {repo_response.status_code}, {repo_response.text}')
+print(repo_response.json())
+
+# COMMAND ----------
+
 # Imports
 from pyspark.sql.functions import *
 
@@ -1598,4 +1621,5 @@ display(gold_game_stats)
 display(gold_model_data)
 
 # COMMAND ----------
+
 

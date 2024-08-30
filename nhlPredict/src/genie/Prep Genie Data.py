@@ -16,6 +16,7 @@ bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
 
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
+team_code_mappings = spark.table("dev.team_code_mappings")
 
 silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
 gold_player_stats_v2 = spark.table("dev.gold_player_stats_v2")
@@ -25,15 +26,15 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
+display(team_code_mappings)
+
+# COMMAND ----------
+
 display(silver_games_schedule_v2)
 
 # COMMAND ----------
 
 display(gold_player_stats_v2)
-
-# COMMAND ----------
-
-silver_games_schedule_v2.columns
 
 # COMMAND ----------
 
@@ -249,6 +250,7 @@ display(games_clean)
 # COMMAND ----------
 
 gold_player_stats_clean = gold_player_stats_v2[[clean_cols]]
+display(gold_player_stats_clean)
 
 # COMMAND ----------
 
