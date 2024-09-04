@@ -150,6 +150,7 @@ if count_rows is None or count_rows < 7:
 else:
     print(f"Max Season for rankings: {max_season}")
 
+
 # # Group by playerTeam and season
 grouped_df = (pk_norm_filled.filter(col("season") == max_season)
 .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling").agg(
