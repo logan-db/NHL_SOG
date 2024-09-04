@@ -1496,20 +1496,20 @@ def window_gold_game_data():
         )
     )
 
-    # Define the window specification for rolling sum
-    group_window_spec = (
-        Window.partitionBy("playerTeam")
-        .orderBy("teamGamesPlayedRolling")
-        .rowsBetween(Window.unboundedPreceding, Window.currentRow)
-    )
-
     for column in columns_to_rank:
+        rolling_window_spec = (
+            Window.partitionBy("playerTeam")
+            .orderBy("teamGamesPlayedRolling")
+            .rowsBetween(Window.unboundedPreceding, 0)
+        )
         rolling_column = f"rolling_{column}"
         rank_column = f"rank_rolling_{column}"
         grouped_df = grouped_df.withColumn(
-            rolling_column, sum(f"sum_{column}").over(group_window_spec)
+            rolling_column,
+            when(col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")).otherwise(
+                sum(f"sum_{column}").over(rolling_window_spec)
+            ),
         )
-
         # Define the window specification
         rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
             desc(rolling_column)
@@ -1519,7 +1519,11 @@ def window_gold_game_data():
         )
 
     # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
-    return grouped_df
+    final_joined_rank = gold_game_stats.join(
+        grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
+    ).orderBy(desc("gameDate"), "playerTeam")
+
+    return final_joined_rank
 
 
 # COMMAND ----------
