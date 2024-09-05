@@ -1450,6 +1450,17 @@ def window_gold_game_data():
 
     pk_norm_filled = pk_norm.fillna(fill_values)
 
+    per_game_columns = [
+        "previous_game_Total_goalsFor",
+        "previous_game_Total_goalsAgainst",
+        "previous_game_Total_shotsOnGoalFor",
+        "previous_game_Total_shotsOnGoalAgainst",
+        "previous_game_Total_shotAttemptsFor",
+        "previous_game_Total_shotAttemptsAgainst",
+        "previous_game_Total_penaltiesFor",
+        "previous_game_Total_penaltiesAgainst",
+    ]
+
     # Define columns to rank
     columns_to_rank = [
         "previous_game_Total_goalsFor",
@@ -1481,13 +1492,13 @@ def window_gold_game_data():
         .collect()[0][0]
     )
 
-    if count_rows is None or count_rows < 7:
+    if count_rows is None or count_rows < 3:
         max_season = 2023
         print(f"Max Season for rankings: {max_season}")
     else:
         print(f"Max Season for rankings: {max_season}")
 
-    # Group by playerTeam and season
+    # # Group by playerTeam and season
     grouped_df = (
         pk_norm_filled.filter(col("season") == max_season)
         .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling")
@@ -1504,19 +1515,49 @@ def window_gold_game_data():
         )
         rolling_column = f"rolling_{column}"
         rank_column = f"rank_rolling_{column}"
-        grouped_df = grouped_df.withColumn(
-            rolling_column,
-            when(col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")).otherwise(
-                sum(f"sum_{column}").over(rolling_window_spec)
-            ),
-        )
+
         # Define the window specification
         rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
             desc(rolling_column)
         )
-        grouped_df = grouped_df.withColumn(
-            rank_column, dense_rank().over(rank_window_spec)
-        )
+
+        if column not in per_game_columns:
+            # Rolling Sum Logic
+            grouped_df = grouped_df.withColumn(
+                rolling_column,
+                when(
+                    col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")
+                ).otherwise(sum(f"sum_{column}").over(rolling_window_spec)),
+            )
+            grouped_df = grouped_df.withColumn(
+                rank_column, dense_rank().over(rank_window_spec)
+            )
+
+            grouped_df = grouped_df.withColumnRenamed(
+                rolling_column, rolling_column.replace("previous_game_", "sum_")
+            ).withColumnRenamed(
+                rank_column, rank_column.replace("previous_game_", "sum_")
+            )
+
+        else:
+            # PerGame Rolling AVG Logic
+            # grouped_df = grouped_df.withColumn(f"sum_{game_column}PerGame", round(col(rolling_column) / col("teamGamesPlayedRolling"), 2))
+            grouped_df = grouped_df.withColumn(
+                rolling_column,
+                when(
+                    col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")
+                ).otherwise(mean(f"sum_{column}").over(rolling_window_spec)),
+            )
+
+            grouped_df = grouped_df.withColumn(
+                rank_column, dense_rank().over(rank_window_spec)
+            )
+
+            grouped_df = grouped_df.withColumnRenamed(
+                rolling_column, rolling_column.replace("previous_game_", "avg_")
+            ).withColumnRenamed(
+                rank_column, rank_column.replace("previous_game_", "avg_")
+            )
 
     # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
     final_joined_rank = gold_game_stats.join(
