@@ -57,18 +57,10 @@ gameCountWindowSpec = (
     .orderBy("gameDate")
     .rowsBetween(Window.unboundedPreceding, 0)
 )
-matchupCountWindowSpec = (
-    Window.partitionBy("playerTeam", "opposingTeam")
-    .orderBy("gameDate")
-    .rowsBetween(Window.unboundedPreceding, 0)
-)
 
 pk_norm = (
     silver_games_schedule
     .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
-    .withColumn(
-            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
-        )
     .withColumn(
         "game_PP_goalsForPerPenalty",
         round(
@@ -198,7 +190,8 @@ else:
 
 # # Group by playerTeam and season
 grouped_df = (
-    pk_norm_filled.filter(col("season") == max_season)
+    pk_norm_filled
+    .filter(col("season") == max_season)
     .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling")
     .agg(
         *[sum(column).alias(f"sum_{column}") for column in columns_to_rank],
@@ -264,7 +257,9 @@ final_joined_rank = silver_games_schedule.join(
     grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
 ).orderBy(desc("gameDate"), "playerTeam").drop(*per_game_columns)
 
-display(final_joined_rank.filter(col('playerTeam')=="VAN").select("gameDate", "playerTeam", "season", "sum_game_PP_goalsForPerPenalty", "rolling_sum_PP_goalsForPerPenalty", "rank_rolling_sum_PP_goalsForPerPenalty", "sum_game_Total_shotsOnGoalAgainst", "rolling_avg_Total_shotsOnGoalAgainst", "rank_rolling_avg_Total_shotsOnGoalAgainst").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+display(final_joined_rank.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+        
+        # .select("gameDate", "playerTeam", "season", "sum_game_PP_goalsForPerPenalty", "rolling_sum_PP_goalsForPerPenalty", "rank_rolling_sum_PP_goalsForPerPenalty", "sum_game_Total_shotsOnGoalAgainst", "rolling_avg_Total_shotsOnGoalAgainst", "rank_rolling_avg_Total_shotsOnGoalAgainst")
 
 # COMMAND ----------
 

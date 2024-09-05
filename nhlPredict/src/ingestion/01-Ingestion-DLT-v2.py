@@ -1473,10 +1473,19 @@ def window_gold_game_data():
         "teamMatchupPlayedRolling",
     ]
 
+    matchupCountWindowSpec = (
+        Window.partitionBy("playerTeam", "opposingTeam")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
+
     # Apply the count function within the window
     gold_games_count = (
         dlt.read("silver_games_rankings")
         .drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
+        .withColumn(
+            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+        )
     )
 
     columns_to_iterate = [
