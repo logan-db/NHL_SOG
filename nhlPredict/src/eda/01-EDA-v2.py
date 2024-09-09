@@ -45,7 +45,27 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
-display(silver_games_schedule_v2.orderBy(desc("gameDate")))
+shooter_name = "Alex Ovechkin"
+n_games = 3
+
+stats_columns = [
+  "player_Total_shotsOnGoal",
+  "player_Total_hits",
+  "player_Total_goals",
+  "player_Total_points",
+  "player_Total_shotAttempts",
+  "player_Total_shotsOnGoal",
+  "player_Total_primaryAssists",
+  "player_Total_secondaryAssists",
+  "player_Total_iceTimeRank"
+]
+
+display(
+  gold_player_stats
+  .filter((col("shooterName") == shooter_name) & (col("gameId").isNotNull()))
+  .select("gameDate", "playerTeam", "opposingTeam", "shooterName", "home_or_away", "season", *stats_columns)
+  .orderBy(desc("gameDate")).limit(n_games)
+        )
 
 # COMMAND ----------
 
