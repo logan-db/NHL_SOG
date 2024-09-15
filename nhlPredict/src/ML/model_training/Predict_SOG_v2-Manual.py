@@ -507,7 +507,7 @@ set_config(transform_output="pandas")
 #     ]
 # )
 
-# Create the full pipeline
+# # Create the full pipeline
 # features_pipeline = Pipeline(
 #     [
 #         ("column_selector", col_selector),
@@ -519,15 +519,15 @@ set_config(transform_output="pandas")
 #     ]
 # )
 
-features_pipeline = Pipeline(
-    [
-        ('column_selector', col_selector),
-        ('preprocessor', preprocessor),
-        ('feature_selection_rfe', RFE(estimator=RandomForestClassifier(), n_features_to_select=100, step=10)),
-        ('feature_selection_kbest', SelectKBest(score_func=mutual_info_classif, k=75)),
-        ('feature_selection_rfr', SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)))
-    ]
-)
+# features_pipeline = Pipeline(
+#     [
+#         ('column_selector', col_selector),
+#         ('preprocessor', preprocessor),
+#         ('feature_selection_rfe', RFE(estimator=RandomForestClassifier(), n_features_to_select=100, step=10)),
+#         ('feature_selection_kbest', SelectKBest(score_func=mutual_info_classif, k=75)),
+#         ('feature_selection_rfr', SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)))
+#     ]
+# )
 
 # COMMAND ----------
 
@@ -556,17 +556,17 @@ pipeline_rfecv = Pipeline([
 # COMMAND ----------
 
 # DBTITLE 1,feature selection testing
-set_config(transform_output="pandas")
+# set_config(transform_output="pandas")
 
-# Fit the RFECV pipeline
-pipeline_rfecv.fit(X_train, y_train)
+# # Fit the RFECV pipeline
+# pipeline_rfecv.fit(X_train, y_train)
 
-# Evaluate the RFECV pipeline
-rfecv_score = cross_val_score(pipeline_rfecv, X_train, y_train, cv=5, scoring='neg_mean_squared_error')
-print("RFECV pipeline score:", rfecv_score.mean())
+# # Evaluate the RFECV pipeline
+# rfecv_score = cross_val_score(pipeline_rfecv, X_train, y_train, cv=5, scoring='neg_mean_squared_error')
+# print("RFECV pipeline score:", rfecv_score.mean())
 
-# Get the number of features selected by RFECV
-print("Optimal number of features selected by RFECV:", rfecv.n_features_)
+# # Get the number of features selected by RFECV
+# print("Optimal number of features selected by RFECV:", rfecv.n_features_)
 
 # COMMAND ----------
 

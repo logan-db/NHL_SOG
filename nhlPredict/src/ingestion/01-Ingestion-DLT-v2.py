@@ -751,6 +751,7 @@ def merge_games_data():
                 2,
             ),
         )
+        .withColumn("isPlayoffGame", when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)))
     )
 
     fill_values = {
@@ -812,10 +813,10 @@ def merge_games_data():
     else:
         print(f"Max Season for rankings: {max_season}")
 
-    # # Group by playerTeam and season
+    # Group by playerTeam and season
     grouped_df = (
         pk_norm_filled.filter(col("season") == max_season)
-        .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling")
+        .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling", "isPlayoffGame")
         .agg(
             *[sum(column).alias(f"sum_{column}") for column in columns_to_rank],
         )
@@ -831,7 +832,7 @@ def merge_games_data():
         rank_column = f"rank_rolling_{column}"
 
         # Define the window specification
-        rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
+        rank_window_spec = Window.partitionBy("teamGamesPlayedRolling", "isPlayoffGame").orderBy(
             desc(rolling_column)
         )
 
@@ -846,7 +847,7 @@ def merge_games_data():
             grouped_df = grouped_df.withColumn(
                 rank_column, dense_rank().over(rank_window_spec)
             )
-
+ƒ
             grouped_df = grouped_df.withColumnRenamed(
                 rolling_column, rolling_column.replace("game_", "sum_")
             ).withColumnRenamed(
@@ -1473,19 +1474,10 @@ def window_gold_game_data():
         "teamMatchupPlayedRolling",
     ]
 
-    matchupCountWindowSpec = (
-        Window.partitionBy("playerTeam", "opposingTeam", "season")
-        .orderBy("gameDate")
-        .rowsBetween(Window.unboundedPreceding, 0)
-    )
-
     # Apply the count function within the window
     gold_games_count = (
         dlt.read("silver_games_rankings")
         .drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
-        .withColumn(
-            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
-        )
     )
 
     columns_to_iterate = [
@@ -1497,19 +1489,19 @@ def window_gold_game_data():
         col(c) for c in gold_games_count.columns
     ]  # Start with all existing columns
     game_avg_exprs = {
-        col_name: round(median(col(col_name)).over(Window.partitionBy("playerTeam")), 2)
+        col_name: round(median(col(col_name)).over(Window.partitionBy("playerTeam", "season")), 2)
         for col_name in columns_to_iterate
     }
     opponent_game_avg_exprs = {
         col_name: round(
-            median(col(col_name)).over(Window.partitionBy("opposingTeam")), 2
+            median(col(col_name)).over(Window.partitionBy("opposingTeam", "season")), 2
         )
         for col_name in columns_to_iterate
     }
     matchup_avg_exprs = {
         col_name: round(
             median(col(col_name)).over(
-                Window.partitionBy("playerTeam", "opposingTeam")
+                Window.partitionBy("playerTeam", "opposingTeam", "season")
             ),
             2,
         )
@@ -1579,10 +1571,7 @@ def window_gold_game_data():
 
     # Apply all column expressions at once using select
     gold_game_stats = gold_games_count.select(*column_exprs).withColumn(
-        "previous_opposingTeam",
-        when(
-            col("teamGamesPlayedRolling") > 1, lag(col("opposingTeam")).over(windowSpec)
-        ).otherwise(lit(None)),
+        "previous_opposingTeam", lag(col("opposingTeam")).over(windowSpec)
     )
 
     return gold_game_stats
@@ -1634,13 +1623,6 @@ def merge_player_game_stats():
         .withColumn("playerId", col("playerId").cast("string"))
         .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
         .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
-        .withColumn(
-            "isPlayoffGame",
-            when(
-                (col("season") == 2023) & (col("gameDate") < "04-19-2024"),
-                lit(0),  # change this when adding previous seasons
-            ).otherwise(lit(1)),
-        )
     )
 
     reorder_list = [

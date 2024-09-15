@@ -30,6 +30,7 @@ schedule_2024 = spark.table("dev.2024_25_official_nhl_schedule_by_day")
 silver_games_schedule = spark.table("dev.silver_games_schedule")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
 silver_schedule_2023_v2 = spark.table("dev.silver_schedule_2023_v2")
+silver_games_rankings = spark.table("dev.silver_games_rankings")
 
 silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
 silver_shots = spark.table("dev.silver_shots")
@@ -45,6 +46,232 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
+# DBTITLE 1,General Discovery
+display(silver_games_rankings.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+
+
+# COMMAND ----------
+
+display(player_game_stats_v2)
+
+# COMMAND ----------
+
+# DBTITLE 1,Player Ranking Logic
+silver_games_schedule = silver_games_schedule_v2
+
+# Create a window specification
+gameCountWindowSpec = (
+    Window.partitionBy("playerTeam")
+    .orderBy("gameDate")
+    .rowsBetween(Window.unboundedPreceding, 0)
+)
+
+pk_norm = (
+    silver_games_schedule
+    .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+    .withColumn(
+        "game_PP_goalsForPerPenalty",
+        round(
+            when(
+                col("game_Total_penaltiesAgainst") != 0,
+                col("game_PP_goalsFor")
+                / col("game_Total_penaltiesAgainst"),
+            ).otherwise(None),
+            2,
+        ),
+    )
+    .withColumn(
+        "game_PK_goalsAgainstPerPenalty",
+        round(
+            when(
+                col("game_Total_penaltiesFor") != 0,
+                col("game_PK_goalsAgainst")
+                / col("game_Total_penaltiesFor"),
+            ).otherwise(None),
+            2,
+        ),
+    )
+    .withColumn(
+        "game_PP_SOGForPerPenalty",
+        round(
+            when(
+                col("game_Total_penaltiesAgainst") != 0,
+                col("game_PP_shotsOnGoalFor")
+                / col("game_Total_penaltiesAgainst"),
+            ).otherwise(None),
+            2,
+        ),
+    )
+    .withColumn(
+        "game_PP_SOGAttemptsForPerPenalty",
+        round(
+            when(
+                col("game_Total_penaltiesAgainst") != 0,
+                col("game_PP_shotAttemptsFor")
+                / col("game_Total_penaltiesAgainst"),
+            ).otherwise(None),
+            2,
+        ),
+    )
+    .withColumn(
+        "game_PK_SOGAgainstPerPenalty",
+        round(
+            when(
+                col("game_Total_penaltiesFor") != 0,
+                col("game_PK_shotsOnGoalAgainst")
+                / col("game_Total_penaltiesFor"),
+            ).otherwise(None),
+            2,
+        ),
+    )
+    .withColumn(
+        "game_PK_SOGAttemptsAgainstPerPenalty",
+        round(
+            when(
+                col("game_Total_penaltiesFor") != 0,
+                col("game_PK_shotAttemptsAgainst")
+                / col("game_Total_penaltiesFor"),
+            ).otherwise(None),
+            2,
+        ),
+    )
+)
+
+fill_values = {
+    "game_PP_goalsForPerPenalty": 0,
+    "game_PK_goalsAgainstPerPenalty": 0,
+    "game_PP_SOGForPerPenalty": 0,
+    "game_PP_SOGAttemptsForPerPenalty": 0,
+    "game_PK_SOGAgainstPerPenalty": 0,
+    "game_PK_SOGAttemptsAgainstPerPenalty": 0,
+}
+
+pk_norm_filled = pk_norm.fillna(fill_values)
+
+per_game_columns = [
+    "game_Total_goalsFor",
+    "game_Total_goalsAgainst",
+    "game_Total_shotsOnGoalFor",
+    "game_Total_shotsOnGoalAgainst",
+    "game_Total_shotAttemptsFor",
+    "game_Total_shotAttemptsAgainst",
+    "game_Total_penaltiesFor",
+    "game_Total_penaltiesAgainst",
+]
+
+# Define columns to rank
+columns_to_rank = [
+    "game_Total_goalsFor",
+    "game_Total_goalsAgainst",
+    "game_PP_goalsForPerPenalty",
+    "game_PK_goalsAgainstPerPenalty",
+    "game_Total_shotsOnGoalFor",
+    "game_Total_shotsOnGoalAgainst",
+    "game_PP_SOGForPerPenalty",
+    "game_PK_SOGAgainstPerPenalty",
+    "game_PP_SOGAttemptsForPerPenalty",
+    "game_PK_SOGAttemptsAgainstPerPenalty",
+    "game_Total_shotAttemptsFor",
+    "game_Total_shotAttemptsAgainst",
+    "game_Total_penaltiesFor",
+    "game_Total_penaltiesAgainst",
+]
+
+# Get the maximum season
+max_season = pk_norm_filled.select(max("season")).collect()[0][0]
+
+count_rows = (
+    pk_norm_filled.filter(
+        (col("season") == max_season) & (col("gameId").isNotNull())
+    )
+    .groupBy("playerTeam", "season")
+    .count()
+    .select(min("count"))
+    .collect()[0][0]
+)
+
+if count_rows is None or count_rows < 3:
+    max_season = 2023
+    print(f"Max Season for rankings: {max_season}")
+else:
+    print(f"Max Season for rankings: {max_season}")
+
+# # Group by playerTeam and season
+grouped_df = (
+    pk_norm_filled
+    .filter(col("season") == max_season)
+    .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling")
+    .agg(
+        *[sum(column).alias(f"sum_{column}") for column in columns_to_rank],
+    )
+)
+
+for column in columns_to_rank:
+    rolling_window_spec = (
+        Window.partitionBy("playerTeam")
+        .orderBy("teamGamesPlayedRolling")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
+    rolling_column = f"rolling_{column}"
+    rank_column = f"rank_rolling_{column}"
+
+    # Define the window specification
+    rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
+        desc(rolling_column)
+    )
+
+    if column not in per_game_columns:
+        # Rolling Sum Logic
+        grouped_df = grouped_df.withColumn(
+            rolling_column,
+            when(
+                col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")
+            ).otherwise(sum(f"sum_{column}").over(rolling_window_spec)),
+        )
+        grouped_df = grouped_df.withColumn(
+            rank_column, dense_rank().over(rank_window_spec)
+        )
+
+        grouped_df = grouped_df.withColumnRenamed(
+            rolling_column, rolling_column.replace("game_", "sum_")
+        ).withColumnRenamed(
+            rank_column, rank_column.replace("game_", "sum_")
+        )
+
+    else:
+        # PerGame Rolling AVG Logic
+        # grouped_df = grouped_df.withColumn(f"sum_{game_column}PerGame", round(col(rolling_column) / col("teamGamesPlayedRolling"), 2))
+        grouped_df = grouped_df.withColumn(
+            rolling_column,
+            when(
+                col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")
+            ).otherwise(mean(f"sum_{column}").over(rolling_window_spec)),
+        )
+
+        grouped_df = grouped_df.withColumn(
+            rank_column, dense_rank().over(rank_window_spec)
+        )
+
+        grouped_df = grouped_df.withColumnRenamed(
+            rolling_column, rolling_column.replace("game_", "avg_")
+        ).withColumnRenamed(
+            rank_column, rank_column.replace("game_", "avg_")
+        )
+
+rank_roll_columns = list(set(grouped_df.columns) - set(['gameDate','playerTeam','season','teamGamesPlayedRolling']))
+
+# NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
+final_joined_rank = silver_games_schedule.join(
+    grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
+).orderBy(desc("gameDate"), "playerTeam").drop(*per_game_columns)
+
+display(final_joined_rank.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+        
+        # .select("gameDate", "playerTeam", "season", "sum_game_PP_goalsForPerPenalty", "rolling_sum_PP_goalsForPerPenalty", "rank_rolling_sum_PP_goalsForPerPenalty", "sum_game_Total_shotsOnGoalAgainst", "rolling_avg_Total_shotsOnGoalAgainst", "rank_rolling_avg_Total_shotsOnGoalAgainst")
+
+# COMMAND ----------
+
+# DBTITLE 1,Team Ranking Logic
 shooter_name = "Alex Ovechkin"
 n_games = 3
 
