@@ -669,12 +669,12 @@ def merge_games_data():
 
     # Create a window specification
     gameCountWindowSpec = (
-        Window.partitionBy("playerTeam")
+        Window.partitionBy("playerTeam", "season")
         .orderBy("gameDate")
         .rowsBetween(Window.unboundedPreceding, 0)
     )
     matchupCountWindowSpec = (
-        Window.partitionBy("playerTeam", "opposingTeam")
+        Window.partitionBy("playerTeam", "opposingTeam", "season")
         .orderBy("gameDate")
         .rowsBetween(Window.unboundedPreceding, 0)
     )
@@ -1337,12 +1337,12 @@ def aggregate_games_data():
 
     # Create a window specification
     gameCountWindowSpec = (
-        Window.partitionBy("playerId")
+        Window.partitionBy("playerId", "season")
         .orderBy("gameDate")
         .rowsBetween(Window.unboundedPreceding, 0)
     )
     matchupCountWindowSpec = (
-        Window.partitionBy("playerId", "playerTeam", "opposingTeam")
+        Window.partitionBy("playerId", "playerTeam", "opposingTeam", "season")
         .orderBy("gameDate")
         .rowsBetween(Window.unboundedPreceding, 0)
     )
@@ -1474,7 +1474,7 @@ def window_gold_game_data():
     ]
 
     matchupCountWindowSpec = (
-        Window.partitionBy("playerTeam", "opposingTeam")
+        Window.partitionBy("playerTeam", "opposingTeam", "season")
         .orderBy("gameDate")
         .rowsBetween(Window.unboundedPreceding, 0)
     )
