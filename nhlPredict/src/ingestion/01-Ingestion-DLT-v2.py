@@ -820,6 +820,7 @@ def merge_games_data():
             "playerTeam",
             "season",
             "teamGamesPlayedRolling",
+            "teamMatchupPlayedRolling",
             "isPlayoffGame",
         )
         .agg(
