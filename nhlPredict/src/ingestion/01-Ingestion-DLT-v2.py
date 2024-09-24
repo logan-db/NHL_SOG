@@ -659,6 +659,7 @@ def merge_games_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,silver_games_rankings
 @dlt.table(
     name="silver_games_rankings",
@@ -680,18 +681,18 @@ def merge_games_data():
     )
 
     pk_norm = (
-        silver_games_schedule
-        .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+        silver_games_schedule.withColumn(
+            "teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
+        )
         .withColumn(
-                "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
-            )
+            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+        )
         .withColumn(
             "game_PP_goalsForPerPenalty",
             round(
                 when(
                     col("game_Total_penaltiesAgainst") != 0,
-                    col("game_PP_goalsFor")
-                    / col("game_Total_penaltiesAgainst"),
+                    col("game_PP_goalsFor") / col("game_Total_penaltiesAgainst"),
                 ).otherwise(None),
                 2,
             ),
@@ -701,8 +702,7 @@ def merge_games_data():
             round(
                 when(
                     col("game_Total_penaltiesFor") != 0,
-                    col("game_PK_goalsAgainst")
-                    / col("game_Total_penaltiesFor"),
+                    col("game_PK_goalsAgainst") / col("game_Total_penaltiesFor"),
                 ).otherwise(None),
                 2,
             ),
@@ -712,8 +712,7 @@ def merge_games_data():
             round(
                 when(
                     col("game_Total_penaltiesAgainst") != 0,
-                    col("game_PP_shotsOnGoalFor")
-                    / col("game_Total_penaltiesAgainst"),
+                    col("game_PP_shotsOnGoalFor") / col("game_Total_penaltiesAgainst"),
                 ).otherwise(None),
                 2,
             ),
@@ -723,8 +722,7 @@ def merge_games_data():
             round(
                 when(
                     col("game_Total_penaltiesAgainst") != 0,
-                    col("game_PP_shotAttemptsFor")
-                    / col("game_Total_penaltiesAgainst"),
+                    col("game_PP_shotAttemptsFor") / col("game_Total_penaltiesAgainst"),
                 ).otherwise(None),
                 2,
             ),
@@ -734,8 +732,7 @@ def merge_games_data():
             round(
                 when(
                     col("game_Total_penaltiesFor") != 0,
-                    col("game_PK_shotsOnGoalAgainst")
-                    / col("game_Total_penaltiesFor"),
+                    col("game_PK_shotsOnGoalAgainst") / col("game_Total_penaltiesFor"),
                 ).otherwise(None),
                 2,
             ),
@@ -745,13 +742,15 @@ def merge_games_data():
             round(
                 when(
                     col("game_Total_penaltiesFor") != 0,
-                    col("game_PK_shotAttemptsAgainst")
-                    / col("game_Total_penaltiesFor"),
+                    col("game_PK_shotAttemptsAgainst") / col("game_Total_penaltiesFor"),
                 ).otherwise(None),
                 2,
             ),
         )
-        .withColumn("isPlayoffGame", when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)))
+        .withColumn(
+            "isPlayoffGame",
+            when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)),
+        )
     )
 
     fill_values = {
@@ -816,7 +815,13 @@ def merge_games_data():
     # Group by playerTeam and season
     grouped_df = (
         pk_norm_filled.filter(col("season") == max_season)
-        .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling", "isPlayoffGame")
+        .groupBy(
+            "gameDate",
+            "playerTeam",
+            "season",
+            "teamGamesPlayedRolling",
+            "isPlayoffGame",
+        )
         .agg(
             *[sum(column).alias(f"sum_{column}") for column in columns_to_rank],
         )
@@ -832,9 +837,9 @@ def merge_games_data():
         rank_column = f"rank_rolling_{column}"
 
         # Define the window specification
-        rank_window_spec = Window.partitionBy("teamGamesPlayedRolling", "isPlayoffGame").orderBy(
-            desc(rolling_column)
-        )
+        rank_window_spec = Window.partitionBy(
+            "teamGamesPlayedRolling", "isPlayoffGame"
+        ).orderBy(desc(rolling_column))
 
         if column not in per_game_columns:
             # Rolling Sum Logic
@@ -847,12 +852,9 @@ def merge_games_data():
             grouped_df = grouped_df.withColumn(
                 rank_column, dense_rank().over(rank_window_spec)
             )
-ƒ
             grouped_df = grouped_df.withColumnRenamed(
                 rolling_column, rolling_column.replace("game_", "sum_")
-            ).withColumnRenamed(
-                rank_column, rank_column.replace("game_", "sum_")
-            )
+            ).withColumnRenamed(rank_column, rank_column.replace("game_", "sum_"))
 
         else:
             # PerGame Rolling AVG Logic
@@ -870,17 +872,23 @@ def merge_games_data():
 
             grouped_df = grouped_df.withColumnRenamed(
                 rolling_column, rolling_column.replace("game_", "avg_")
-            ).withColumnRenamed(
-                rank_column, rank_column.replace("game_", "avg_")
-            )
+            ).withColumnRenamed(rank_column, rank_column.replace("game_", "avg_"))
 
-    rank_roll_columns = list(set(grouped_df.columns) - set(['gameDate','playerTeam','season','teamGamesPlayedRolling']))
+    rank_roll_columns = list(
+        set(grouped_df.columns)
+        - set(["gameDate", "playerTeam", "season", "teamGamesPlayedRolling"])
+    )
 
     # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
-    final_joined_rank = silver_games_schedule.join(
-        grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
-    ).orderBy(desc("gameDate"), "playerTeam").drop(*per_game_columns)
+    final_joined_rank = (
+        silver_games_schedule.join(
+            grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
+        )
+        .orderBy(desc("gameDate"), "playerTeam")
+        .drop(*per_game_columns)
+    )
     return final_joined_rank
+
 
 # COMMAND ----------
 
@@ -1475,9 +1483,8 @@ def window_gold_game_data():
     ]
 
     # Apply the count function within the window
-    gold_games_count = (
-        dlt.read("silver_games_rankings")
-        .drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
+    gold_games_count = dlt.read("silver_games_rankings").drop(
+        "EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode"
     )
 
     columns_to_iterate = [
@@ -1489,7 +1496,9 @@ def window_gold_game_data():
         col(c) for c in gold_games_count.columns
     ]  # Start with all existing columns
     game_avg_exprs = {
-        col_name: round(median(col(col_name)).over(Window.partitionBy("playerTeam", "season")), 2)
+        col_name: round(
+            median(col(col_name)).over(Window.partitionBy("playerTeam", "season")), 2
+        )
         for col_name in columns_to_iterate
     }
     opponent_game_avg_exprs = {
