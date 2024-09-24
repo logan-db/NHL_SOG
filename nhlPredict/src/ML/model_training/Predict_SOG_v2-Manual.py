@@ -1,23 +1,50 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC ## Load Data
+
+# COMMAND ----------
+
 import mlflow
+from pyspark.sql.functions import col
 
 target_col = "player_Total_shotsOnGoal"
 time_col = "gameDate"
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Load Data
+gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
 
 # COMMAND ----------
 
-import shutil
-import pandas as pd
+model_remove_1st_and_upcoming_games = gold_model_stats.filter(
+    (col("gameId").isNotNull())
+    # & (col("playerGamesPlayedRolling") > 0)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+)
 
-df_loaded = spark.table("lr_nhl_demo.dev.SOG_features_v2")
+df_loaded = model_remove_1st_and_upcoming_games
 
-# Preview data
-display(df_loaded.limit(5))
+model_remove_1st_and_upcoming_games.count()
+
+# COMMAND ----------
+
+assert (
+    model_remove_1st_and_upcoming_games.count()
+    == model_remove_1st_and_upcoming_games.select("gameId", "playerId")
+    .distinct()
+    .count()
+)
+
+# COMMAND ----------
+
+upcoming_games = gold_model_stats.filter(
+    (col("gameId").isNull())
+    # & (col("playerGamesPlayedRolling") > 0)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("gameDate") != "2024-01-17")
+)
+
+display(upcoming_games)
 
 # COMMAND ----------
 
@@ -395,6 +422,485 @@ feature_union = FeatureUnion(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Define Pre-Processing Pipeline
+# MAGIC - Dynamic Feature Selection based on 'feature_counts' list
+# MAGIC - Creates associated Feature Tables, with only preprocessed and selected features
+
+# COMMAND ----------
+
+# DBTITLE 1,log preprocessing pipeline
+import mlflow
+import os
+import shutil
+import tempfile
+import yaml
+import pandas as pd
+import numpy as np
+from mlflow.models import infer_signature
+from mlflow.pyfunc import PythonModel
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.feature_selection import SelectFromModel
+from databricks.feature_store import FeatureStoreClient
+from sklearn import set_config
+
+class PreprocessModel(PythonModel):
+    def __init__(self, pipeline, id_columns):
+        self.pipeline = pipeline
+        self.id_columns = id_columns
+
+    def fit(self, X, y):
+        self.pipeline.fit(X.drop(columns=self.id_columns), y)
+
+    def predict(self, context, model_input):
+        id_data = model_input[self.id_columns]
+        transformed_data = self.pipeline.transform(model_input.drop(columns=self.id_columns))
+        
+        # Check if transformed_data is a DataFrame
+        if not isinstance(transformed_data, pd.DataFrame):
+            # Convert transformed_data to DataFrame if it's not already
+            raise ValueError("transformed_data must be a DataFrame.", transformed_data)
+        
+        # Ensure index alignment before concatenation
+        transformed_data.index = id_data.index
+        
+        # Concatenate id_data with transformed_data
+        final_data = pd.concat([id_data, transformed_data], axis=1)
+        
+        return final_data
+
+def create_feature_store_tables(X_train, y_train, col_selector, preprocessor, n_estimators, feature_counts):
+    """
+    Create a single preprocess model and use it to create multiple Feature Store tables for different feature counts.
+
+    This function performs the following steps:
+    1. Creates a preprocessing pipeline with a configurable feature selector
+    2. Fits the pipeline on the training data
+    3. Saves the model using MLflow
+    4. Registers the model and sets it as champion
+    5. For each feature count:
+       a. Configures the feature selector
+       b. Transforms the datasets
+       c. Creates a Feature Store table with the processed data
+
+    Args:
+        X_train (DataFrame): Training features
+        y_train (Series): Training target variable
+        col_selector: Column selector for the pipeline
+        preprocessor: Preprocessor for the pipeline
+        feature_counts (list): List of feature counts to iterate over
+
+    Returns:
+        None
+    """
+
+    set_config(transform_output="pandas")
+
+    mlflow.end_run()
+    fs = FeatureStoreClient()
+    id_columns = ["gameId", "playerId"]
+
+    # Create a single preprocessing pipeline with a configurable feature selector
+    preprocess_pipeline = Pipeline([
+        ("column_selector", col_selector),
+        ("preprocessor", preprocessor),
+        ("feature_selector", SelectFromModel(
+            RandomForestRegressor(n_estimators=n_estimators, random_state=42),
+            max_features=feature_counts,  # We'll configure this later
+            threshold=-np.inf
+        )),
+    ])
+
+    # Fit the pipeline on the full dataset, excluding id columns
+    preprocess_pipeline.fit(X_train.drop(columns=id_columns), y_train)
+
+    # Get the current working directory
+    cwd = os.getcwd()
+
+    # Specify the file name of the model
+    file_name = f'preprocess_model_{feature_counts}'
+
+    # Create the full file path by joining the current working directory with the file name
+    path = os.path.join(cwd, file_name)
+
+    # Check if the directory exists
+    if os.path.exists(path):
+        # Check if the path is a directory
+        if os.path.isdir(path):
+            # Remove the directory and its contents
+            shutil.rmtree(path)
+            print(f"The directory '{path}' and its contents have been deleted.")
+        else:
+            print(f"The path '{path}' is not a directory.")
+    else:
+        print(f"The directory '{path}' does not exist.")
+
+    # Create an instance of the custom PythonModel
+    pyfunc_preprocess_model = PreprocessModel(preprocess_pipeline, id_columns)
+
+    # Save the model using MLflow
+    with mlflow.start_run() as run:
+        mlflow.pyfunc.save_model(
+            path=file_name,
+            python_model=pyfunc_preprocess_model,
+            input_example=X_train.iloc[:5],
+            signature=infer_signature(X_train, preprocess_pipeline.transform(X_train)),
+        )
+
+    print("MODEL RAN!")
+    preprocess_model_uri = mlflow.get_artifact_uri(file_name)
+    preprocess_run = mlflow.last_active_run()
+    run_id = preprocess_run.info.run_id
+
+    print(f"Model preprocess_model_uri: {preprocess_model_uri}")
+    print(f"preprocess_run: {preprocess_run}")
+    print(f"Model run_id: {run_id}")
+
+    artifact_uri_base_path = f"/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/ML/model_training/{file_name}"
+
+    # Set up a local dir for downloading the artifacts.
+    tmp_dir = tempfile.mkdtemp()
+
+    client = mlflow.tracking.MlflowClient()
+
+    print("DOWNLOAD START - CONDA")
+    # Fix conda.yaml
+    conda_file_path = mlflow.artifacts.download_artifacts(
+        artifact_uri=f"{artifact_uri_base_path}/conda.yaml", dst_path=tmp_dir
+    )
+    with open(conda_file_path) as f:
+        conda_libs = yaml.load(f, Loader=yaml.FullLoader)
+    pandas_lib_exists = any(
+        [lib.startswith("pandas==") for lib in conda_libs["dependencies"][-1]["pip"]]
+    )
+    if not pandas_lib_exists:
+        print("Adding pandas dependency to conda.yaml")
+        conda_libs["dependencies"][-1]["pip"].append(f"pandas=={pd.__version__}")
+
+        with open(f"{tmp_dir}/conda.yaml", "w") as f:
+            f.write(yaml.dump(conda_libs))
+        client.log_artifact(
+            run_id=run_id, local_path=conda_file_path, artifact_path=file_name
+        )
+
+    print("DOWNLOAD START - REQS")
+    # Fix requirements.txt
+    venv_file_path = mlflow.artifacts.download_artifacts(
+        artifact_uri=f"{artifact_uri_base_path}/requirements.txt", dst_path=tmp_dir
+    )
+    with open(venv_file_path) as f:
+        venv_libs = f.readlines()
+    venv_libs = [lib.strip() for lib in venv_libs]
+    pandas_lib_exists = any([lib.startswith("pandas==") for lib in venv_libs])
+    if not pandas_lib_exists:
+        print("Adding pandas dependency to requirements.txt")
+        venv_libs.append(f"pandas=={pd.__version__}")
+
+        with open(f"{tmp_dir}/requirements.txt", "w") as f:
+            f.write("\n".join(venv_libs))
+        client.log_artifact(
+            run_id=run_id, local_path=venv_file_path, artifact_path=file_name
+        )
+
+    shutil.rmtree(tmp_dir)
+
+    uc_model_name = f"lr_nhl_demo.dev.{file_name}"
+
+    # Register the model
+    print(f"Registering model {uc_model_name}...")
+    mlflow.register_model(artifact_uri_base_path, uc_model_name)
+
+    # Set as Champion
+    print("Setting model as Champion...")
+    client = mlflow.tracking.MlflowClient()
+    model_version_infos = client.search_model_versions(f"name = '{uc_model_name}'")
+    new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
+    client.set_registered_model_alias(uc_model_name, "champion", new_model_version)
+
+    pp_champion_version = client.get_model_version_by_alias(
+        uc_model_name, "champion"
+    )
+
+    preprocess_model_name = pp_champion_version.name
+    preprocess_model_version = pp_champion_version.version
+
+    preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+    preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+    mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
+
+    print(f"Creating Feature Store table for {feature_counts} features...")
+
+    # Transform datasets using the configured model
+    X_train_processed = pyfunc_preprocess_model.predict(None, X_train)
+
+    X_train_processed_spark = spark.createDataFrame(X_train_processed)
+
+    display(X_train_processed_spark)
+
+    table_name = f"lr_nhl_demo.dev.player_features_{feature_counts}"
+
+    print(f"Creating Feature Store table {table_name}...")
+
+    try:
+        fs.drop_table(table_name)
+        print(f"Dropped Feature Store table {table_name}...")
+    except:
+        pass
+
+    customer_feature_table = fs.create_table(
+        name=table_name,
+        primary_keys=id_columns,
+        schema=X_train_processed_spark.schema,
+        description=f"Pre-Processed data with feature selection applied: {feature_counts} Features included. Represents player stats, game by game to be used for player level predictions",
+    )
+
+    fs.write_table(
+        name=table_name,
+        df=X_train_processed_spark,
+        mode="overwrite",
+    )
+
+    print(f"Feature Store table {table_name} created SUCCESSFULLY...")
+
+# COMMAND ----------
+
+# Convert df_loaded to Pandas DataFrame
+df_loaded_pd = df_loaded.toPandas()
+
+# Separate target column from features
+X = df_loaded_pd.drop([target_col], axis=1)
+y = df_loaded_pd[target_col]
+
+# COMMAND ----------
+
+feature_counts = [25, 50, 100, 200]
+X_train_processed_spark = create_feature_store_tables(X, y, col_selector, preprocessor, 1, 50) # Replace with feature_counts
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Troubleshooting
+
+# COMMAND ----------
+
+# Get the artifact URI for the saved model
+artifact_uri = mlflow.get_artifact_uri("preprocess_model") + "/conda.yaml"
+
+print(f"Model artifact URI: {artifact_uri}")
+
+# The rest of your code remains the same
+preprocess_run = mlflow.last_active_run()
+run_id = preprocess_run.info.run_id
+
+tmp_dir = tempfile.mkdtemp()
+client = mlflow.tracking.MlflowClient()
+
+conda_file_path = mlflow.artifacts.download_artifacts(
+    "/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/ML/model_training/preprocess_model/conda.yaml"
+)
+
+# COMMAND ----------
+
+preprocess_model_uri = f"runs:/{preprocess_run.info.run_id}/preprocess_model"
+preprocess_model_uri
+
+# COMMAND ----------
+
+conda_file_path = mlflow.artifacts.download_artifacts(
+    artifact_uri=f"/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/ML/model_training/preprocess_model/conda.yaml", dst_path=tmp_dir
+)
+with open(conda_file_path) as f:
+    conda_libs = yaml.load(f, Loader=yaml.FullLoader)
+pandas_lib_exists = any(
+    [lib.startswith("pandas==") for lib in conda_libs["dependencies"][-1]["pip"]]
+)
+if not pandas_lib_exists:
+    print("Adding pandas dependency to conda.yaml")
+    conda_libs["dependencies"][-1]["pip"].append(f"pandas=={pd.__version__}")
+
+    with open(f"{tmp_dir}/conda.yaml", "w") as f:
+        f.write(yaml.dump(conda_libs))
+    client.log_artifact(
+        run_id=run_id, local_path=conda_file_path, artifact_path="preprocess_model"
+    )
+
+# Fix requirements.txt
+venv_file_path = mlflow.artifacts.download_artifacts(
+    artifact_uri=f"/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/ML/model_training/preprocess_model/requirements.txt", dst_path=tmp_dir
+)
+with open(venv_file_path) as f:
+    venv_libs = f.readlines()
+venv_libs = [lib.strip() for lib in venv_libs]
+pandas_lib_exists = any([lib.startswith("pandas==") for lib in venv_libs])
+if not pandas_lib_exists:
+    print("Adding pandas dependency to requirements.txt")
+    venv_libs.append(f"pandas=={pd.__version__}")
+
+    with open(f"{tmp_dir}/requirements.txt", "w") as f:
+        f.write("\n".join(venv_libs))
+    client.log_artifact(
+        run_id=run_id, local_path=venv_file_path, artifact_path="preprocess_model"
+    )
+
+shutil.rmtree(tmp_dir)
+
+# Register the model
+preprocess_model_uri = f"runs:/{preprocess_run.info.run_id}/preprocess_model"
+mlflow.register_model(preprocess_model_uri, "lr_nhl_demo.dev.preprocess_model")
+
+# Set as Champion
+client = mlflow.tracking.MlflowClient()
+model_version_infos = client.search_model_versions("name = 'lr_nhl_demo.dev.preprocess_model'")
+new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
+client.set_registered_model_alias("lr_nhl_demo.dev.preprocess_model", "champion", new_model_version)
+
+pp_champion_version = client.get_model_version_by_alias(
+    "lr_nhl_demo.dev.preprocess_model", "champion"
+)
+
+preprocess_model_name = pp_champion_version.name
+preprocess_model_version = pp_champion_version.version
+
+preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+# COMMAND ----------
+
+import os
+
+model_path = preprocess_model_uri.replace("runs:/", "/dbfs/mlflow/")
+print(f"Checking model path: {model_path}")
+if os.path.exists(model_path):
+    print("Model directory exists")
+    print("Contents:")
+    print(os.listdir(model_path))
+else:
+    print("Model directory does not exist")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Previous Methodology
+
+# COMMAND ----------
+
+import mlflow
+import os
+import shutil
+import tempfile
+import yaml
+
+preprocess_run = mlflow.last_active_run()
+run_id = preprocess_run.info.run_id
+
+# Set up a local dir for downloading the artifacts.
+tmp_dir = tempfile.mkdtemp()
+
+client = mlflow.tracking.MlflowClient()
+
+# Fix conda.yaml
+conda_file_path = mlflow.artifacts.download_artifacts(
+    artifact_uri=f"runs:/{run_id}/preprocess_model/conda.yaml", dst_path=tmp_dir
+)
+with open(conda_file_path) as f:
+    conda_libs = yaml.load(f, Loader=yaml.FullLoader)
+pandas_lib_exists = any(
+    [lib.startswith("pandas==") for lib in conda_libs["dependencies"][-1]["pip"]]
+)
+if not pandas_lib_exists:
+    print("Adding pandas dependency to conda.yaml")
+    conda_libs["dependencies"][-1]["pip"].append(f"pandas=={pd.__version__}")
+
+    with open(f"{tmp_dir}/conda.yaml", "w") as f:
+        f.write(yaml.dump(conda_libs))
+    client.log_artifact(
+        run_id=run_id, local_path=conda_file_path, artifact_path="preprocess_model"
+    )
+
+# Fix requirements.txt
+venv_file_path = mlflow.artifacts.download_artifacts(
+    artifact_uri=f"runs:/{run_id}/preprocess_model/requirements.txt", dst_path=tmp_dir
+)
+with open(venv_file_path) as f:
+    venv_libs = f.readlines()
+venv_libs = [lib.strip() for lib in venv_libs]
+pandas_lib_exists = any([lib.startswith("pandas==") for lib in venv_libs])
+if not pandas_lib_exists:
+    print("Adding pandas dependency to requirements.txt")
+    venv_libs.append(f"pandas=={pd.__version__}")
+
+    with open(f"{tmp_dir}/requirements.txt", "w") as f:
+        f.write("\n".join(venv_libs))
+    client.log_artifact(
+        run_id=run_id, local_path=venv_file_path, artifact_path="preprocess_model"
+    )
+
+shutil.rmtree(tmp_dir)
+
+
+# Get the run ID and model URI
+preprocess_model_uri = f"runs:/{preprocess_run.info.run_id}/preprocess_model"
+
+# Register the model
+mlflow.register_model(preprocess_model_uri, "lr_nhl_demo.dev.preprocess_model")
+
+# Set as Champion based on max version
+client = mlflow.tracking.MlflowClient()
+model_version_infos = client.search_model_versions("name = 'lr_nhl_demo.dev.preprocess_model'")
+new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
+client.set_registered_model_alias("lr_nhl_demo.dev.preprocess_model", "champion", new_model_version)
+
+pp_champion_version = client.get_model_version_by_alias(
+    "lr_nhl_demo.dev.preprocess_model", "champion"
+)
+
+preprocess_model_name = pp_champion_version.name
+preprocess_model_version = pp_champion_version.version
+
+preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+# COMMAND ----------
+
+# Get the run ID and model URI
+preprocess_model_uri = f"runs:/{preprocess_run.info.run_id}/preprocess_model"
+
+# Register the model
+mlflow.register_model(preprocess_model_uri, "lr_nhl_demo.dev.preprocess_model")
+
+# COMMAND ----------
+
+# Set as Champion based on max version
+client = mlflow.tracking.MlflowClient()
+model_version_infos = client.search_model_versions("name = 'lr_nhl_demo.dev.preprocess_model'")
+new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
+client.set_registered_model_alias("lr_nhl_demo.dev.preprocess_model", "champion", new_model_version)
+
+pp_champion_version = client.get_model_version_by_alias(
+    "lr_nhl_demo.dev.preprocess_model", "champion"
+)
+
+preprocess_model_name = pp_champion_version.name
+preprocess_model_version = pp_champion_version.version
+
+preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+# COMMAND ----------
+
+X_train_processed = preprocess_model.predict(X_train)
+
+# COMMAND ----------
+
+X_train_processed_UC = mlflow.data.load_delta(table_name="lr_nhl_demo.dev.X_train_processed", version="0")
+X_train_processed_UC_PD = X_train_processed_UC.df.toPandas()
+
+X_train_processed_UC_PD
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Train - Validation - Test Split
 # MAGIC The input data is split by AutoML into 3 sets:
 # MAGIC - Train (60% of the dataset used to train the model)
@@ -467,10 +973,11 @@ X_train, X_val, y_train, y_val = train_test_split(
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Test Feature Selection Code
+# MAGIC ## Feature Selection Exploration
 
 # COMMAND ----------
 
+# DBTITLE 1,Create Features Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import (
     SelectFromModel,
@@ -487,6 +994,20 @@ from lightgbm import LGBMRegressor
 from sklearn import set_config
 
 set_config(transform_output="pandas")
+
+# Create the full pipeline
+features_pipeline = Pipeline(
+    [
+        ("column_selector", col_selector),
+        ("preprocessor", preprocessor),
+        (
+            "feature_selector",
+            SelectFromModel(RandomForestRegressor(n_estimators=200, random_state=42), max_features=150, threshold=-np.inf),
+        ),
+    ]
+)
+
+# COMMAND ----------
 
 # Now create the FeatureUnion with fitted pipelines
 # feature_union = FeatureUnion(
@@ -507,18 +1028,6 @@ set_config(transform_output="pandas")
 #     ]
 # )
 
-# # Create the full pipeline
-# features_pipeline = Pipeline(
-#     [
-#         ("column_selector", col_selector),
-#         ("preprocessor", preprocessor),
-#         (
-#             "feature_selector",
-#             SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
-#         ),
-#     ]
-# )
-
 # features_pipeline = Pipeline(
 #     [
 #         ('column_selector', col_selector),
@@ -531,27 +1040,114 @@ set_config(transform_output="pandas")
 
 # COMMAND ----------
 
-# DBTITLE 1,feature selection testing
-from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import RFE, RFECV
+# DBTITLE 1,Feature Selection Threshold Function
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import cross_val_score
+from sklearn.feature_selection import SelectFromModel
+from sklearn.ensemble import RandomForestRegressor
 from lightgbm import LGBMRegressor
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.datasets import make_regression
-from sklearn.model_selection import RepeatedKFold
+from sklearn.pipeline import Pipeline
 
-# Initialize the LGBMRegressor
-lgbm = LGBMRegressor(random_state=42)
+def evaluate_threshold(X_train, y_train, pipeline, thresholds):
+    scores = []
+    n_features = []
+    
+    for threshold in thresholds:
+        # Update the feature_selector step with the new threshold
+        pipeline.named_steps['feature_selector'] = SelectFromModel(
+            RandomForestRegressor(n_estimators=5, random_state=42),
+            threshold=threshold
+        )
+        
+        # Fit the pipeline to get the selected features
+        pipeline.fit(X_train, y_train)
+        
+        # Get the number of selected features
+        selected_features = pipeline.named_steps['feature_selector'].get_support()
+        n_features.append(np.sum(selected_features))
+        
+        # Evaluate the pipeline
+        score = cross_val_score(pipeline, X_train, y_train, cv=5, scoring='neg_mean_squared_error').mean()
+        scores.append(-score)  # Convert to positive MSE
+    
+    return scores, n_features
 
-# Set up RFECV
-rfecv = RFECV(estimator=lgbm, step=20, cv=RepeatedKFold(n_splits=3, n_repeats=2, random_state=42), scoring='neg_mean_squared_error', min_features_to_select=100, verbose=1)
+# COMMAND ----------
 
-# Create a pipeline with RFECV
-pipeline_rfecv = Pipeline([
-    ('column_selector', col_selector),
-    ('preprocessor', preprocessor),
-    ('feature_selection_rfecv', rfecv),
-    ('model', lgbm)
-])
+# DBTITLE 1,Get Optimal Threshold
+run_importances = False
+
+if run_importances:
+    # Define your pipeline
+    features_pipeline = Pipeline(
+        [
+            ("column_selector", col_selector),
+            ("preprocessor", preprocessor),
+            (
+                "feature_selector",
+                SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
+                
+            ),
+            ("regressor", LGBMRegressor(random_state=42)),
+        ]
+    )
+
+    # Define thresholds to try
+    thresholds = [1e-5, 1e-4, 1e-3, 1e-2, 0.1, 0.15, 0.2, 0.25]
+
+    # Evaluate the pipeline for different thresholds
+    scores, n_features = evaluate_threshold(X_train, y_train, features_pipeline, thresholds)
+
+    # Plot results
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    ax1.set_xlabel('Threshold')
+    ax1.set_ylabel('Mean Squared Error', color='tab:blue')
+    ax1.plot(thresholds, scores, color='tab:blue', marker='o')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Number of Features', color='tab:orange')
+    ax2.plot(thresholds, n_features, color='tab:orange', marker='s')
+    ax2.tick_params(axis='y', labelcolor='tab:orange')
+
+    plt.title('Feature Selection Threshold vs. MSE and Number of Features')
+    plt.xscale('log')
+    fig.tight_layout()
+    plt.show()
+
+    # Print the results
+    for threshold, score, n_feat in zip(thresholds, scores, n_features):
+        print(f"Threshold: {threshold:.5f}, MSE: {score:.4f}, Features: {n_feat}")
+
+    # Find the threshold with the lowest MSE
+    best_threshold = thresholds[np.argmin(scores)]
+    print(f"\nBest threshold: {best_threshold:.5f}")
+
+# COMMAND ----------
+
+# DBTITLE 1,feature selection testing
+# from sklearn.pipeline import Pipeline
+# from sklearn.feature_selection import RFE, RFECV
+# from lightgbm import LGBMRegressor
+# from sklearn.model_selection import train_test_split, cross_val_score
+# from sklearn.datasets import make_regression
+# from sklearn.model_selection import RepeatedKFold
+
+# # Initialize the LGBMRegressor
+# lgbm = LGBMRegressor(random_state=42)
+
+# # Set up RFECV
+# rfecv = RFECV(estimator=lgbm, step=20, cv=RepeatedKFold(n_splits=3, n_repeats=2, random_state=42), scoring='neg_mean_squared_error', min_features_to_select=100, verbose=1)
+
+# # Create a pipeline with RFECV
+# pipeline_rfecv = Pipeline([
+#     ('column_selector', col_selector),
+#     ('preprocessor', preprocessor),
+#     ('feature_selection_rfecv', rfecv),
+#     ('model', lgbm)
+# ])
 
 # COMMAND ----------
 
@@ -570,10 +1166,65 @@ pipeline_rfecv = Pipeline([
 
 # COMMAND ----------
 
+# DBTITLE 1,Feature Selection Fit
 set_config(transform_output="pandas")
 
+# Fit the pipeline to data
 features_pipeline.fit(X_train, y_train)
 
+# COMMAND ----------
+
+# DBTITLE 1,Get minimum importance value
+# Get the feature selector step
+feature_selector = features_pipeline.named_steps['feature_selector']
+
+# Get the selected feature importances
+importances = feature_selector.estimator_.feature_importances_
+
+# Sort the importances in descending order
+sorted_importances = np.sort(importances)[::-1]
+
+# Get the minimum threshold value (importance of the 150th feature)
+min_threshold = sorted_importances[149]
+
+print(f"Minimum feature threshold value: {min_threshold}")
+
+# COMMAND ----------
+
+import matplotlib.pyplot as plt
+
+# Slice the sorted importances to get the top 150 features
+top_n_importances = sorted_importances[:150]
+
+plt.figure(figsize=(12, 6))
+plt.plot(range(1, len(top_n_importances) + 1), top_n_importances, marker='o', markersize=3)
+plt.title('Top 150 Feature Importances')
+plt.xlabel('Feature Number')
+plt.ylabel('Importance')
+plt.grid(True)
+plt.yscale('log')  # Using log scale to better visualize the drop-off
+plt.tight_layout()
+plt.show()
+
+# COMMAND ----------
+
+# Assuming 'feature_names' is a list of all feature names
+# Get the indices of the top 10 features
+feature_names = [f"Feature_{i}" for i in range(len(importances))]
+top_10_indices = np.argsort(sorted_importances)[-10:][::-1]
+
+# Get the top 10 feature names and importances
+top_10_features = [feature_names[i] for i in top_10_indices]
+top_10_importances = sorted_importances[top_10_indices]
+
+# Create a DataFrame
+df_top_10 = pd.DataFrame({
+    'Feature': top_10_features,
+    'Importance': top_10_importances
+})
+
+# Display the DataFrame
+print(df_top_10)
 
 # COMMAND ----------
 
@@ -583,8 +1234,9 @@ processed_X_train
 
 # COMMAND ----------
 
+# DBTITLE 1,Get Number of Features Selected
 # Get selected columns
-selected_columns = features_pipeline.named_steps["feature_selection_rfr"].get_support()
+selected_columns = features_pipeline.named_steps["feature_selector"].get_support()
 print("Selected feature names count:", len(selected_columns))
 
 # TO DO: convert X_train below to be the preprocessed dataset
@@ -602,10 +1254,6 @@ print("Selected feature names count:", len(selected_columns))
 
 # COMMAND ----------
 
-help(LGBMRegressor)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ### Define the objective function
 # MAGIC The objective function used to find optimal hyperparameters. By default, this notebook only runs
@@ -615,185 +1263,8 @@ help(LGBMRegressor)
 
 # COMMAND ----------
 
-# DBTITLE 1,log preprocessing pipeline
-import mlflow
-import os
-from mlflow.models import Model, infer_signature, ModelSignature
-from mlflow.pyfunc import PythonModel
-import sklearn
-from sklearn import set_config
-from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.feature_selection import SelectFromModel
-import joblib
-
-
-class PreprocessModel(PythonModel):
-    def __init__(self, pipeline):
-        self.pipeline = pipeline
-
-    def fit(self, X, y):
-        self.pipeline.fit(X, y)
-
-    def predict(self, context, model_input):
-        return self.pipeline.transform(model_input)
-
-
-# Create the preprocessing pipeline
-preprocess_pipeline = Pipeline(
-    [
-        ("column_selector", col_selector),
-        ("preprocessor", preprocessor),
-        (
-            "feature_selector",
-            SelectFromModel(RandomForestRegressor(n_estimators=5, random_state=42)),
-        ),
-    ]
-)
-
-# Create an instance of the custom PythonModel
-pyfunc_preprocess_model = PreprocessModel(preprocess_pipeline)
-
-# Fit the model
-pyfunc_preprocess_model.fit(X_train, y_train)
-
-# Get the current working directory
-cwd = os.getcwd()
-
-# Specify the file name
-file_name = 'preprocess_model'
-
-# Create the full file path by joining the current working directory with the file name
-path = os.path.join(cwd, file_name)
-
-# Check if the directory exists
-if os.path.exists(path):
-    # Check if the path is a directory
-    if os.path.isdir(path):
-        # Remove the directory and its contents
-        shutil.rmtree(path)
-        print(f"The directory '{path}' and its contents have been deleted.")
-    else:
-        print(f"The path '{path}' is not a directory.")
-else:
-    print(f"The directory '{path}' does not exist.")
-
-# Save the model using MLflow
-with mlflow.start_run() as run:
-    mlflow.pyfunc.save_model(
-        path="preprocess_model",
-        python_model=pyfunc_preprocess_model,
-        input_example=X_train.iloc[:5],
-        signature=infer_signature(X_train, preprocess_pipeline.transform(X_train)),
-    )
-
-    # Log the model
-    mlflow.pyfunc.log_model(
-        artifact_path="preprocess_model",
-        python_model=pyfunc_preprocess_model,
-        input_example=X_train.iloc[:5],
-        signature=infer_signature(X_train, preprocess_pipeline.transform(X_train)),
-    )
-
-# Load the saved model
-loaded_model = mlflow.pyfunc.load_model("preprocess_model")
-
-# Transform datasets using the loaded model
-X_val_processed = loaded_model.predict(X_val)
-X_train_processed = loaded_model.predict(X_train)
-X_test_processed = loaded_model.predict(X_test)
-
-# COMMAND ----------
-
-import mlflow
-import os
-import shutil
-import tempfile
-import yaml
-
-preprocess_run = mlflow.last_active_run()
-run_id = preprocess_run.info.run_id
-
-# Set up a local dir for downloading the artifacts.
-tmp_dir = tempfile.mkdtemp()
-
-client = mlflow.tracking.MlflowClient()
-
-# Fix conda.yaml
-conda_file_path = mlflow.artifacts.download_artifacts(
-    artifact_uri=f"runs:/{run_id}/preprocess_model/conda.yaml", dst_path=tmp_dir
-)
-with open(conda_file_path) as f:
-    conda_libs = yaml.load(f, Loader=yaml.FullLoader)
-pandas_lib_exists = any(
-    [lib.startswith("pandas==") for lib in conda_libs["dependencies"][-1]["pip"]]
-)
-if not pandas_lib_exists:
-    print("Adding pandas dependency to conda.yaml")
-    conda_libs["dependencies"][-1]["pip"].append(f"pandas=={pd.__version__}")
-
-    with open(f"{tmp_dir}/conda.yaml", "w") as f:
-        f.write(yaml.dump(conda_libs))
-    client.log_artifact(
-        run_id=run_id, local_path=conda_file_path, artifact_path="preprocess_model"
-    )
-
-# Fix requirements.txt
-venv_file_path = mlflow.artifacts.download_artifacts(
-    artifact_uri=f"runs:/{run_id}/preprocess_model/requirements.txt", dst_path=tmp_dir
-)
-with open(venv_file_path) as f:
-    venv_libs = f.readlines()
-venv_libs = [lib.strip() for lib in venv_libs]
-pandas_lib_exists = any([lib.startswith("pandas==") for lib in venv_libs])
-if not pandas_lib_exists:
-    print("Adding pandas dependency to requirements.txt")
-    venv_libs.append(f"pandas=={pd.__version__}")
-
-    with open(f"{tmp_dir}/requirements.txt", "w") as f:
-        f.write("\n".join(venv_libs))
-    client.log_artifact(
-        run_id=run_id, local_path=venv_file_path, artifact_path="preprocess_model"
-    )
-
-shutil.rmtree(tmp_dir)
-
-# COMMAND ----------
-
-# Get the run ID and model URI
-preprocess_model_uri = f"runs:/{preprocess_run.info.run_id}/preprocess_model"
-
-# Register the model
-mlflow.register_model(preprocess_model_uri, "lr_nhl_demo.dev.preprocess_model")
-
-# COMMAND ----------
-
-# Set as Champion based on max version
-client = mlflow.tracking.MlflowClient()
-model_version_infos = client.search_model_versions("name = 'lr_nhl_demo.dev.preprocess_model'")
-new_model_version = max([model_version_info.version for model_version_info in model_version_infos])
-client.set_registered_model_alias("lr_nhl_demo.dev.preprocess_model", "champion", new_model_version)
-
-pp_champion_version = client.get_model_version_by_alias(
-    "lr_nhl_demo.dev.preprocess_model", "champion"
-)
-
-preprocess_model_name = pp_champion_version.name
-preprocess_model_version = pp_champion_version.version
-
-preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
-preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
-
-# COMMAND ----------
-
-X_train_processed = preprocess_model.predict(X_train)
-
-# COMMAND ----------
-
-X_train_processed_UC = mlflow.data.load_delta(table_name="lr_nhl_demo.dev.X_train_processed", version="0")
-X_train_processed_UC_PD = X_train_processed_UC.df.toPandas()
-
-X_train_processed_UC_PD
+# split feature table into train test val and evaluate
+# then train best model on FULL data of the Feature table with best score
 
 # COMMAND ----------
 
@@ -1160,20 +1631,21 @@ if shap_enabled:
 
     # Sample background data for SHAP Explainer. Increase the sample size to reduce variance.
     train_sample = X_train_processed.sample(
-        n=min(100, X_train_processed.shape[0]), random_state=729986891
+        n=min(1000, X_train_processed.shape[0]), random_state=729986891
     ).fillna(mode)
 
     # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
     example = X_val_processed.sample(
-        n=min(100, X_val_processed.shape[0]), random_state=729986891
+        n=min(1000, X_val_processed.shape[0]), random_state=729986891
     ).fillna(mode)
 
     # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
     predict = lambda x: model.predict(
         pd.DataFrame(x, columns=X_train_processed.columns)
     )
-    explainer = KernelExplainer(predict, train_sample, link="identity")
-    shap_values = explainer.shap_values(example, l1_reg=False, nsamples=500)
+    explainer = KernelExplainer(predict, train_sample
+                                , link="identity")
+    shap_values = explainer.shap_values(example, l1_reg=False, nsamples=1000)
     summary_plot(shap_values, example)
 
 # COMMAND ----------

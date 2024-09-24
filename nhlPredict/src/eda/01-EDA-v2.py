@@ -52,16 +52,83 @@ display(silver_games_rankings.filter(col('playerTeam')=="VAN").orderBy("gameDate
 
 # COMMAND ----------
 
-display(player_game_stats_v2)
+upcoming_games = gold_model_data_v2.filter(
+    (col("gameId").isNull())
+    # & (col("playerGamesPlayedRolling") > 0)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("gameDate") != "2024-01-17")
+)
+
+display(upcoming_games)
+
+# COMMAND ----------
+
+select_cols = [
+    "playerId",
+    "season",
+    "name",
+    "gameId",
+    "playerTeam",
+    "opposingTeam",
+    "home_or_away",
+    "gameDate",
+    "position",
+    "icetime",
+    "shifts",
+    "onIce_corsiPercentage",
+    "offIce_corsiPercentage",
+    "onIce_fenwickPercentage",
+    "offIce_fenwickPercentage",
+    "iceTimeRank",
+    "I_F_primaryAssists",
+    "I_F_secondaryAssists",
+    "I_F_shotsOnGoal",
+    "I_F_missedShots",
+    "I_F_blockedShotAttempts",
+    "I_F_shotAttempts",
+    "I_F_points",
+    "I_F_goals",
+    "I_F_rebounds",
+    "I_F_reboundGoals",
+    "I_F_savedShotsOnGoal",
+    "I_F_savedUnblockedShotAttempts",
+    "I_F_hits",
+    "I_F_takeaways",
+    "I_F_giveaways",
+    "I_F_lowDangerShots",
+    "I_F_mediumDangerShots",
+    "I_F_highDangerShots",
+    "I_F_lowDangerGoals",
+    "I_F_mediumDangerGoals",
+    "I_F_highDangerGoals",
+    "I_F_unblockedShotAttempts",
+    "OnIce_F_shotsOnGoal",
+    "OnIce_F_missedShots",
+    "OnIce_F_blockedShotAttempts",
+    "OnIce_F_shotAttempts",
+    "OnIce_F_goals",
+    "OnIce_F_lowDangerShots",
+    "OnIce_F_mediumDangerShots",
+    "OnIce_F_highDangerShots",
+    "OnIce_F_lowDangerGoals",
+    "OnIce_F_mediumDangerGoals",
+    "OnIce_F_highDangerGoals",
+    "OnIce_A_shotsOnGoal",
+    "OnIce_A_shotAttempts",
+    "OnIce_A_goals",
+    "OffIce_F_shotAttempts",
+    "OffIce_A_shotAttempts",
+]
+
+
+display(player_game_stats_v2.select(*select_cols))
 
 # COMMAND ----------
 
 # DBTITLE 1,Player Ranking Logic
-silver_games_schedule = silver_games_schedule_v2
-
 # Create a window specification
 gameCountWindowSpec = (
-    Window.partitionBy("playerTeam")
+    Window.partitionBy("playerTeam", "season")
     .orderBy("gameDate")
     .rowsBetween(Window.unboundedPreceding, 0)
 )

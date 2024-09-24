@@ -22,11 +22,6 @@ from databricks.feature_store import FeatureStoreClient
 
 # COMMAND ----------
 
-target_col = "player_ShotsOnGoalInGame"
-time_col = "gameDate"
-
-# COMMAND ----------
-
 min_player_matchup_played_rolling = gold_model_stats.agg(
     F.min("playerGamesPlayedRolling")
 ).collect()[0][0]
@@ -44,7 +39,7 @@ display(gold_model_stats.filter(F.col("gameId").isNull()))
 
 model_remove_1st_and_upcoming_games = gold_model_stats.filter(
     (F.col("gameId").isNotNull())
-    & (F.col("playerGamesPlayedRolling") > 0)
+    # & (F.col("playerGamesPlayedRolling") > 0)
     & (F.col("rolling_playerTotalTimeOnIceInGame") > 180)
 )
 
@@ -54,7 +49,7 @@ model_remove_1st_and_upcoming_games.count()
 
 upcoming_games = gold_model_stats.filter(
     (F.col("gameId").isNull())
-    & (F.col("playerGamesPlayedRolling") > 0)
+    # & (F.col("playerGamesPlayedRolling") > 0)
     & (F.col("rolling_playerTotalTimeOnIceInGame") > 180)
     & (F.col("gameDate") != "2024-01-17")
 )
