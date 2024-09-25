@@ -526,7 +526,7 @@ def create_feature_store_tables(
     # Save the model using MLflow
     with mlflow.start_run() as run:
         mlflow.pyfunc.save_model(
-            path=file_name,
+            path=path,
             python_model=pyfunc_preprocess_model,
             input_example=X_train.iloc[:5],
             signature=infer_signature(X_train, preprocess_pipeline.transform(X_train)),
@@ -541,7 +541,7 @@ def create_feature_store_tables(
     print(f"preprocess_run: {preprocess_run}")
     print(f"Model run_id: {run_id}")
 
-    artifact_uri_base_path = f"/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/ML/model_training/{file_name}"
+    artifact_uri_base_path = path
 
     # Set up a local dir for downloading the artifacts.
     tmp_dir = tempfile.mkdtemp()
@@ -659,11 +659,11 @@ X = df_loaded_pd.drop([target_col], axis=1)
 y = df_loaded_pd[target_col]
 
 # COMMAND ----------
-
+# feature_counts_param = dbutils.widgets.get("train_model_param")
 feature_counts = [25, 50, 100, 200]
 for count in feature_counts:
     print(f"Feature Engineering Pipeline RUNNING on {count} features")
-    create_feature_store_tables(X, y, col_selector, preprocessor, 100, count)
+    create_feature_store_tables(X, y, col_selector, preprocessor, 5, count)
     print(f"Feature Engineering Pipeline COMPLETE on {count} features")
 
 # COMMAND ----------
