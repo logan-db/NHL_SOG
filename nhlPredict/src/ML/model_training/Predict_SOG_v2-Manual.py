@@ -20,9 +20,17 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,random split
+from databricks.feature_store import FeatureStoreClient
 from sklearn.model_selection import train_test_split
 
+fs = FeatureStoreClient()
+
+# feature_counts = [25, 50, 100, 200]
+df_loaded = fs.read_table(name="lr_nhl_demo.dev.player_features_200")
+
+# COMMAND ----------
+
+# DBTITLE 1,random split
 # Convert df_loaded to Pandas DataFrame
 df_loaded_pd = df_loaded.toPandas()
 
@@ -94,42 +102,18 @@ X_train, X_val, y_train, y_val = train_test_split(
 
 # COMMAND ----------
 
-# split feature table into train test val and evaluate
-# then train best model on FULL data of the Feature table with best score
-
-# COMMAND ----------
-
 import mlflow
 from mlflow.models import Model, infer_signature, ModelSignature
-from mlflow.pyfunc import PyFuncModel
 from mlflow import pyfunc
 from hyperopt import hp, tpe, fmin, STATUS_OK, SparkTrials
 import pyspark.pandas as ps
-
-# Write X_train_processed to Unity Catalog for lineage tracking
-ps.from_pandas(X_train_processed).to_table(
-    "lr_nhl_demo.dev.X_train_processed", mode="overwrite"
-)
-print("Writing X_train_processed to UC!")
-
-# Load a Unity Catalog table, train a model, and log the input table
-print("Loading X_train_processed_UC")
-X_train_processed_UC = mlflow.data.load_delta(
-    table_name="lr_nhl_demo.dev.X_train_processed", version="0"
-)
-X_train_processed_UC_PD = X_train_processed_UC.df.toPandas()
-
-import mlflow
 from sklearn.pipeline import Pipeline
 from lightgbm import LGBMRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
-from hyperopt import fmin, tpe, hp, STATUS_OK
 from hyperopt.pyll.base import scope
-from mlflow.models import Model
 from mlflow.pyfunc import PyFuncModel
-
 
 # Define the objective function to accept different model types
 def objective(params):
@@ -168,7 +152,7 @@ def objective(params):
         )
 
         pipeline.fit(
-            X_train_processed,
+            X_train,
             y_train,
             # These callbacks are specific to LightGBM, so they should only be used for LightGBM
             **(
@@ -177,7 +161,7 @@ def objective(params):
                         lightgbm.early_stopping(5),
                         lightgbm.log_evaluation(0),
                     ],
-                    "regressor__eval_set": [(X_val_processed, y_val)],
+                    "regressor__eval_set": [(X_val, y_val)],
                 }
                 if model_type == "lightgbm"
                 else {}
@@ -190,7 +174,7 @@ def objective(params):
         pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
         training_eval_result = mlflow.evaluate(
             model=pyfunc_model,
-            data=X_train_processed.assign(**{str(target_col): y_train}),
+            data=X_train.assign(**{str(target_col): y_train}),
             targets=target_col,
             model_type="regressor",
             evaluator_config={
@@ -202,7 +186,7 @@ def objective(params):
         # Log metrics for the validation set
         val_eval_result = mlflow.evaluate(
             model=pyfunc_model,
-            data=X_val_processed.assign(**{str(target_col): y_val}),
+            data=X_val.assign(**{str(target_col): y_val}),
             targets=target_col,
             model_type="regressor",
             evaluator_config={
@@ -215,7 +199,7 @@ def objective(params):
         # Log metrics for the test set
         test_eval_result = mlflow.evaluate(
             model=pyfunc_model,
-            data=X_test_processed.assign(**{str(target_col): y_test}),
+            data=X_test.assign(**{str(target_col): y_test}),
             targets=target_col,
             model_type="regressor",
             evaluator_config={
@@ -239,9 +223,6 @@ def objective(params):
             "model": pipeline,
             "run": mlflow_run,
         }
-
-
-X_train_processed
 
 # COMMAND ----------
 
@@ -288,9 +269,6 @@ space = hp.choice(
             "subsample": hp.uniform("subsample", 0.5, 1.0),
             "random_state": 729986891,
         },
-        # {
-        #     'model_type': 'linear',
-        # },
         {
             "model_type": "random_forest",
             "n_estimators": scope.int(hp.quniform("rf_n_estimators", 100, 500, 1)),
@@ -356,29 +334,92 @@ model
 
 # COMMAND ----------
 
-# Retrain the best model with the best hyperparameters on the FULL dataset
-# # Retrieve the best model and parameters
-# best_trial = trials.best_trial['result']
-# best_model_type = best_trial['model']
-# best_params = best_trial['params']
+# Get Run Id of best model, then retrain on full data with same params and model type
 
-# # Retrain the best model on the full dataset
-# X_full = ...  # Combine your training, validation, and test sets
-# y_full = ...  # Combine your target values
+# COMMAND ----------
 
-# with mlflow.start_run(experiment_id="634720160613016") as final_run:
-#     # Set tags for the final run
-#     mlflow.set_tag("model_type", best_model_type)
-#     mlflow.set_tag("experiment", "final_model_training")
+# # Train model
+# import mlflow
+# from sklearn import linear_model
 
-#     # Retrain the model
-#     final_model = Pipeline([('regressor', best_model_type)])
-#     final_model.fit(X_full, y_full)
+# feature_lookups = [
+#     FeatureLookup(
+#       table_name='ml.recommender_system.customer_features',
+#       feature_names=['total_purchases_30d'],
+#       lookup_key='customer_id',
+#     ),
+#     FeatureLookup(
+#       table_name='ml.recommender_system.product_features',
+#       feature_names=['category'],
+#       lookup_key='product_id'
+#     )
+#   ]
 
-#     # Log the final model
-#     mlflow.sklearn.log_model(final_model, "final_model")
+# fe = FeatureEngineeringClient()
 
-#     print(f"Final model trained with best parameters: {best_params}")
+# with mlflow.start_run():
+
+#   # df has columns ['customer_id', 'product_id', 'rating']
+#   training_set = fe.create_training_set(
+#     df=df,
+#     feature_lookups=feature_lookups,
+#     label='rating',
+#     exclude_columns=['customer_id', 'product_id']
+#   )
+
+#   training_df = training_set.load_df().toPandas()
+
+#   # "training_df" columns ['total_purchases_30d', 'category', 'rating']
+#   X_train = training_df.drop(['rating'], axis=1)
+#   y_train = training_df.rating
+
+#   model = linear_model.LinearRegression().fit(X_train, y_train)
+
+#   fe.log_model(
+#     model=model,
+#     artifact_path="recommendation_model",
+#     flavor=mlflow.sklearn,
+#     training_set=training_set,
+#     registered_model_name="recommendation_model"
+#   )
+
+# # Batch inference
+
+# # If the model at model_uri is packaged with the features, the FeatureStoreClient.score_batch()
+# # call automatically retrieves the required features from Feature Store before scoring the model.
+# # The DataFrame returned by score_batch() augments batch_df with
+# # columns containing the feature values and a column containing model predictions.
+
+# fe = FeatureEngineeringClient()
+
+# # batch_df has columns ‘customer_id’ and ‘product_id’
+# predictions = fe.score_batch(
+#     model_uri=model_uri,
+#     df=batch_df
+# )
+
+# # The ‘predictions’ DataFrame has these columns:
+# # ‘customer_id’, ‘product_id’, ‘total_purchases_30d’, ‘category’, ‘prediction’
+
+
+# COMMAND ----------
+
+with mlflow.start_run() as run:
+    # Get the model type and parameters
+    model_type = type(best_model.unwrap_python_model())
+    params = best_model.unwrap_python_model().get_params()
+    
+    # Create a new instance with the same parameters
+    new_model = model_type(**params)
+    
+    # Fit the model on the entire dataset
+    new_model.fit(X, y)
+    
+    # Log the retrained model
+    mlflow.sklearn.log_model(new_model, "retrained_model")
+    
+    # Log relevant metrics
+    mlflow.log_metric("dataset_size", len(X))
 
 # COMMAND ----------
 
@@ -538,5 +579,3 @@ print(best_model_uri)
 
 dbutils.jobs.taskValues.set(key="best_model_uri", value=best_model_uri)
 print(f"Successfully set the best_model_uri to {best_model_uri}")
-
-# COMMAND ----------
