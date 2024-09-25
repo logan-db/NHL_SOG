@@ -1,6 +1,50 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC ## Load Data
+# MAGIC ## Load Data and Create Training Set
+
+# COMMAND ----------
+
+from sklearn.model_selection import train_test_split
+
+# feature_counts = [25, 50, 100, 200]
+# df_loaded = fs.read_table(name="lr_nhl_demo.dev.player_features_200")
+target_col = "player_Total_shotsOnGoal"
+time_col = "gameDate"
+id_columns = ["gameId", "playerId"]
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Join Label Columns to Feature Table for Training Purposes
+
+# COMMAND ----------
+
+# Load lr_nhl_demo.dev.pre_feat_eng
+pre_feat_eng = spark.table("lr_nhl_demo.dev.pre_feat_eng").select(*id_columns, target_col)
+
+# COMMAND ----------
+
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
+
+fe = FeatureEngineeringClient()
+
+# Define feature lookups
+feature_lookups = [
+    FeatureLookup(
+        table_name="lr_nhl_demo.dev.player_features_200",
+        feature_names=None,  # Include all features
+        lookup_key=id_columns  # The key column used for joining
+    )
+]
+
+training_set = fe.create_training_set(
+  df=pre_feat_eng,
+  feature_lookups=feature_lookups,
+  label=target_col,
+  exclude_columns=id_columns,
+)
+
+training_df = training_set.load_df().toPandas()
 
 # COMMAND ----------
 
@@ -20,23 +64,10 @@
 
 # COMMAND ----------
 
-from databricks.feature_store import FeatureStoreClient
-from sklearn.model_selection import train_test_split
-
-fs = FeatureStoreClient()
-
-# feature_counts = [25, 50, 100, 200]
-df_loaded = fs.read_table(name="lr_nhl_demo.dev.player_features_200")
-
-# COMMAND ----------
-
 # DBTITLE 1,random split
-# Convert df_loaded to Pandas DataFrame
-df_loaded_pd = df_loaded.toPandas()
-
 # Separate target column from features
-X = df_loaded_pd.drop([target_col], axis=1)
-y = df_loaded_pd[target_col]
+X = training_df.drop([target_col], axis=1)
+y = training_df[target_col]
 
 # Split the data into train and test datasets
 X_train, X_test, y_train, y_test = train_test_split(
@@ -108,6 +139,7 @@ from mlflow import pyfunc
 from hyperopt import hp, tpe, fmin, STATUS_OK, SparkTrials
 import pyspark.pandas as ps
 from sklearn.pipeline import Pipeline
+import lightgbm
 from lightgbm import LGBMRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
@@ -116,7 +148,8 @@ from hyperopt.pyll.base import scope
 from mlflow.pyfunc import PyFuncModel
 
 # Define the objective function to accept different model types
-def objective(params):
+def objective(params, X=[], y=[], full_train_flag=False):
+
     model_type = params.pop("model_type")
 
     with mlflow.start_run(experiment_id="634720160613016") as mlflow_run:
@@ -138,6 +171,12 @@ def objective(params):
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
+        # Enable automatic logging of input samples, metrics, parameters, and models
+        mlflow.sklearn.autolog(
+            log_input_examples=True,
+            silent=True,
+        )
+        
         # Create a pipeline with the selected model
         pipeline = Pipeline(
             [
@@ -145,75 +184,96 @@ def objective(params):
             ]
         )
 
-        # Enable automatic logging of input samples, metrics, parameters, and models
-        mlflow.sklearn.autolog(
-            log_input_examples=True,
-            silent=True,
-        )
+        if full_train_flag:
+            X_train = X
+            y_train = y
 
-        pipeline.fit(
-            X_train,
-            y_train,
-            # These callbacks are specific to LightGBM, so they should only be used for LightGBM
-            **(
-                {
-                    "regressor__callbacks": [
-                        lightgbm.early_stopping(5),
-                        lightgbm.log_evaluation(0),
-                    ],
-                    "regressor__eval_set": [(X_val, y_val)],
-                }
-                if model_type == "lightgbm"
-                else {}
-            ),
-        )
+            pipeline.fit(
+                X_train,
+                y_train,
+            )
 
-        # Log metrics for the training set
-        mlflow_model = Model()
-        pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
-        pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
-        training_eval_result = mlflow.evaluate(
-            model=pyfunc_model,
-            data=X_train.assign(**{str(target_col): y_train}),
-            targets=target_col,
-            model_type="regressor",
-            evaluator_config={
-                "log_model_explainability": False,
-                "metric_prefix": "training_",
-            },
-        )
+            mlflow_model = Model()
+            pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
+            pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
 
-        # Log metrics for the validation set
-        val_eval_result = mlflow.evaluate(
-            model=pyfunc_model,
-            data=X_val.assign(**{str(target_col): y_val}),
-            targets=target_col,
-            model_type="regressor",
-            evaluator_config={
-                "log_model_explainability": False,
-                "metric_prefix": "val_",
-            },
-        )
-        val_metrics = val_eval_result.metrics
+            fe.log_model(
+                model=pyfunc_model,
+                artifact_path="player_prediction_SOG",
+                flavor=mlflow.sklearn,
+                training_set=training_set,
+                registered_model_name="lr_nhl_demo.dev.player_prediction_SOG",
+                params=params,
+            )
+            loss = "N/A"
+            val_metrics = "N/A"
+            test_metrics = "N/A"
 
-        # Log metrics for the test set
-        test_eval_result = mlflow.evaluate(
-            model=pyfunc_model,
-            data=X_test.assign(**{str(target_col): y_test}),
-            targets=target_col,
-            model_type="regressor",
-            evaluator_config={
-                "log_model_explainability": False,
-                "metric_prefix": "test_",
-            },
-        )
-        test_metrics = test_eval_result.metrics
+        else:
+            
+            pipeline.fit(
+                X_train,
+                y_train,
+                # These callbacks are specific to LightGBM, so they should only be used for LightGBM
+                **(
+                    {
+                        "regressor__callbacks": [
+                            lightgbm.early_stopping(5),
+                            lightgbm.log_evaluation(0),
+                        ],
+                        "regressor__eval_set": [(X_val, y_val)],
+                    }
+                    if model_type == "lightgbm"
+                    else {}
+                ),
+            )
 
-        loss = -val_metrics["val_r2_score"]
+            # Log metrics for the training set
+            mlflow_model = Model()
+            pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
+            pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
+            training_eval_result = mlflow.evaluate(
+                model=pyfunc_model,
+                data=X_train.assign(**{str(target_col): y_train}),
+                targets=target_col,
+                model_type="regressor",
+                evaluator_config={
+                    "log_model_explainability": False,
+                    "metric_prefix": "training_",
+                },
+            )
 
-        # Truncate metric key names so they can be displayed together
-        val_metrics = {k.replace("val_", ""): v for k, v in val_metrics.items()}
-        test_metrics = {k.replace("test_", ""): v for k, v in test_metrics.items()}
+            # Log metrics for the validation set
+            val_eval_result = mlflow.evaluate(
+                model=pyfunc_model,
+                data=X_val.assign(**{str(target_col): y_val}),
+                targets=target_col,
+                model_type="regressor",
+                evaluator_config={
+                    "log_model_explainability": False,
+                    "metric_prefix": "val_",
+                },
+            )
+            val_metrics = val_eval_result.metrics
+
+            # Log metrics for the test set
+            test_eval_result = mlflow.evaluate(
+                model=pyfunc_model,
+                data=X_test.assign(**{str(target_col): y_test}),
+                targets=target_col,
+                model_type="regressor",
+                evaluator_config={
+                    "log_model_explainability": False,
+                    "metric_prefix": "test_",
+                },
+            )
+            test_metrics = test_eval_result.metrics
+
+            loss = -val_metrics["val_r2_score"]
+
+            # Truncate metric key names so they can be displayed together
+            val_metrics = {k.replace("val_", ""): v for k, v in val_metrics.items()}
+            test_metrics = {k.replace("test_", ""): v for k, v in test_metrics.items()}
 
         return {
             "loss": loss,
@@ -307,6 +367,9 @@ space = hp.choice(
 
 # COMMAND ----------
 
+import pandas as pd
+from sklearn import set_config
+
 trials = SparkTrials()
 
 # Run the optimization
@@ -314,7 +377,7 @@ fmin(
     fn=objective,
     space=space,
     algo=tpe.suggest,
-    max_evals=100,
+    max_evals=200,
     trials=trials,
 )
 
@@ -334,28 +397,17 @@ model
 
 # COMMAND ----------
 
-# Get Run Id of best model, then retrain on full data with same params and model type
+# Assuming you have the best_run_id from the previous experiment
+best_run_id = mlflow_run.info.run_id
+
+# Load the best model's configuration
+best_run = mlflow.get_run(best_run_id)
+best_params = best_run.data.params
+
+# best_params = {k: v for k, v in best_run.data.params.items()}
+best_model_type = best_run.data.tags["model_type"]
 
 # COMMAND ----------
-
-# # Train model
-# import mlflow
-# from sklearn import linear_model
-
-# feature_lookups = [
-#     FeatureLookup(
-#       table_name='ml.recommender_system.customer_features',
-#       feature_names=['total_purchases_30d'],
-#       lookup_key='customer_id',
-#     ),
-#     FeatureLookup(
-#       table_name='ml.recommender_system.product_features',
-#       feature_names=['category'],
-#       lookup_key='product_id'
-#     )
-#   ]
-
-# fe = FeatureEngineeringClient()
 
 # with mlflow.start_run():
 
@@ -404,22 +456,8 @@ model
 
 # COMMAND ----------
 
-with mlflow.start_run() as run:
-    # Get the model type and parameters
-    model_type = type(best_model.unwrap_python_model())
-    params = best_model.unwrap_python_model().get_params()
-    
-    # Create a new instance with the same parameters
-    new_model = model_type(**params)
-    
-    # Fit the model on the entire dataset
-    new_model.fit(X, y)
-    
-    # Log the retrained model
-    mlflow.sklearn.log_model(new_model, "retrained_model")
-    
-    # Log relevant metrics
-    mlflow.log_metric("dataset_size", len(X))
+best_params["model_type"] = best_model_type
+result = objective(best_params, X, y, full_train_flag=True)
 
 # COMMAND ----------
 

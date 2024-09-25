@@ -1,11 +1,11 @@
 # Databricks notebook source
-# COMMAND ----------
-
 import mlflow
 from pyspark.sql.functions import col
 
 target_col = "player_Total_shotsOnGoal"
 time_col = "gameDate"
+catalog = 'lr_nhl_demo'
+schema = 'dev'
 
 # COMMAND ----------
 
@@ -13,6 +13,7 @@ gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
 
 # COMMAND ----------
 
+# DBTITLE 1,define main dataframe
 model_remove_1st_and_upcoming_games = gold_model_stats.filter(
     (col("gameId").isNotNull())
     # & (col("playerGamesPlayedRolling") > 0)
@@ -25,12 +26,21 @@ model_remove_1st_and_upcoming_games.count()
 
 # COMMAND ----------
 
+# DBTITLE 1,Ensure Dataframe is Unique
 assert (
     model_remove_1st_and_upcoming_games.count()
     == model_remove_1st_and_upcoming_games.select("gameId", "playerId")
     .distinct()
     .count()
 )
+
+# COMMAND ----------
+
+# DBTITLE 1,Write Dataframe to UC
+spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.pre_feat_eng")
+
+df_loaded.write.format("delta").mode("overwrite").saveAsTable(f"{catalog}.{schema}.pre_feat_eng")
+print(f"Successfully solidified {catalog}.{schema}.pre_feat_eng to --> {catalog}.{schema}.pre_feat_eng")
 
 # COMMAND ----------
 
@@ -659,6 +669,7 @@ X = df_loaded_pd.drop([target_col], axis=1)
 y = df_loaded_pd[target_col]
 
 # COMMAND ----------
+
 # feature_counts_param = dbutils.widgets.get("train_model_param")
 feature_counts = [25, 50, 100, 200]
 for count in feature_counts:
