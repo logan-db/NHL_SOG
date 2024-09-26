@@ -32,9 +32,15 @@ resources:
             python_file: ../src/transformation/solidify_gold_tables_v2.py
           environment_key: Default
 
-        - task_key: create_feature_table
+        - task_key: createPreFeatEngTable
           depends_on:
             - task_key: Write_out_Delta_Tables
+          notebook_task:
+            notebook_path: ../src/transformation/pre_feat_eng.py
+
+        - task_key: create_feature_table
+          depends_on:
+            - task_key: createPreFeatEngTable
           for_each_task:
             inputs: "[25, 50, 100, 200]"
             concurrency: 4

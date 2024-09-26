@@ -13,43 +13,7 @@ catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
 
 # COMMAND ----------
-
-gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
-
-# COMMAND ----------
-
-# DBTITLE 1,define main dataframe
-model_remove_1st_and_upcoming_games = gold_model_stats.filter(
-    (col("gameId").isNotNull())
-    # & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
-)
-
-df_loaded = model_remove_1st_and_upcoming_games
-
-model_remove_1st_and_upcoming_games.count()
-
-# COMMAND ----------
-
-# DBTITLE 1,Ensure Dataframe is Unique
-assert (
-    model_remove_1st_and_upcoming_games.count()
-    == model_remove_1st_and_upcoming_games.select("gameId", "playerId")
-    .distinct()
-    .count()
-)
-
-# COMMAND ----------
-
-# DBTITLE 1,Write Dataframe to UC
-spark.sql(f"DROP TABLE IF EXISTS {catalog_param}.pre_feat_eng")
-
-df_loaded.write.format("delta").mode("overwrite").saveAsTable(
-    f"{catalog_param}.pre_feat_eng"
-)
-print(
-    f"Successfully solidified {catalog_param}.pre_feat_eng to --> {catalog_param}.pre_feat_eng"
-)
+pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng")
 
 # COMMAND ----------
 
@@ -74,10 +38,10 @@ cols_to_remove = [
 # Identify numerical and categorical columns
 numerical_cols = [
     col
-    for col, dtype in df_loaded.dtypes
+    for col, dtype in pre_feat_eng.dtypes
     if dtype in ["int", "bigint", "float", "double"] and col != target_col
 ]
-categorical_cols = [col for col, dtype in df_loaded.dtypes if dtype == "string"]
+categorical_cols = [col for col, dtype in pre_feat_eng.dtypes if dtype == "string"]
 
 numerical_cols = list(set(numerical_cols) - set(cols_to_remove))
 categorical_cols = list(set(categorical_cols) - set(cols_to_remove))
@@ -236,7 +200,7 @@ categorical_cols_value_counts = {}
 
 for col in categorical_cols:
     value_counts = spark.sql(
-        f"SELECT COUNT(DISTINCT {col}) as count FROM {catalog_param}.gold_model_stats_delta_v2"
+        f"SELECT COUNT(DISTINCT {col}) as count FROM {catalog_param}.pre_feat_eng"
     ).toPandas()
     categorical_cols_value_counts[col] = value_counts
 
@@ -659,12 +623,12 @@ def create_feature_store_tables(
 
 # COMMAND ----------
 
-# Convert df_loaded to Pandas DataFrame
-df_loaded_pd = df_loaded.toPandas()
+# Convert pre_feat_eng to Pandas DataFrame
+pre_feat_eng_pd = pre_feat_eng.toPandas()
 
 # Separate target column from features
-X = df_loaded_pd.drop([target_col], axis=1)
-y = df_loaded_pd[target_col]
+X = pre_feat_eng_pd.drop([target_col], axis=1)
+y = pre_feat_eng_pd[target_col]
 
 # COMMAND ----------
 
