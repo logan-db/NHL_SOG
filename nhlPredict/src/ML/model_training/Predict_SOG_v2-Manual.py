@@ -12,6 +12,7 @@ id_columns = ["gameId", "playerId"]
 trial_eval_param = int(dbutils.widgets.get("trial_eval_param"))
 catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
+trial_experiment_param = str(dbutils.widgets.get("trial_experiment_param"))
 
 # COMMAND ----------
 
@@ -144,7 +145,7 @@ def objective(params, X=[], y=[], full_train_flag=False):
 
     model_type = params.pop("model_type")
 
-    with mlflow.start_run(experiment_id="634720160613016") as mlflow_run:
+    with mlflow.start_run(experiment_id=trial_experiment_param) as mlflow_run:
         mlflow.set_tag("model_type", model_type)
         mlflow.set_tag("features_count", feature_count_param)
 

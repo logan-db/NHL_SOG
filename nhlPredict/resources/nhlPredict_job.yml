@@ -135,6 +135,10 @@ resources:
           default: 5 # Prod use 100
         - name: trial_eval_param
           default: 10 # Prod use 200
+        - name: trial_experiment_param
+          default: 4320825364109465
+        - name: training_experiment_param
+          default: 4320825364109641
       environments:
         - environment_key: Default
           spec:

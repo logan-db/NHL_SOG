@@ -3,6 +3,10 @@
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
+trial_experiment_param = str(dbutils.widgets.get("trial_experiment_param"))
+training_experiment_param = str(dbutils.widgets.get("training_experiment_param"))
+
+# COMMAND ----------
 import mlflow
 from mlflow.tracking import MlflowClient
 
@@ -15,10 +19,8 @@ def get_best_run(experiment_id, metric_name):
     return runs[0]
 
 
-# Example usage
-experiment_id = "634720160613016"
-metric_name = "training_mean_absolute_error"
-best_run = get_best_run(experiment_id, metric_name)
+metric_name = "best_trial_loss"
+best_run = get_best_run(trial_experiment_param, metric_name)
 print(f"Best run ID: {best_run.info.run_id}")
 print(f"Best run {metric_name}: {best_run.data.metrics[metric_name]}")
 
