@@ -113,7 +113,7 @@ resources:
       job_clusters:
         - job_cluster_key: LR-ML
           new_cluster:
-            cluster_name: ""
+            cluster_name: "LR-ML-Job"
             spark_version: 15.3.x-cpu-ml-scala2.12
             aws_attributes:
               first_on_demand: 1
@@ -121,7 +121,9 @@ resources:
               zone_id: us-west-2a
               spot_bid_price_percent: 100
               ebs_volume_count: 0
-            node_type_id: i3.xlarge
+            node_type_id: i3.4xlarge
+            custom_tags:
+              computeType: ML_Job
             enable_elastic_disk: true
             data_security_mode: SINGLE_USER
             runtime_engine: STANDARD
@@ -136,7 +138,7 @@ resources:
         - name: time_col
           default: gameDate
         - name: train_model_param
-          default: false
+          default: true
         - name: n_estimators_param
           default: 5 # Prod use 100
         - name: trial_eval_param
