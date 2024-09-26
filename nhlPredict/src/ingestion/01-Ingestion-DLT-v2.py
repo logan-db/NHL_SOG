@@ -659,8 +659,8 @@ def merge_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,silver_games_rankings
+
 @dlt.table(
     name="silver_games_rankings",
     table_properties={"quality": "silver"},
@@ -1372,6 +1372,8 @@ def aggregate_games_data():
     column_exprs = [
         col(c) for c in gold_shots_date_count.columns
     ]  # Start with all existing columns
+
+    # might be nulls still for players that have just switched teams, will get imputed in Feat Engineering
     player_avg_exprs = {
         col_name: round(
             median(col(col_name)).over(Window.partitionBy("playerId", "playerTeam")), 2
@@ -1498,20 +1500,20 @@ def window_gold_game_data():
     ]  # Start with all existing columns
     game_avg_exprs = {
         col_name: round(
-            median(col(col_name)).over(Window.partitionBy("playerTeam", "season")), 2
+            median(col(col_name)).over(Window.partitionBy("playerTeam")), 2
         )
         for col_name in columns_to_iterate
     }
     opponent_game_avg_exprs = {
         col_name: round(
-            median(col(col_name)).over(Window.partitionBy("opposingTeam", "season")), 2
+            median(col(col_name)).over(Window.partitionBy("opposingTeam")), 2
         )
         for col_name in columns_to_iterate
     }
     matchup_avg_exprs = {
         col_name: round(
             median(col(col_name)).over(
-                Window.partitionBy("playerTeam", "opposingTeam", "season")
+                Window.partitionBy("playerTeam", "opposingTeam")
             ),
             2,
         )

@@ -52,6 +52,10 @@ display(silver_games_rankings.filter(col('playerTeam')=="VAN").orderBy("gameDate
 
 # COMMAND ----------
 
+display(gold_game_stats_v2.orderBy(desc("gameDate")))
+
+# COMMAND ----------
+
 upcoming_games = gold_model_data_v2.filter(
     (col("gameId").isNull())
     # & (col("playerGamesPlayedRolling") > 0)
@@ -60,6 +64,11 @@ upcoming_games = gold_model_data_v2.filter(
 )
 
 display(upcoming_games)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Ranking Logic
 
 # COMMAND ----------
 

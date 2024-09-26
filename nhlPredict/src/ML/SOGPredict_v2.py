@@ -23,53 +23,19 @@ from pyspark.ml.evaluation import RegressionEvaluator
 
 # COMMAND ----------
 
-
-def create_tf_serving_json(data):
-    return {
-        "inputs": (
-            {name: data[name].tolist() for name in data.keys()}
-            if isinstance(data, dict)
-            else data.tolist()
-        )
-    }
-
-
-def score_model(dataset):
-    url = "https://e2-demo-field-eng.cloud.databricks.com/serving-endpoints/sogprediction/invocations"
-    headers = {
-        "Authorization": f'Bearer {os.environ.get("DATABRICKS_TOKEN")}',
-        "Content-Type": "application/json",
-    }
-    ds_dict = (
-        {"dataframe_split": dataset.to_dict(orient="split")}
-        if isinstance(dataset, pd.DataFrame)
-        else create_tf_serving_json(dataset)
-    )
-    data_json = json.dumps(ds_dict, allow_nan=True)
-    response = requests.request(method="POST", headers=headers, url=url, data=data_json)
-    if response.status_code != 200:
-        raise Exception(
-            f"Request failed with status {response.status_code}, {response.text}"
-        )
-
-    return response.json()
-
-
-# COMMAND ----------
-
-fs = FeatureStoreClient()
-
-sog_features = fs.read_table("lr_nhl_demo.dev.sog_features_v2")
+target_col = "player_Total_shotsOnGoal"
 gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
+sog_features = spark.table("lr_nhl_demo.dev.pre_feat_eng")
 
 # COMMAND ----------
 
 mlflow.set_registry_uri("databricks-uc")
 
 # COMMAND ----------
+
 client = mlflow.tracking.MlflowClient()
 champion_version = client.get_model_version_by_alias(
-    "lr_nhl_demo.dev.SOGModel_v2", "champion"
+    "lr_nhl_demo.dev.player_prediction_sog", "champion"
 )
 
 model_name = champion_version.name
@@ -78,6 +44,21 @@ model_version = champion_version.version
 model_uri = f"models:/{model_name}/{model_version}"
 mlflow.pyfunc.get_model_dependencies(model_uri)
 model = mlflow.pyfunc.load_model(model_uri=model_uri)
+
+# COMMAND ----------
+
+target_col = "player_Total_shotsOnGoal"
+
+champion_version_pp = client.get_model_version_by_alias(
+    "lr_nhl_demo.dev.preprocess_model_200", "champion"
+)
+
+preprocess_model_name = champion_version_pp.name
+preprocess_model_version = champion_version_pp.version
+
+preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
+preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 
 # COMMAND ----------
 
@@ -96,7 +77,7 @@ gold_model_stats.filter(col("gameId").isNull()).count()
 
 upcoming_games = gold_model_stats.filter(
     (col("gameId").isNull())
-    & (col("playerGamesPlayedRolling") > 0)
+    # & (col("playerGamesPlayedRolling") > 0)
     & (col("rolling_playerTotalTimeOnIceInGame") > 180)
     & (col("gameDate") != "2024-01-17")
 )
@@ -105,34 +86,19 @@ display(upcoming_games)
 
 # COMMAND ----------
 
+assert upcoming_games.count() <= gold_model_stats.filter(col("gameId").isNull()).count()
+
+# COMMAND ----------
+
 len(upcoming_games.columns)
 
 # COMMAND ----------
 
-target_col = "player_Total_shotsOnGoal"
-
-champion_version_pp = client.get_model_version_by_alias(
-    "lr_nhl_demo.dev.preprocess_model", "champion"
-)
-
-preprocess_model_name = champion_version_pp.name
-preprocess_model_version = champion_version_pp.version
-
-preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
-mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
-preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+display(gold_model_stats.filter(col("isPlayoffGame").isNull()))
 
 # COMMAND ----------
 
 # DBTITLE 1,Run preprocess model on
-# target_col = "player_Total_shotsOnGoal"
-
-# preprocess_model_name = "lr_nhl_demo.dev.preprocess_model"
-# preprocess_model_version = 1
-
-# preprocess_model_uri=f"models:/{preprocess_model_name}/{preprocess_model_version}"
-# preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
-
 from sklearn import set_config
 
 set_config(transform_output="pandas")
@@ -261,5 +227,3 @@ print("R-squared (R2):", r2)
 # COMMAND ----------
 
 display(predict_games_df)
-
-# COMMAND ----------

@@ -44,17 +44,6 @@ print(f"Successfully solidified {catalog}.{schema}.pre_feat_eng to --> {catalog}
 
 # COMMAND ----------
 
-upcoming_games = gold_model_stats.filter(
-    (col("gameId").isNull())
-    # & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
-    & (col("gameDate") != "2024-01-17")
-)
-
-display(upcoming_games)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ### Select supported columns
 # MAGIC Select only the columns that are supported. This allows us to train a model that can predict on a dataset that has extra columns that are not used in training.
