@@ -113,7 +113,7 @@ resources:
       job_clusters:
         - job_cluster_key: LR-ML
           new_cluster:
-            cluster_name: "LR-ML-Job"
+            cluster_name: ""
             spark_version: 15.3.x-cpu-ml-scala2.12
             aws_attributes:
               first_on_demand: 1
