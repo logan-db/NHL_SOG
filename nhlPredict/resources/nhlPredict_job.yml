@@ -59,10 +59,17 @@ resources:
           depends_on:
             - task_key: re_train_model
               outcome: "true"
-          notebook_task:
-            notebook_path: ../src/ML/model_training/Predict_SOG_v2-Manual.py
-            source: WORKSPACE
-          job_cluster_key: LR-ML
+          for_each_task:
+            inputs: "[25, 50, 100, 200]"
+            concurrency: 4
+            task:
+              task_key: train_model_iteration
+              notebook_task:
+                notebook_path: ../src/ML/model_training/Predict_SOG_v2-Manual.py
+                base_parameters:
+                  feature_count: "{{input}}"
+                source: WORKSPACE
+              job_cluster_key: LR-ML
             
         - task_key: register_model
           depends_on:
