@@ -42,7 +42,7 @@ assert (
 # COMMAND ----------
 
 # DBTITLE 1,Write Dataframe to UC
-spark.sql(f"DROP TABLE IF EXISTS {catalog_param}.dev.pre_feat_eng")
+spark.sql(f"DROP TABLE IF EXISTS {catalog_param}.pre_feat_eng")
 
 df_loaded.write.format("delta").mode("overwrite").saveAsTable(
     f"{catalog_param}.pre_feat_eng"
