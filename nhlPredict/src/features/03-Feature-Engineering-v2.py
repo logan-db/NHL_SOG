@@ -10,12 +10,11 @@ time_col = dbutils.widgets.get("time_col")
 n_estimators_param = int(dbutils.widgets.get("n_estimators_param"))
 train_model_param = dbutils.widgets.get("train_model_param").lower()
 catalog_param = dbutils.widgets.get("catalog").lower()
+feature_count_param = int(dbutils.widgets.get("feature_count"))
 
 # COMMAND ----------
 
 gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
-
-# feature_counts = [25, 50, 100, 200]
 
 # COMMAND ----------
 
@@ -498,7 +497,7 @@ def create_feature_store_tables(
                 "feature_selector",
                 SelectFromModel(
                     RandomForestRegressor(n_estimators=n_estimators, random_state=42),
-                    max_features=feature_counts,  # We'll configure this later
+                    max_features=feature_counts,
                     threshold=-np.inf,
                 ),
             ),
@@ -669,14 +668,11 @@ y = df_loaded_pd[target_col]
 
 # COMMAND ----------
 
-# feature_counts_param = dbutils.widgets.get("train_model_param")
-feature_counts = [25, 50, 100, 200]
-for count in feature_counts:
-    print(f"Feature Engineering Pipeline RUNNING on {count} features")
-    create_feature_store_tables(
-        X, y, col_selector, preprocessor, n_estimators_param, count
-    )
-    print(f"Feature Engineering Pipeline COMPLETE on {count} features")
+print(f"Feature Engineering Pipeline RUNNING on {feature_count_param} features")
+create_feature_store_tables(
+    X, y, col_selector, preprocessor, n_estimators_param, feature_count_param
+)
+print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features")
 
 # COMMAND ----------
 

@@ -41,7 +41,7 @@ tmp_base_path = spark.conf.get("tmp_base_path")
 player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
-season_list = [2023, 2024]
+season_list = spark.conf.get("season_list")
 
 # Get current date
 today_date = date.today()
@@ -660,6 +660,7 @@ def merge_games_data():
 # COMMAND ----------
 
 # DBTITLE 1,silver_games_rankings
+
 
 @dlt.table(
     name="silver_games_rankings",
@@ -1499,9 +1500,7 @@ def window_gold_game_data():
         col(c) for c in gold_games_count.columns
     ]  # Start with all existing columns
     game_avg_exprs = {
-        col_name: round(
-            median(col(col_name)).over(Window.partitionBy("playerTeam")), 2
-        )
+        col_name: round(median(col(col_name)).over(Window.partitionBy("playerTeam")), 2)
         for col_name in columns_to_iterate
     }
     opponent_game_avg_exprs = {
