@@ -1682,6 +1682,17 @@ def merge_player_game_stats():
 def make_model_ready():
     gold_model_data = dlt.read("gold_merged_stats_v2")
 
+    gameCountWindowSpec = (
+        Window.partitionBy("playerId", "season")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
+    matchupCountWindowSpec = (
+        Window.partitionBy("playerId", "playerTeam", "opposingTeam", "season")
+        .orderBy("gameDate")
+        .rowsBetween(Window.unboundedPreceding, 0)
+    )
+
     reorder_list = [
         "gameDate",
         "gameId",
@@ -1733,6 +1744,11 @@ def make_model_ready():
         round(sum(col("player_Total_icetime")).over(timeOnIceWindowSpec), 2).alias(
             "rolling_playerTotalTimeOnIceInGame"
         ),
-    )
+    ).withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+    .withColumn("teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec))
+    .withColumn(
+            "isPlayoffGame",
+            when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)),
+        )
 
     return gold_model_data

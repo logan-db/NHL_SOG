@@ -67,6 +67,13 @@ display(upcoming_games)
 
 # COMMAND ----------
 
+# FIX NULLS IN COLUMNS: position
+# TEST FEATURE TABLE LOOP
+# TEST TRIAL LOOP
+# UPDATE REGISTER MODEL / RETRAIN MODEL LOGIC
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Ranking Logic
 
@@ -143,7 +150,7 @@ gameCountWindowSpec = (
 )
 
 pk_norm = (
-    silver_games_schedule
+    silver_games_schedule_v2
     .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
     .withColumn(
         "game_PP_goalsForPerPenalty",
@@ -337,13 +344,21 @@ for column in columns_to_rank:
 rank_roll_columns = list(set(grouped_df.columns) - set(['gameDate','playerTeam','season','teamGamesPlayedRolling']))
 
 # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
-final_joined_rank = silver_games_schedule.join(
+final_joined_rank = silver_games_schedule_v2.join(
     grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
 ).orderBy(desc("gameDate"), "playerTeam").drop(*per_game_columns)
 
-display(final_joined_rank.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+display(final_joined_rank.withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)).filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
         
         # .select("gameDate", "playerTeam", "season", "sum_game_PP_goalsForPerPenalty", "rolling_sum_PP_goalsForPerPenalty", "rank_rolling_sum_PP_goalsForPerPenalty", "sum_game_Total_shotsOnGoalAgainst", "rolling_avg_Total_shotsOnGoalAgainst", "rank_rolling_avg_Total_shotsOnGoalAgainst")
+
+# COMMAND ----------
+
+display(final_joined_rank.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+
+# COMMAND ----------
+
+display(grouped_df.filter(col("season")==2024))
 
 # COMMAND ----------
 
