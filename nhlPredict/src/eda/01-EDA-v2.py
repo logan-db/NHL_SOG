@@ -20,7 +20,7 @@ shots_2023 = spark.table("dev.bronze_shots_2023")
 skaters_2023 = spark.table("dev.bronze_skaters_2023_v2")
 lines_2023 = spark.table("dev.bronze_lines_2023")
 games = spark.table("dev.bronze_games_historical")
-games_v2 = spark.table("dev.bronze_games_historical_v2")
+bronze_games_historical_v2 = spark.table("dev.bronze_games_historical_v2")
 player_game_stats = spark.table("dev.bronze_player_game_stats")
 player_game_stats_v2 = spark.table("dev.bronze_player_game_stats_v2")
 bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
@@ -52,7 +52,7 @@ display(silver_games_rankings.filter(col('playerTeam')=="VAN").orderBy("gameDate
 
 # COMMAND ----------
 
-display(gold_game_stats_v2.orderBy(desc("gameDate")))
+display(silver_games_historical_v2)
 
 # COMMAND ----------
 
