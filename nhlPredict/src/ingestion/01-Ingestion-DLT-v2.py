@@ -1739,16 +1739,21 @@ def make_model_ready():
     )
 
     # Apply all column expressions at once using select
-    gold_model_data = gold_model_data.select(
-        *keep_column_exprs,
-        round(sum(col("player_Total_icetime")).over(timeOnIceWindowSpec), 2).alias(
-            "rolling_playerTotalTimeOnIceInGame"
-        ),
-    ).withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
-    .withColumn("teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec))
-    .withColumn(
+    gold_model_data = (
+        gold_model_data.select(
+            *keep_column_exprs,
+            round(sum(col("player_Total_icetime")).over(timeOnIceWindowSpec), 2).alias(
+                "rolling_playerTotalTimeOnIceInGame"
+            ),
+        )
+        .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+        .withColumn(
+            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+        )
+        .withColumn(
             "isPlayoffGame",
             when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)),
         )
+    )
 
     return gold_model_data
