@@ -6,13 +6,12 @@
 
 from sklearn.model_selection import train_test_split
 
-# feature_counts = [25, 50, 100, 200]
-# df_loaded = fs.read_table(name=f"{catalog_param}.player_features_200")
 target_col = dbutils.widgets.get("target_col")
 time_col = dbutils.widgets.get("time_col")
 id_columns = ["gameId", "playerId"]
 trial_eval_param = int(dbutils.widgets.get("trial_eval_param"))
 catalog_param = dbutils.widgets.get("catalog").lower()
+feature_count_param = int(dbutils.widgets.get("feature_count"))
 
 # COMMAND ----------
 
@@ -35,7 +34,7 @@ fe = FeatureEngineeringClient()
 # Define feature lookups
 feature_lookups = [
     FeatureLookup(
-        table_name=f"{catalog_param}.player_features_200",
+        table_name=f"{catalog_param}.player_features_{feature_count_param}",
         feature_names=None,  # Include all features
         lookup_key=id_columns,  # The key column used for joining
     )
@@ -107,18 +106,6 @@ X_train, X_val, y_train, y_val = train_test_split(
 
 # COMMAND ----------
 
-# # Separate target column from features and drop _automl_split_col_0000
-# X_train = split_train_df.drop([target_col], axis=1)
-# y_train = split_train_df[target_col]
-
-# X_val = split_val_df.drop([target_col], axis=1)
-# y_val = split_val_df[target_col]
-
-# X_test = split_test_df.drop([target_col], axis=1)
-# y_test = split_test_df[target_col]
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Train regression model
 # MAGIC - Log relevant metrics to MLflow to track runs
@@ -159,6 +146,7 @@ def objective(params, X=[], y=[], full_train_flag=False):
 
     with mlflow.start_run(experiment_id="634720160613016") as mlflow_run:
         mlflow.set_tag("model_type", model_type)
+        mlflow.set_tag("features_count", feature_count_param)
 
         # Select the model based on the model_type parameter
         if model_type == "lightgbm":
