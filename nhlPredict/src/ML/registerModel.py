@@ -8,6 +8,7 @@ best_model_uri_task = dbutils.jobs.taskValues.get(
     taskKey="get_model_uri", key="best_model_uri", debugValue="some_value"
 )
 print(best_model_uri_task)
+catalog_param = dbutils.widgets.get("catalog").lower()
 
 # COMMAND ----------
 
@@ -28,15 +29,13 @@ import mlflow
 # Set as Champion based on max version
 client = mlflow.tracking.MlflowClient()
 model_version_infos = client.search_model_versions(
-    "name = 'lr_nhl_demo.dev.player_prediction_sog'"
+    f"name = '{catalog_param}.player_prediction_sog'"
 )
 new_model_version = max(
     [model_version_info.version for model_version_info in model_version_infos]
 )
 client.set_registered_model_alias(
-    "lr_nhl_demo.dev.player_prediction_sog", "champion", new_model_version
+    f"{catalog_param}.player_prediction_sog", "champion", new_model_version
 )
 
 # COMMAND ----------
-
-

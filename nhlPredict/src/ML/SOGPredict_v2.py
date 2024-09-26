@@ -23,9 +23,11 @@ from pyspark.ml.evaluation import RegressionEvaluator
 
 # COMMAND ----------
 
-target_col = "player_Total_shotsOnGoal"
-gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
-sog_features = spark.table("lr_nhl_demo.dev.pre_feat_eng")
+catalog_param = dbutils.widgets.get("catalog").lower()
+target_col = dbutils.widgets.get("target_col")
+
+gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
+sog_features = spark.table(f"{catalog_param}.pre_feat_eng")
 
 # COMMAND ----------
 
@@ -35,7 +37,7 @@ mlflow.set_registry_uri("databricks-uc")
 
 client = mlflow.tracking.MlflowClient()
 champion_version = client.get_model_version_by_alias(
-    "lr_nhl_demo.dev.player_prediction_sog", "champion"
+    f"{catalog_param}.player_prediction_sog", "champion"
 )
 
 model_name = champion_version.name
@@ -47,10 +49,8 @@ model = mlflow.pyfunc.load_model(model_uri=model_uri)
 
 # COMMAND ----------
 
-target_col = "player_Total_shotsOnGoal"
-
 champion_version_pp = client.get_model_version_by_alias(
-    "lr_nhl_demo.dev.preprocess_model_200", "champion"
+    f"{catalog_param}.preprocess_model_200", "champion"
 )
 
 preprocess_model_name = champion_version_pp.name
@@ -196,10 +196,10 @@ predict_games_df.count()
 # COMMAND ----------
 
 predict_hist_games_df.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.predictSOG_hist_v2"
+    f"{catalog_param}.predictSOG_hist_v2"
 )
 predict_games_df.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.predictSOG_upcoming_v2"
+    f"{catalog_param}.predictSOG_upcoming_v2"
 )
 
 # COMMAND ----------

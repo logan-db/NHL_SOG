@@ -7,10 +7,12 @@
 from sklearn.model_selection import train_test_split
 
 # feature_counts = [25, 50, 100, 200]
-# df_loaded = fs.read_table(name="lr_nhl_demo.dev.player_features_200")
-target_col = "player_Total_shotsOnGoal"
-time_col = "gameDate"
+# df_loaded = fs.read_table(name=f"{catalog_param}.player_features_200")
+target_col = dbutils.widgets.get("target_col")
+time_col = dbutils.widgets.get("time_col")
 id_columns = ["gameId", "playerId"]
+trial_eval_param = int(dbutils.widgets.get("trial_eval_param"))
+catalog_param = dbutils.widgets.get("catalog").lower()
 
 # COMMAND ----------
 
@@ -19,8 +21,10 @@ id_columns = ["gameId", "playerId"]
 
 # COMMAND ----------
 
-# Load lr_nhl_demo.dev.pre_feat_eng
-pre_feat_eng = spark.table("lr_nhl_demo.dev.pre_feat_eng").select(*id_columns, target_col)
+# Load f"{catalog_param}.pre_feat_eng
+pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng").select(
+    *id_columns, target_col
+)
 
 # COMMAND ----------
 
@@ -31,17 +35,17 @@ fe = FeatureEngineeringClient()
 # Define feature lookups
 feature_lookups = [
     FeatureLookup(
-        table_name="lr_nhl_demo.dev.player_features_200",
+        table_name=f"{catalog_param}.player_features_200",
         feature_names=None,  # Include all features
-        lookup_key=id_columns  # The key column used for joining
+        lookup_key=id_columns,  # The key column used for joining
     )
 ]
 
 training_set = fe.create_training_set(
-  df=pre_feat_eng,
-  feature_lookups=feature_lookups,
-  label=target_col,
-  exclude_columns=id_columns,
+    df=pre_feat_eng,
+    feature_lookups=feature_lookups,
+    label=target_col,
+    exclude_columns=id_columns,
 )
 
 training_df = training_set.load_df().toPandas()
@@ -147,6 +151,7 @@ from xgboost import XGBRegressor
 from hyperopt.pyll.base import scope
 from mlflow.pyfunc import PyFuncModel
 
+
 # Define the objective function to accept different model types
 def objective(params, X=[], y=[], full_train_flag=False):
 
@@ -176,7 +181,7 @@ def objective(params, X=[], y=[], full_train_flag=False):
             log_input_examples=True,
             silent=True,
         )
-        
+
         # Create a pipeline with the selected model
         pipeline = Pipeline(
             [
@@ -202,7 +207,7 @@ def objective(params, X=[], y=[], full_train_flag=False):
                 artifact_path="player_prediction_SOG",
                 flavor=mlflow.sklearn,
                 training_set=training_set,
-                registered_model_name="lr_nhl_demo.dev.player_prediction_SOG",
+                registered_model_name=f"{catalog_param}.player_prediction_SOG",
                 params=params,
             )
             loss = "N/A"
@@ -210,7 +215,7 @@ def objective(params, X=[], y=[], full_train_flag=False):
             test_metrics = "N/A"
 
         else:
-            
+
             pipeline.fit(
                 X_train,
                 y_train,
@@ -283,6 +288,7 @@ def objective(params, X=[], y=[], full_train_flag=False):
             "model": pipeline,
             "run": mlflow_run,
         }
+
 
 # COMMAND ----------
 
@@ -377,7 +383,7 @@ fmin(
     fn=objective,
     space=space,
     algo=tpe.suggest,
-    max_evals=200,
+    max_evals=trial_eval_param,
     trials=trials,
 )
 

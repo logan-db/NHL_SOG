@@ -111,8 +111,16 @@ resources:
       parameters:
         - name: catalog
           default: lr_nhl_demo.dev
+        - name: target_col
+          default: player_Total_shotsOnGoal
+        - name: time_col
+          default: gameDate
         - name: train_model_param
           default: false
+        - name: n_estimators_param
+          default: 5 # Prod use 100
+        - name: trial_eval_param
+          default: 10 # Prod use 200
       environments:
         - environment_key: Default
           spec:

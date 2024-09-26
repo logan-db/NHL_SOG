@@ -2,14 +2,20 @@
 import mlflow
 from pyspark.sql.functions import col
 
-target_col = "player_Total_shotsOnGoal"
-time_col = "gameDate"
-catalog = 'lr_nhl_demo'
-schema = 'dev'
+target_col = dbutils.widgets.get("target_col")
+time_col = dbutils.widgets.get("time_col")
+
+# COMMAND ----------
+# Get Pipeline Params
+n_estimators_param = int(dbutils.widgets.get("n_estimators_param"))
+train_model_param = dbutils.widgets.get("train_model_param").lower()
+catalog_param = dbutils.widgets.get("catalog").lower()
 
 # COMMAND ----------
 
-gold_model_stats = spark.table("lr_nhl_demo.dev.gold_model_stats_delta_v2")
+gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
+
+# feature_counts = [25, 50, 100, 200]
 
 # COMMAND ----------
 
@@ -37,10 +43,14 @@ assert (
 # COMMAND ----------
 
 # DBTITLE 1,Write Dataframe to UC
-spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.pre_feat_eng")
+spark.sql(f"DROP TABLE IF EXISTS {catalog_param}.dev.pre_feat_eng")
 
-df_loaded.write.format("delta").mode("overwrite").saveAsTable(f"{catalog}.{schema}.pre_feat_eng")
-print(f"Successfully solidified {catalog}.{schema}.pre_feat_eng to --> {catalog}.{schema}.pre_feat_eng")
+df_loaded.write.format("delta").mode("overwrite").saveAsTable(
+    f"{catalog_param}.pre_feat_eng"
+)
+print(
+    f"Successfully solidified {catalog_param}.pre_feat_eng to --> {catalog_param}.pre_feat_eng"
+)
 
 # COMMAND ----------
 
@@ -227,7 +237,7 @@ categorical_cols_value_counts = {}
 
 for col in categorical_cols:
     value_counts = spark.sql(
-        f"SELECT COUNT(DISTINCT {col}) as count FROM lr_nhl_demo.dev.gold_model_stats_delta_v2"
+        f"SELECT COUNT(DISTINCT {col}) as count FROM {catalog_param}.gold_model_stats_delta_v2"
     ).toPandas()
     categorical_cols_value_counts[col] = value_counts
 
@@ -588,7 +598,7 @@ def create_feature_store_tables(
 
     shutil.rmtree(tmp_dir)
 
-    uc_model_name = f"lr_nhl_demo.dev.{file_name}"
+    uc_model_name = f"{catalog_param}.{file_name}"
 
     # Register the model
     print(f"Registering model {uc_model_name}...")
@@ -622,7 +632,7 @@ def create_feature_store_tables(
 
     display(X_train_processed_spark)
 
-    table_name = f"lr_nhl_demo.dev.player_features_{feature_counts}"
+    table_name = f"{catalog_param}.player_features_{feature_counts}"
 
     print(f"Creating Feature Store table {table_name}...")
 
@@ -663,12 +673,12 @@ y = df_loaded_pd[target_col]
 feature_counts = [25, 50, 100, 200]
 for count in feature_counts:
     print(f"Feature Engineering Pipeline RUNNING on {count} features")
-    create_feature_store_tables(X, y, col_selector, preprocessor, 5, count)
+    create_feature_store_tables(
+        X, y, col_selector, preprocessor, n_estimators_param, count
+    )
     print(f"Feature Engineering Pipeline COMPLETE on {count} features")
 
 # COMMAND ----------
-
-train_model_param = dbutils.widgets.get("train_model_param").lower()
 
 if train_model_param == "true":
     # Set training task condition to true/false for next pipeline steps
