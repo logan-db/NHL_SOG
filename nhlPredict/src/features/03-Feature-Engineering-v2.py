@@ -8,7 +8,6 @@ time_col = dbutils.widgets.get("time_col")
 # COMMAND ----------
 # Get Pipeline Params
 n_estimators_param = int(dbutils.widgets.get("n_estimators_param"))
-train_model_param = dbutils.widgets.get("train_model_param").lower()
 catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
 
@@ -637,11 +636,3 @@ create_feature_store_tables(
     X, y, col_selector, preprocessor, n_estimators_param, feature_count_param
 )
 print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features")
-
-# COMMAND ----------
-
-if train_model_param == "true":
-    # Set training task condition to true/false for next pipeline steps
-    dbutils.jobs.taskValues.set(key="train_model", value="true")
-else:
-    dbutils.jobs.taskValues.set(key="train_model", value="false")

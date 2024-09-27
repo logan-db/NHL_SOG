@@ -4,6 +4,7 @@ from pyspark.sql.functions import col
 # COMMAND ----------
 # Get Pipeline Params
 catalog_param = dbutils.widgets.get("catalog").lower()
+train_model_param = dbutils.widgets.get("train_model_param").lower()
 
 # COMMAND ----------
 
@@ -41,3 +42,10 @@ model_remove_1st_and_upcoming_games.write.format("delta").mode("overwrite").save
 print(
     f"Successfully solidified {catalog_param}.pre_feat_eng to --> {catalog_param}.pre_feat_eng"
 )
+
+# COMMAND ----------
+if train_model_param == "true":
+    # Set training task condition to true/false for next pipeline steps
+    dbutils.jobs.taskValues.set(key="train_model", value="true")
+else:
+    dbutils.jobs.taskValues.set(key="train_model", value="false")
