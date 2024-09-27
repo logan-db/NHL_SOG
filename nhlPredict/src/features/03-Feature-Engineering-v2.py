@@ -1,23 +1,61 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC ## Notebook Setup
+
+# COMMAND ----------
+
+# MAGIC %pip install databricks-feature-engineering --upgrade
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 import mlflow
 from pyspark.sql.functions import col
+from databricks.feature_engineering import FeatureEngineeringClient
+
+fs = FeatureEngineeringClient()
+
+# COMMAND ----------
+
+# Create widgets with default values
+dbutils.widgets.text("n_estimators_param", "100", "Number of estimators")
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
+dbutils.widgets.text("feature_count", "10", "Number of features")
+dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
+dbutils.widgets.text("time_col", "gameDate", "time_col")
+
+# COMMAND ----------
 
 target_col = dbutils.widgets.get("target_col")
 time_col = dbutils.widgets.get("time_col")
 
+# Print the parameter values
+print(f"time_col: {time_col}")
+print(f"target_col: {target_col}")
+
 # COMMAND ----------
+
 # Get Pipeline Params
 n_estimators_param = int(dbutils.widgets.get("n_estimators_param"))
 catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
 
+# Print the parameter values
+print(f"n_estimators_param: {n_estimators_param}")
+print(f"catalog_param: {catalog_param}")
+print(f"feature_count_param: {feature_count_param}")
+
 # COMMAND ----------
+
 pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Select supported columns
+# MAGIC ## Select supported columns
 # MAGIC Select only the columns that are supported. This allows us to train a model that can predict on a dataset that has extra columns that are not used in training.
 # MAGIC `["isPlayoffGame"]` are dropped in the pipelines. See the Alerts tab of the AutoML Experiment page for details on why these columns are dropped.
 
@@ -386,7 +424,6 @@ from mlflow.pyfunc import PythonModel
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import SelectFromModel
-from databricks.feature_store import FeatureStoreClient
 from sklearn import set_config
 
 
@@ -448,7 +485,6 @@ def create_feature_store_tables(
     set_config(transform_output="pandas")
 
     mlflow.end_run()
-    fs = FeatureStoreClient()
     id_columns = ["gameId", "playerId"]
 
     # Create a single preprocessing pipeline with a configurable feature selector
@@ -636,3 +672,84 @@ create_feature_store_tables(
     X, y, col_selector, preprocessor, n_estimators_param, feature_count_param
 )
 print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## TESTING
+
+# COMMAND ----------
+
+testing = True
+
+if testing:
+    dbutils.notebook.exit("success")
+
+# COMMAND ----------
+
+set_config(transform_output="pandas")
+
+mlflow.end_run()
+id_columns = ["gameId", "playerId"]
+
+client = mlflow.tracking.MlflowClient()
+
+feature_counts = 100
+
+uc_model_name = f"{catalog_param}.preprocess_model_{feature_counts}"
+
+pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
+
+preprocess_model_name = pp_champion_version.name
+preprocess_model_version = pp_champion_version.version
+
+preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC DROP TABLE IF EXISTS lr_nhl_demo.dev.player_features_100;
+
+# COMMAND ----------
+
+print(f"Creating Feature Store table for {feature_counts} features...")
+
+X_train_processed = preprocess_model.predict(X)
+
+X_train_processed_spark = spark.createDataFrame(X_train_processed)
+
+display(X_train_processed_spark)
+
+table_name = f"{catalog_param}.player_features_{feature_counts}"
+
+# COMMAND ----------
+
+print(f"Creating Feature Store table {table_name}...")
+
+try:
+    fs.drop_table(table_name)
+    print(f"Dropped Feature Store table {table_name}...")
+except:
+    pass
+
+fs.create_table(
+    name=table_name,
+    primary_keys=id_columns,
+    schema=X_train_processed_spark.schema,
+    description=f"Pre-Processed data with feature selection applied: {feature_counts} Features included. Represents player stats, game by game to be used for player level predictions",
+)
+
+fs.write_table(
+    name=table_name,
+    df=X_train_processed_spark,
+)
+
+print(f"Feature Store table {table_name} created SUCCESSFULLY...")
+
+# COMMAND ----------
+
+df = fs.read_table(name=table_name)
+display(df)
