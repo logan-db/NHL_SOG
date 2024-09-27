@@ -650,7 +650,7 @@ def create_feature_store_tables(
     fs.write_table(
         name=table_name,
         df=X_train_processed_spark,
-        mode="overwrite",
+        # mode="overwrite",
     )
 
     print(f"Feature Store table {table_name} created SUCCESSFULLY...")
