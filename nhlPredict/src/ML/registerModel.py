@@ -1,112 +1,73 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC ## Get Best Trial Model
+
+# COMMAND ----------
+
 # MAGIC %pip install "mlflow-skinny[databricks]>=2.4.1"
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
+
+# Create widgets with default values
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
+dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
+dbutils.widgets.text("trial_eval_param", "10", "trial_eval_param")
+dbutils.widgets.text("trial_experiment_param", "4320825364109465", "trial_experiment_param")
+dbutils.widgets.text("training_experiment_param", "4320825364109641", "training_experiment_param")
+
+# COMMAND ----------
+
 trial_experiment_param = str(dbutils.widgets.get("trial_experiment_param"))
 training_experiment_param = str(dbutils.widgets.get("training_experiment_param"))
 
+target_col = dbutils.widgets.get("target_col")
+id_columns = ["gameId", "playerId"]
+
+trial_eval_param = int(dbutils.widgets.get("trial_eval_param"))
+catalog_param = dbutils.widgets.get("catalog").lower()
+
 # COMMAND ----------
+
 import mlflow
 from mlflow.tracking import MlflowClient
-
 
 def get_best_run(experiment_id, metric_name):
     client = MlflowClient()
     runs = client.search_runs(
-        experiment_id, order_by=[f"metrics.{metric_name} ASC"], max_results=1
+        experiment_id, order_by=[f"metrics.{metric_name} DESC"], max_results=1
     )
     return runs[0]
 
 
-metric_name = "best_trial_loss"
+metric_name = "test_r2_score"
 best_run = get_best_run(trial_experiment_param, metric_name)
 print(f"Best run ID: {best_run.info.run_id}")
 print(f"Best run {metric_name}: {best_run.data.metrics[metric_name]}")
-
-# COMMAND ----------
-
-# model = best_run["model"]
-# mlflow_run = best_run["run"]
-
-# display(
-#     pd.DataFrame(
-#         [best_result["val_metrics"], best_result["test_metrics"]],
-#         index=["validation", "test"],
-#     )
-# )
-
-# set_config(display="diagram")
-# model
+print(f"Best run MSE: {best_run.data.metrics['test_mean_squared_error']}")
 
 # COMMAND ----------
 
 # Assuming you have the best_run_id from the previous experiment
 best_run_id = best_run.info.run_id
+best_model_type = best_run.data.tags.get("model_type", None)
 
 # Load the best model's configuration
 best_run = mlflow.get_run(best_run_id)
 best_params = best_run.data.params
 
-# best_params = {k: v for k, v in best_run.data.params.items()}
-best_model_type = best_run.data.tags["model_type"]
+print(f"best_model_type: {best_model_type}")
+best_params
 
 # COMMAND ----------
 
-# with mlflow.start_run():
-
-#   # df has columns ['customer_id', 'product_id', 'rating']
-#   training_set = fe.create_training_set(
-#     df=df,
-#     feature_lookups=feature_lookups,
-#     label='rating',
-#     exclude_columns=['customer_id', 'product_id']
-#   )
-
-#   training_df = training_set.load_df().toPandas()
-
-#   # "training_df" columns ['total_purchases_30d', 'category', 'rating']
-#   X_train = training_df.drop(['rating'], axis=1)
-#   y_train = training_df.rating
-
-#   model = linear_model.LinearRegression().fit(X_train, y_train)
-
-#   fe.log_model(
-#     model=model,
-#     artifact_path="recommendation_model",
-#     flavor=mlflow.sklearn,
-#     training_set=training_set,
-#     registered_model_name="recommendation_model"
-#   )
-
-# # Batch inference
-
-# # If the model at model_uri is packaged with the features, the FeatureStoreClient.score_batch()
-# # call automatically retrieves the required features from Feature Store before scoring the model.
-# # The DataFrame returned by score_batch() augments batch_df with
-# # columns containing the feature values and a column containing model predictions.
-
-# fe = FeatureEngineeringClient()
-
-# # batch_df has columns ‘customer_id’ and ‘product_id’
-# predictions = fe.score_batch(
-#     model_uri=model_uri,
-#     df=batch_df
-# )
-
-# # The ‘predictions’ DataFrame has these columns:
-# # ‘customer_id’, ‘product_id’, ‘total_purchases_30d’, ‘category’, ‘prediction’
-
-
-# COMMAND ----------
-
-best_params["model_type"] = best_model_type
-result = objective(best_params, X, y, full_train_flag=True)
+feature_count_param = int(best_run.data.tags.get("features_count", None))
+feature_count_param
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Patch pandas version in logged model
+# MAGIC ## Patch pandas version in logged model
 # MAGIC
 # MAGIC Ensures that model serving uses the same version of pandas that was used to train the model.
 
@@ -118,7 +79,7 @@ import shutil
 import tempfile
 import yaml
 
-run_id = mlflow_run.info.run_id
+run_id = best_run_id
 
 # Set up a local dir for downloading the artifacts.
 tmp_dir = tempfile.mkdtemp()
@@ -165,6 +126,221 @@ shutil.rmtree(tmp_dir)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## RETRAIN best model trial on FULL dataset
+
+# COMMAND ----------
+
+# Load f"{catalog_param}.pre_feat_eng
+pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng").select(
+    *id_columns, target_col
+)
+
+# COMMAND ----------
+
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
+
+fe = FeatureEngineeringClient()
+
+# Define feature lookups
+feature_lookups = [
+    FeatureLookup(
+        table_name=f"{catalog_param}.player_features_{feature_count_param}",
+        feature_names=None,  # Include all features
+        lookup_key=id_columns,  # The key column used for joining
+    )
+]
+
+training_set = fe.create_training_set(
+    df=pre_feat_eng,
+    feature_lookups=feature_lookups,
+    label=target_col,
+    exclude_columns=id_columns,
+)
+
+training_df = training_set.load_df().toPandas()
+
+# COMMAND ----------
+
+# Separate target column from features
+X = training_df.drop([target_col], axis=1)
+y = training_df[target_col]
+
+# COMMAND ----------
+
+import mlflow
+from mlflow.models import Model, infer_signature, ModelSignature
+from mlflow import pyfunc
+from hyperopt import hp, tpe, fmin, STATUS_OK, SparkTrials
+import pyspark.pandas as ps
+import pandas as pd
+from sklearn.pipeline import Pipeline
+import lightgbm
+from lightgbm import LGBMRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from hyperopt.pyll.base import scope
+from mlflow.pyfunc import PyFuncModel
+
+
+# Define the objective function to accept different model types
+def retrain_objective(params, X_train=pd.DataFrame(), y_train=pd.DataFrame(), full_train_flag=False):
+
+    model_type = params.pop("model_type")
+
+    # Convert numeric parameters to the correct type
+    for key, value in params.items():
+        if isinstance(value, str):
+            try:
+                if '.' in value:
+                    params[key] = float(value)
+                else:
+                    params[key] = int(value)
+            except ValueError:
+                # If conversion fails, leave the parameter as is
+                pass
+
+    with mlflow.start_run(experiment_id=training_experiment_param) as mlflow_run:
+        mlflow.set_tag("model_type", model_type)
+        mlflow.set_tag("features_count", feature_count_param)
+
+        # Select the model based on the model_type parameter
+        if model_type == "lightgbm":
+            model = LGBMRegressor(**params)
+            print(f"Training LightGBM model with params: {params}")
+        elif model_type == "linear":
+            model = LinearRegression()
+            print(f"Training LinearRegression model with params: {params}")
+        elif model_type == "random_forest":
+            model = RandomForestRegressor(**params)
+            print(f"Training RandomForestRegressor model with params: {params}")
+        elif model_type == "xgboost":
+            model = XGBRegressor(**params)
+            print(f"Training XGBRegressor model with params: {params}")
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
+        # Enable automatic logging of input samples, metrics, parameters, and models
+        mlflow.sklearn.autolog(
+            log_input_examples=True,
+            silent=True,
+        )
+
+        # # Log parameters
+        # mlflow.log_params(cleaned_params)
+
+        # Create a sample input
+        sample_input = X.head(5)  
+
+        # Create a pipeline with the selected model
+        pipeline = Pipeline(
+            [
+                ("regressor", model),
+            ]
+        )
+
+        pipeline.fit(
+            X_train,
+            y_train,
+        )
+
+        # Infer the model signature
+        signature = infer_signature(X, pipeline.predict(X))
+
+        mlflow_model = Model()
+        pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
+        pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
+
+        fe.log_model(
+            model=pyfunc_model,
+            artifact_path="player_prediction_SOG",
+            flavor=mlflow.sklearn,
+            training_set=training_set,
+            registered_model_name=f"{catalog_param}.player_prediction_SOG",
+            params=params,
+            signature=signature,
+            input_example=sample_input,
+        )
+
+        loss = "N/A"
+        val_metrics = "N/A"
+        test_metrics = "N/A"
+
+        return {
+            "loss": loss,
+            "status": STATUS_OK,
+            "val_metrics": val_metrics,
+            "test_metrics": test_metrics,
+            "model": pipeline,
+            "run": mlflow_run,
+        }
+
+# COMMAND ----------
+
+def clean_and_prepare_params(best_params, best_model_type):
+    def clean_and_convert_param(key, value):
+        if isinstance(value, str):
+            value = value.strip().rstrip(',')
+        
+        if key in ['random_state', 'seed', 'num_iterations', 'n_estimators', 'max_depth', 'min_child_samples', 'num_leaves', 'max_bin', 'subsample_for_bin'] or key.endswith(('_estimators', '_depth', '_samples', '_leaves', '_bin')):
+            return int(float(value))  # Convert to float first, then to int
+        elif key in ['learning_rate', 'colsample_bytree', 'subsample', 'lambda_l1', 'lambda_l2', 'min_samples_split', 'min_samples_leaf', 'min_child_weight', 'min_split_gain', 'reg_alpha', 'reg_lambda'] or key.endswith(('_rate', '_bytree', '_l1', '_l2', '_alpha', '_lambda', '_gain')):
+            return float(value)
+        elif value == 'None' or value is None:
+            return None
+        else:
+            return value  # Keep as string for non-numeric parameters
+
+    # Clean all parameters
+    cleaned_params = {key: clean_and_convert_param(key, value) for key, value in best_params.items()}
+
+    # Remove redundant 'regressor__' parameters
+    cleaned_params = {key.replace('regressor__', ''): value for key, value in cleaned_params.items()}
+
+    # Add verbosity parameter to suppress output
+    cleaned_params["verbose"] = -1
+
+    cleaned_params['model_type'] = best_model_type
+
+    # Ensure 'num_iterations' is present and correctly formatted for LightGBM
+    if 'num_iterations' not in cleaned_params:
+        if 'n_estimators' in cleaned_params:
+            cleaned_params['num_iterations'] = cleaned_params['n_estimators']
+        else:
+            cleaned_params['num_iterations'] = 100  # Default value if neither is present
+
+    # Ensure 'random_state' is present and is an integer
+    if 'random_state' not in cleaned_params:
+        cleaned_params['random_state'] = 729986891
+    else:
+        cleaned_params['random_state'] = int(str(cleaned_params['random_state']).replace(',', ''))
+
+    # Remove 'seed' if present (as LightGBM uses 'random_state')
+    cleaned_params.pop('seed', None)
+
+    # Remove unnecessary parameters
+    keys_to_remove = ['regressor', 'steps', 'memory', 'classifier_type']
+    for key in keys_to_remove:
+        cleaned_params.pop(key, None)
+
+    return cleaned_params
+
+# Usage:
+cleaned_params = clean_and_prepare_params(best_params, best_model_type)
+print("Final cleaned parameters:")
+print(cleaned_params)
+
+# COMMAND ----------
+
+# Retrain on full dataset
+result = retrain_objective(cleaned_params, X, y, full_train_flag=True)
+
+print("Retraining completed. Results:")
+print(result)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Feature importance
 # MAGIC
 # MAGIC SHAP is a game-theoretic approach to explain machine learning models, providing a summary plot
@@ -186,32 +362,46 @@ shutil.rmtree(tmp_dir)
 # COMMAND ----------
 
 # Set this flag to True and re-run the notebook to see the SHAP plots
-shap_enabled = True
+shap_enabled = False
 
 # COMMAND ----------
 
 if shap_enabled:
+
+    model = "pass"
+
+    pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
+
+    preprocess_model_name = pp_champion_version.name
+    preprocess_model_version = pp_champion_version.version
+
+    preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+    preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+    mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
+
+
     mlflow.autolog(disable=True)
     mlflow.sklearn.autolog(disable=True)
     from shap import KernelExplainer, summary_plot
 
     # SHAP cannot explain models using data with nulls.
     # To enable SHAP to succeed, both the background data and examples to explain are imputed with the mode (most frequent values).
-    mode = X_train_processed.mode().iloc[0]
+    mode = X.mode().iloc[0]
 
     # Sample background data for SHAP Explainer. Increase the sample size to reduce variance.
-    train_sample = X_train_processed.sample(
-        n=min(1000, X_train_processed.shape[0]), random_state=729986891
+    train_sample = X.sample(
+        n=min(1000, X.shape[0]), random_state=729986891
     ).fillna(mode)
 
     # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
-    example = X_val_processed.sample(
-        n=min(1000, X_val_processed.shape[0]), random_state=729986891
+    example = X.sample(
+        n=min(1000, X.shape[0]), random_state=729986891
     ).fillna(mode)
 
     # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
     predict = lambda x: model.predict(
-        pd.DataFrame(x, columns=X_train_processed.columns)
+        pd.DataFrame(x, columns=X.columns)
     )
     explainer = KernelExplainer(predict, train_sample, link="identity")
     shap_values = explainer.shap_values(example, l1_reg=False, nsamples=1000)
@@ -253,27 +443,32 @@ if shap_enabled:
 
 # COMMAND ----------
 
+from mlflow.tracking import MlflowClient
+
+client = MlflowClient()
+runs = client.search_runs(experiment_ids=training_experiment_param, order_by=["created DESC"], max_results=1)
+last_run = runs[0]
+
+display(last_run)
+
+# COMMAND ----------
+
+last_run_id = last_run.info.run_id
+
+# COMMAND ----------
+
 # model_uri for the generated model
-best_model_uri = f"runs:/{ mlflow_run.info.run_id }/model"
+best_model_uri = f"runs:/{last_run_id}/model"
 print(best_model_uri)
 
 # COMMAND ----------
 
 dbutils.jobs.taskValues.set(key="best_model_uri", value=best_model_uri)
 print(f"Successfully set the best_model_uri to {best_model_uri}")
+
 # COMMAND ----------
 
-import mlflow
-
-# catalog = "lr_nhl_demo"
-# schema = "dev"
-# model_name = "SOGModel_v2"
-# mlflow.set_registry_uri("databricks-uc")
-# # mlflow.register_model("runs:/6667e97b3600461d827eebf069c9b6e3/model", f"{catalog}.{schema}.{model_name}")
-# # mlflow.register_model("runs:/4e3dd50a456d4687bf06c214452aebc4/model", f"{catalog}.{schema}.{model_name}") df72db8230f04d28ad2bd1231323aeee
-# mlflow.register_model(
-#     model_uri=best_model_uri_task, name=f"{catalog}.{schema}.{model_name}"
-# )
+registered_model_version = mlflow.register_model(best_model_uri, f"{catalog_param}.player_prediction_sog")
 
 # COMMAND ----------
 
@@ -290,3 +485,15 @@ client.set_registered_model_alias(
 )
 
 # COMMAND ----------
+
+# DBTITLE 1,set tag for feature count
+client.set_model_version_tag(
+    name=f"{catalog_param}.player_prediction_sog",
+    version=new_model_version,
+    key="features_count",
+    value=feature_count_param,
+)
+
+# COMMAND ----------
+
+

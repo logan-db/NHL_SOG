@@ -23,6 +23,12 @@ from pyspark.ml.evaluation import RegressionEvaluator
 
 # COMMAND ----------
 
+# Create widgets with default values
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
+dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
+
+# COMMAND ----------
+
 catalog_param = dbutils.widgets.get("catalog").lower()
 target_col = dbutils.widgets.get("target_col")
 
@@ -49,8 +55,21 @@ model = mlflow.pyfunc.load_model(model_uri=model_uri)
 
 # COMMAND ----------
 
+# Get the full model version details
+model_version = client.get_model_version(
+    name=f"{catalog_param}.player_prediction_sog",
+    version=champion_version.version
+)
+
+# Access the tags
+tags = model_version.tags
+feature_count_param = int(tags["features_count"])
+feature_count_param
+
+# COMMAND ----------
+
 champion_version_pp = client.get_model_version_by_alias(
-    f"{catalog_param}.preprocess_model_200", "champion"
+    f"{catalog_param}.preprocess_model_{feature_count_param}", "champion"
 )
 
 preprocess_model_name = champion_version_pp.name
@@ -114,12 +133,20 @@ upcoming_games_processed = preprocess_model.predict(X)
 
 # COMMAND ----------
 
+upcoming_games_processed
+
+# COMMAND ----------
+
 current_games_pd = current_games.toPandas()
 
 current_games_X = current_games_pd.drop([target_col], axis=1)
 current_games_y = current_games_pd[target_col]
 
 current_games_processed = preprocess_model.predict(current_games_X)
+
+# COMMAND ----------
+
+current_games_processed
 
 # COMMAND ----------
 
@@ -183,14 +210,6 @@ display(predict_hist_games_df.select(target_col, "predictedSOG", "*"))
 
 # COMMAND ----------
 
-display(
-    predict_hist_games_df.filter(col("gameDate") == "2024-04-18").select(
-        target_col, "predictedSOG", "*"
-    )
-)
-
-# COMMAND ----------
-
 predict_games_df.count()
 
 # COMMAND ----------
@@ -227,3 +246,7 @@ print("R-squared (R2):", r2)
 # COMMAND ----------
 
 display(predict_games_df)
+
+# COMMAND ----------
+
+

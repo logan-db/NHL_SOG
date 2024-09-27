@@ -4,15 +4,37 @@
 
 # COMMAND ----------
 
+# Create widgets with default values
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
+dbutils.widgets.text("feature_count", "100", "Number of features")
+dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
+dbutils.widgets.text("time_col", "gameDate", "time_col")
+dbutils.widgets.text("trial_eval_param", "10", "trial_eval_param")
+dbutils.widgets.text("trial_experiment_param", "4320825364109465", "trial_experiment_param")
+
+# COMMAND ----------
+
 from sklearn.model_selection import train_test_split
 
 target_col = dbutils.widgets.get("target_col")
 time_col = dbutils.widgets.get("time_col")
 id_columns = ["gameId", "playerId"]
+
 trial_eval_param = int(dbutils.widgets.get("trial_eval_param"))
 catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
 trial_experiment_param = str(dbutils.widgets.get("trial_experiment_param"))
+
+# COMMAND ----------
+
+# Display the values of the variables
+print(f"target_col: {target_col}")
+print(f"time_col: {time_col}")
+print(f"id_columns: {id_columns}")
+print(f"trial_eval_param: {trial_eval_param}")
+print(f"catalog_param: {catalog_param}")
+print(f"feature_count_param: {feature_count_param}")
+print(f"trial_experiment_param: {trial_experiment_param}")
 
 # COMMAND ----------
 
@@ -130,6 +152,7 @@ from mlflow.models import Model, infer_signature, ModelSignature
 from mlflow import pyfunc
 from hyperopt import hp, tpe, fmin, STATUS_OK, SparkTrials
 import pyspark.pandas as ps
+import pandas as pd
 from sklearn.pipeline import Pipeline
 import lightgbm
 from lightgbm import LGBMRegressor
@@ -141,7 +164,7 @@ from mlflow.pyfunc import PyFuncModel
 
 
 # Define the objective function to accept different model types
-def objective(params, X=[], y=[], full_train_flag=False):
+def objective(params):
 
     model_type = params.pop("model_type")
 
@@ -178,96 +201,69 @@ def objective(params, X=[], y=[], full_train_flag=False):
             ]
         )
 
-        if full_train_flag:
-            X_train = X
-            y_train = y
+        pipeline.fit(
+            X_train,
+            y_train,
+            # These callbacks are specific to LightGBM, so they should only be used for LightGBM
+            **(
+                {
+                    "regressor__callbacks": [
+                        lightgbm.early_stopping(5),
+                        lightgbm.log_evaluation(0),
+                    ],
+                    "regressor__eval_set": [(X_val, y_val)],
+                }
+                if model_type == "lightgbm"
+                else {}
+            ),
+        )
 
-            pipeline.fit(
-                X_train,
-                y_train,
-            )
+        # Log metrics for the training set
+        mlflow_model = Model()
+        pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
+        pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
+        training_eval_result = mlflow.evaluate(
+            model=pyfunc_model,
+            data=X_train.assign(**{str(target_col): y_train}),
+            targets=target_col,
+            model_type="regressor",
+            evaluator_config={
+                "log_model_explainability": False,
+                "metric_prefix": "training_",
+            },
+        )
 
-            mlflow_model = Model()
-            pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
-            pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
+        # Log metrics for the validation set
+        val_eval_result = mlflow.evaluate(
+            model=pyfunc_model,
+            data=X_val.assign(**{str(target_col): y_val}),
+            targets=target_col,
+            model_type="regressor",
+            evaluator_config={
+                "log_model_explainability": False,
+                "metric_prefix": "val_",
+            },
+        )
+        val_metrics = val_eval_result.metrics
 
-            fe.log_model(
-                model=pyfunc_model,
-                artifact_path="player_prediction_SOG",
-                flavor=mlflow.sklearn,
-                training_set=training_set,
-                registered_model_name=f"{catalog_param}.player_prediction_SOG",
-                params=params,
-            )
-            loss = "N/A"
-            val_metrics = "N/A"
-            test_metrics = "N/A"
+        # Log metrics for the test set
+        test_eval_result = mlflow.evaluate(
+            model=pyfunc_model,
+            data=X_test.assign(**{str(target_col): y_test}),
+            targets=target_col,
+            model_type="regressor",
+            evaluator_config={
+                "log_model_explainability": False,
+                "metric_prefix": "test_",
+            },
+        )
+        test_metrics = test_eval_result.metrics
 
-        else:
+        loss = -val_metrics["val_r2_score"]
 
-            pipeline.fit(
-                X_train,
-                y_train,
-                # These callbacks are specific to LightGBM, so they should only be used for LightGBM
-                **(
-                    {
-                        "regressor__callbacks": [
-                            lightgbm.early_stopping(5),
-                            lightgbm.log_evaluation(0),
-                        ],
-                        "regressor__eval_set": [(X_val, y_val)],
-                    }
-                    if model_type == "lightgbm"
-                    else {}
-                ),
-            )
-
-            # Log metrics for the training set
-            mlflow_model = Model()
-            pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
-            pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
-            training_eval_result = mlflow.evaluate(
-                model=pyfunc_model,
-                data=X_train.assign(**{str(target_col): y_train}),
-                targets=target_col,
-                model_type="regressor",
-                evaluator_config={
-                    "log_model_explainability": False,
-                    "metric_prefix": "training_",
-                },
-            )
-
-            # Log metrics for the validation set
-            val_eval_result = mlflow.evaluate(
-                model=pyfunc_model,
-                data=X_val.assign(**{str(target_col): y_val}),
-                targets=target_col,
-                model_type="regressor",
-                evaluator_config={
-                    "log_model_explainability": False,
-                    "metric_prefix": "val_",
-                },
-            )
-            val_metrics = val_eval_result.metrics
-
-            # Log metrics for the test set
-            test_eval_result = mlflow.evaluate(
-                model=pyfunc_model,
-                data=X_test.assign(**{str(target_col): y_test}),
-                targets=target_col,
-                model_type="regressor",
-                evaluator_config={
-                    "log_model_explainability": False,
-                    "metric_prefix": "test_",
-                },
-            )
-            test_metrics = test_eval_result.metrics
-
-            loss = -val_metrics["val_r2_score"]
-
-            # Truncate metric key names so they can be displayed together
-            val_metrics = {k.replace("val_", ""): v for k, v in val_metrics.items()}
-            test_metrics = {k.replace("test_", ""): v for k, v in test_metrics.items()}
+        # Truncate metric key names so they can be displayed together
+        val_metrics = {k.replace("val_", ""): v for k, v in val_metrics.items()}
+        test_metrics = {k.replace("test_", ""): v for k, v in test_metrics.items()}
 
         return {
             "loss": loss,
@@ -302,9 +298,10 @@ def objective(params, X=[], y=[], full_train_flag=False):
 
 # COMMAND ----------
 
+from hyperopt import hp
 from hyperopt.pyll.base import scope
 
-# Define the search space including the model type
+# Define the search space including the model type and the new arguments
 space = hp.choice(
     "classifier_type",
     [
@@ -365,6 +362,8 @@ space = hp.choice(
 import pandas as pd
 from sklearn import set_config
 
+mlflow.set_experiment(experiment_id=trial_experiment_param)
+
 trials = SparkTrials()
 
 # Run the optimization
@@ -398,3 +397,7 @@ print(best_model_uri)
 
 dbutils.jobs.taskValues.set(key="best_model_uri", value=best_model_uri)
 print(f"Successfully set the best_model_uri to {best_model_uri}")
+
+# COMMAND ----------
+
+
