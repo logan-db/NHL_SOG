@@ -13,28 +13,28 @@ resources:
           - logan.rupert@databricks.com
 
       tasks:
-        # - task_key: createVols
-        #   notebook_task:
-        #     notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
+        - task_key: createVols
+          notebook_task:
+            notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
         
-        # - task_key: ingest_transform_job
-        #   depends_on:
-        #       - task_key: createVols
-        #   pipeline_task:
-        #     pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
-        #     full_refresh: false
+        - task_key: ingest_transform_job
+          depends_on:
+              - task_key: createVols
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
+            full_refresh: false
 
-        # - task_key: Write_out_Delta_Tables
-        #   depends_on:
-        #     - task_key: ingest_transform_job
-        #   spark_python_task:
-        #     # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
-        #     python_file: ../src/transformation/solidify_gold_tables_v2.py
-        #   environment_key: Default
+        - task_key: Write_out_Delta_Tables
+          depends_on:
+            - task_key: ingest_transform_job
+          spark_python_task:
+            # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
+            python_file: ../src/transformation/solidify_gold_tables_v2.py
+          environment_key: Default
 
         - task_key: createPreFeatEngTable
-          # depends_on:
-          #   - task_key: Write_out_Delta_Tables
+          depends_on:
+            - task_key: Write_out_Delta_Tables
           notebook_task:
             notebook_path: ../src/transformation/pre_feat_eng.py
 
@@ -140,9 +140,9 @@ resources:
         - name: train_model_param
           default: true
         - name: n_estimators_param
-          default: 5 # Prod use 100
+          default: 100 # Prod use 100
         - name: trial_eval_param
-          default: 10 # Prod use 200
+          default: 200 # Prod use 200
         - name: trial_experiment_param
           default: 4320825364109465
         - name: training_experiment_param
