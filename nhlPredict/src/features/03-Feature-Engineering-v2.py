@@ -484,7 +484,7 @@ def create_feature_store_tables(
 
     set_config(transform_output="pandas")
 
-    mlflow.end_run()
+    # mlflow.end_run()
     id_columns = ["gameId", "playerId"]
 
     # Create a single preprocessing pipeline with a configurable feature selector
@@ -689,7 +689,7 @@ if testing:
 
 set_config(transform_output="pandas")
 
-mlflow.end_run()
+# mlflow.end_run()
 id_columns = ["gameId", "playerId"]
 
 client = mlflow.tracking.MlflowClient()

@@ -13,28 +13,28 @@ resources:
           - logan.rupert@databricks.com
 
       tasks:
-        - task_key: createVols
-          notebook_task:
-            notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
+        # - task_key: createVols
+        #   notebook_task:
+        #     notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
         
-        - task_key: ingest_transform_job
-          depends_on:
-              - task_key: createVols
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
-            full_refresh: false
+        # - task_key: ingest_transform_job
+        #   depends_on:
+        #       - task_key: createVols
+        #   pipeline_task:
+        #     pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
+        #     full_refresh: false
 
-        - task_key: Write_out_Delta_Tables
-          depends_on:
-            - task_key: ingest_transform_job
-          spark_python_task:
-            # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
-            python_file: ../src/transformation/solidify_gold_tables_v2.py
-          environment_key: Default
+        # - task_key: Write_out_Delta_Tables
+        #   depends_on:
+        #     - task_key: ingest_transform_job
+        #   spark_python_task:
+        #     # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
+        #     python_file: ../src/transformation/solidify_gold_tables_v2.py
+        #   environment_key: Default
 
         - task_key: createPreFeatEngTable
-          depends_on:
-            - task_key: Write_out_Delta_Tables
+          # depends_on:
+          #   - task_key: Write_out_Delta_Tables
           notebook_task:
             notebook_path: ../src/transformation/pre_feat_eng.py
 
@@ -47,7 +47,7 @@ resources:
             task:
               task_key: create_feature_table_iteration
               notebook_task:
-                notebook_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/features/03-Feature-Engineering-v2
+                notebook_path: ../src/features/03-Feature-Engineering-v2.py
                 base_parameters:
                   feature_count: "{{input}}"
                 source: WORKSPACE
