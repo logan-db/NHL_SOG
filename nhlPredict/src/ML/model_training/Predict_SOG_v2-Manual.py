@@ -10,7 +10,9 @@ dbutils.widgets.text("feature_count", "100", "Number of features")
 dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
 dbutils.widgets.text("time_col", "gameDate", "time_col")
 dbutils.widgets.text("trial_eval_param", "10", "trial_eval_param")
-dbutils.widgets.text("trial_experiment_param", "4320825364109465", "trial_experiment_param")
+dbutils.widgets.text(
+    "trial_experiment_param", "4320825364109465", "trial_experiment_param"
+)
 
 # COMMAND ----------
 
@@ -395,9 +397,7 @@ model
 best_model_uri = f"runs:/{ mlflow_run.info.run_id }/model"
 print(best_model_uri)
 
-dbutils.jobs.taskValues.set(key="best_model_uri", value=best_model_uri)
-print(f"Successfully set the best_model_uri to {best_model_uri}")
+# dbutils.jobs.taskValues.set(key="best_model_uri", value=best_model_uri)
+# print(f"Successfully set the best_model_uri to {best_model_uri}")
 
 # COMMAND ----------
-
-
