@@ -277,19 +277,38 @@ def retrain_objective(params, X_train=pd.DataFrame(), y_train=pd.DataFrame(), fu
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Clean Params from best Model for retraining
+
+# COMMAND ----------
+
 def clean_and_prepare_params(best_params, best_model_type):
+    def safe_convert(value, to_type):
+        if value == 'None' or value is None:
+            return None
+        try:
+            if to_type == int:
+                return int(float(value))
+            return to_type(value)
+        except ValueError:
+            return None
+
     def clean_and_convert_param(key, value):
         if isinstance(value, str):
             value = value.strip().rstrip(',')
         
         if key in ['random_state', 'seed', 'num_iterations', 'n_estimators', 'max_depth', 'min_child_samples', 'num_leaves', 'max_bin', 'subsample_for_bin'] or key.endswith(('_estimators', '_depth', '_samples', '_leaves', '_bin')):
-            return int(float(value))  # Convert to float first, then to int
+            return safe_convert(value, int)
         elif key in ['learning_rate', 'colsample_bytree', 'subsample', 'lambda_l1', 'lambda_l2', 'min_samples_split', 'min_samples_leaf', 'min_child_weight', 'min_split_gain', 'reg_alpha', 'reg_lambda'] or key.endswith(('_rate', '_bytree', '_l1', '_l2', '_alpha', '_lambda', '_gain')):
-            return float(value)
+            return safe_convert(value, float)
         elif value == 'None' or value is None:
             return None
+        elif value.lower() == 'true':
+            return True
+        elif value.lower() == 'false':
+            return False
         else:
-            return value  # Keep as string for non-numeric parameters
+            return value
 
     # Clean all parameters
     cleaned_params = {key: clean_and_convert_param(key, value) for key, value in best_params.items()}
@@ -302,21 +321,36 @@ def clean_and_prepare_params(best_params, best_model_type):
 
     cleaned_params['model_type'] = best_model_type
 
-    # Ensure 'num_iterations' is present and correctly formatted for LightGBM
-    if 'num_iterations' not in cleaned_params:
-        if 'n_estimators' in cleaned_params:
-            cleaned_params['num_iterations'] = cleaned_params['n_estimators']
-        else:
-            cleaned_params['num_iterations'] = 100  # Default value if neither is present
+    # Handle model-specific parameters
+    if best_model_type.lower() == 'lightgbm':
+        # Ensure 'num_iterations' is present and correctly formatted for LightGBM
+        if 'num_iterations' not in cleaned_params:
+            cleaned_params['num_iterations'] = cleaned_params.get('n_estimators', 100)
+        
+        # Remove 'seed' if present (as LightGBM uses 'random_state')
+        cleaned_params.pop('seed', None)
+
+    elif best_model_type.lower() == 'xgboost':
+        # Ensure 'n_estimators' is present for XGBoost
+        if 'n_estimators' not in cleaned_params:
+            cleaned_params['n_estimators'] = cleaned_params.get('num_iterations', 100)
+        
+        # Handle 'missing' parameter for XGBoost
+        if 'missing' in cleaned_params:
+            if cleaned_params['missing'] == 'nan':
+                cleaned_params['missing'] = float('nan')
+            elif cleaned_params['missing'] == 'None':
+                cleaned_params['missing'] = None
+        
+        # Remove LightGBM-specific parameters
+        for param in ['num_iterations', 'num_leaves', 'min_child_samples']:
+            cleaned_params.pop(param, None)
 
     # Ensure 'random_state' is present and is an integer
     if 'random_state' not in cleaned_params:
         cleaned_params['random_state'] = 729986891
     else:
-        cleaned_params['random_state'] = int(str(cleaned_params['random_state']).replace(',', ''))
-
-    # Remove 'seed' if present (as LightGBM uses 'random_state')
-    cleaned_params.pop('seed', None)
+        cleaned_params['random_state'] = safe_convert(str(cleaned_params['random_state']).replace(',', ''), int)
 
     # Remove unnecessary parameters
     keys_to_remove = ['regressor', 'steps', 'memory', 'classifier_type']
@@ -326,6 +360,7 @@ def clean_and_prepare_params(best_params, best_model_type):
     return cleaned_params
 
 # Usage:
+
 cleaned_params = clean_and_prepare_params(best_params, best_model_type)
 print("Final cleaned parameters:")
 print(cleaned_params)
@@ -478,21 +513,25 @@ model_version_infos = client.search_model_versions(
     f"name = '{catalog_param}.player_prediction_sog'"
 )
 new_model_version = max(
-    [model_version_info.version for model_version_info in model_version_infos]
+    int(model_version_info.version) for model_version_info in model_version_infos
 )
 client.set_registered_model_alias(
     f"{catalog_param}.player_prediction_sog", "champion", new_model_version
 )
+
+print(f"Champion model set to version: {new_model_version}")
 
 # COMMAND ----------
 
 # DBTITLE 1,set tag for feature count
 client.set_model_version_tag(
     name=f"{catalog_param}.player_prediction_sog",
-    version=new_model_version,
+    version=str(new_model_version),
     key="features_count",
     value=feature_count_param,
 )
+
+print(f"TAG SET: features_count: {feature_count_param}")
 
 # COMMAND ----------
 

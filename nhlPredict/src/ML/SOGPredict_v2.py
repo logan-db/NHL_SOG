@@ -32,9 +32,6 @@ dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
 catalog_param = dbutils.widgets.get("catalog").lower()
 target_col = dbutils.widgets.get("target_col")
 
-gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
-sog_features = spark.table(f"{catalog_param}.pre_feat_eng")
-
 # COMMAND ----------
 
 mlflow.set_registry_uri("databricks-uc")
@@ -78,6 +75,11 @@ preprocess_model_version = champion_version_pp.version
 preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
 mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
 preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
+
+# COMMAND ----------
+
+gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
+sog_features = spark.table(f"{catalog_param}.player_features_{feature_count_param}")
 
 # COMMAND ----------
 
@@ -137,12 +139,12 @@ upcoming_games_processed
 
 # COMMAND ----------
 
-current_games_pd = current_games.toPandas()
+# current_games_pd = current_games.toPandas()
 
-current_games_X = current_games_pd.drop([target_col], axis=1)
-current_games_y = current_games_pd[target_col]
+# current_games_X = current_games_pd.drop([target_col], axis=1)
+# current_games_y = current_games_pd[target_col]
 
-current_games_processed = preprocess_model.predict(current_games_X)
+# current_games_processed = preprocess_model.predict(current_games_X)
 
 # COMMAND ----------
 
