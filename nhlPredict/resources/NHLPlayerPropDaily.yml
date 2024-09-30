@@ -1,8 +1,8 @@
 # The main job for nhlPredict.
 resources:
   jobs:
-    NHL_to_Features_v2:
-      name: NHL-to-Features-v2
+    NHLPlayerPropDaily:
+      name: NHLPlayerPropDaily
       schedule:
         quartz_cron_expression: 31 0 12 * * ?
         timezone_id: UTC
@@ -21,7 +21,7 @@ resources:
           depends_on:
               - task_key: createVols
           pipeline_task:
-            pipeline_id: ${resources.pipelines.nhlPredict_pipeline.id}
+            pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
             full_refresh: false
 
         - task_key: Write_out_Delta_Tables
