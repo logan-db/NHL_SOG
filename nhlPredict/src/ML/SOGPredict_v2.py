@@ -54,8 +54,7 @@ model = mlflow.pyfunc.load_model(model_uri=model_uri)
 
 # Get the full model version details
 model_version = client.get_model_version(
-    name=f"{catalog_param}.player_prediction_sog",
-    version=champion_version.version
+    name=f"{catalog_param}.player_prediction_sog", version=champion_version.version
 )
 
 # Access the tags
@@ -79,7 +78,9 @@ preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 # COMMAND ----------
 
 gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
-current_games_processed = spark.table(f"{catalog_param}.player_features_{feature_count_param}")
+current_games_processed = spark.table(
+    f"{catalog_param}.player_features_{feature_count_param}"
+)
 
 # COMMAND ----------
 
@@ -143,7 +144,6 @@ current_games_pd = current_games_processed.toPandas()
 # COMMAND ----------
 
 len(upcoming_games_processed.columns)
-len(current_games_processed)
 
 # COMMAND ----------
 
@@ -240,5 +240,3 @@ print("R-squared (R2):", r2)
 display(predict_games_df)
 
 # COMMAND ----------
-
-
