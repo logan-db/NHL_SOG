@@ -79,16 +79,15 @@ preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 # COMMAND ----------
 
 gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
-sog_features = spark.table(f"{catalog_param}.player_features_{feature_count_param}")
+current_games_processed = spark.table(f"{catalog_param}.player_features_{feature_count_param}")
 
 # COMMAND ----------
 
-current_games = sog_features
-current_games.count()
+current_games_processed.count()
 
 # COMMAND ----------
 
-current_games.filter(col("gameId").isNull()).count()
+current_games_processed.filter(col("gameId").isNull()).count()
 
 # COMMAND ----------
 
@@ -139,16 +138,7 @@ upcoming_games_processed
 
 # COMMAND ----------
 
-# current_games_pd = current_games.toPandas()
-
-# current_games_X = current_games_pd.drop([target_col], axis=1)
-# current_games_y = current_games_pd[target_col]
-
-# current_games_processed = preprocess_model.predict(current_games_X)
-
-# COMMAND ----------
-
-current_games_processed
+current_games_pd = current_games_processed.toPandas()
 
 # COMMAND ----------
 
@@ -162,7 +152,7 @@ len(current_games_processed)
 # Use the trained model to predict on the predict_games_df dataframe
 # Use the predict method
 predictions = model.predict(upcoming_games_processed)
-predictions_hist = model.predict(current_games_processed)
+predictions_hist = model.predict(current_games_pd)
 
 # Convert predictions (a numpy array) to a Spark DataFrame with a single column 'predictedSOG'
 predictions_df = spark.createDataFrame(
@@ -178,7 +168,7 @@ predictions_hist_df = predictions_hist_df.withColumn(
 )
 
 predict_games_df = upcoming_games.withColumn("idx", monotonically_increasing_id())
-hist_games_df = current_games.withColumn("idx", monotonically_increasing_id())
+hist_games_df = current_games_processed.withColumn("idx", monotonically_increasing_id())
 
 windowSpec = Window.orderBy("idx")
 predictions_df = predictions_df.withColumn("idx", row_number().over(windowSpec))
