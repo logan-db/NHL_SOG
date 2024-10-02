@@ -215,6 +215,10 @@ display(upcoming_predictions_full.select(target_col, "predictedSOG", "*"))
 
 # COMMAND ----------
 
+upcoming_predictions_full.schema.simpleString() == hist_predictions.schema.simpleString()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Write Prediction Tables to UC
 
@@ -223,7 +227,7 @@ display(upcoming_predictions_full.select(target_col, "predictedSOG", "*"))
 hist_predictions.write.format("delta").mode("overwrite").saveAsTable(
     f"{catalog_param}.predictSOG_hist_v2"
 )
-upcoming_predictions_full.write.format("delta").option("mergeSchema", "true").mode("overwrite").saveAsTable(
+upcoming_predictions_full.write.format("delta").mode("overwrite").saveAsTable(
     f"{catalog_param}.predictSOG_upcoming_v2"
 )
 
