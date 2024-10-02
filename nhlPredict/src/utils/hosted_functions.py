@@ -1,29 +1,28 @@
 # Databricks notebook source
-# %sql
-# CREATE OR REPLACE FUNCTION lr_nhl_demo.dev.get_latest_stats(shooter_name STRING, n_games INT)
-#   RETURNS INTEGER
-#   LANGUAGE PYTHON
-#   AS $$
-#     stats_columns = [
-#       "player_Total_shotsOnGoal",
-#       "player_Total_hits",
-#       "player_Total_goals",
-#       "player_Total_points",
-#       "player_Total_shotAttempts",
-#       "player_Total_shotsOnGoal",
-#       "player_Total_primaryAssists",
-#       "player_Total_secondaryAssists",
-#       "player_Total_iceTimeRank"
-#     ]
+from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
-#     recent_stats = (gold_player_stats
-#     .filter((col("shooterName") == shooter_name) & (col("gameId").isNotNull()))
-#     .select("gameDate", "playerTeam", "opposingTeam", "shooterName", "home_or_away", "season", *stats_columns)
-#     .orderBy(desc("gameDate")).limit(n_games)
-#     )
+# COMMAND ----------
 
-#     return recent_stats
-#   $$
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE FUNCTION lr_nhl_demo.dev.city_to_abbreviation(city_name STRING)
+# MAGIC   RETURNS STRING
+# MAGIC   LANGUAGE PYTHON
+# MAGIC   AS $$
+# MAGIC     from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
+# MAGIC
+# MAGIC     return nhl_team_city_to_abbreviation.get(city_name, "Unknown")
+# MAGIC   $$
+
+# COMMAND ----------
+
+df = spark.table("lr_nhl_demo.dev.bronze_schedule_2023_v2")
+
+# COMMAND ----------
+
+from pyspark.sql.functions import *
+
+df_test = df.withColumn("state_abbr", expr("lr_nhl_demo.dev.city_to_abbreviation(AWAY)"))
+display(df_test)
 
 # COMMAND ----------
 

@@ -889,8 +889,28 @@ def merge_games_data():
         )
         .orderBy(desc("gameDate"), "playerTeam")
         .drop(*per_game_columns)
+        .withColumn(
+            "DATE",
+            col("gameDate"),
+        )
+        .withColumn(
+            "HOME",
+            when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(
+                col("opposingTeam")
+            ),
+        )
+        .withColumn(
+            "AWAY",
+            when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(
+                col("opposingTeam")
+            ),
+        )
     )
-    return final_joined_rank
+
+    # Add day of week and fill LOCAL/EASTERN cols if null with Deafult values
+    final_joined_rank_with_day = get_day_of_week(final_joined_rank, "DATE")
+
+    return final_joined_rank_with_day
 
 
 # COMMAND ----------
