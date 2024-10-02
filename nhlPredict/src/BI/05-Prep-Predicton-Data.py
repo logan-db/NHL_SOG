@@ -25,7 +25,7 @@ display(predictSOG_hist.orderBy("gameDate", "shooterName"))
 
 # COMMAND ----------
 
-full_prediction = predictSOG_hist.unionAll(predictSOG_upcoming).orderBy(
+full_prediction = predictSOG_hist.unionByName(predictSOG_upcoming).orderBy(
     desc("gameDate")
 )
 
@@ -51,12 +51,12 @@ clean_prediction = (
     )
     .withColumn(
         "player_2+_SeasonHitRate",
-        count(when((lag(col("predictedSOG")).over(windowSpec) >= 2) & (col("gameDate") > lag(col("gameDate")).over(windowSpec)), True)).over(windowSpec) / col("playerGamesPlayedRolling"),
-    )
+        when(col("playerGamesPlayedRolling") > 1, count(when((lag(col("predictedSOG")).over(windowSpec) >= 2) & (col("gameDate") > lag(col("gameDate")).over(windowSpec)), True)).over(windowSpec) / col("playerGamesPlayedRolling"),
+    ).otherwise(lit(None)))
     .withColumn(
         "player_3+_SeasonHitRate",
-        count(when((lag(col("predictedSOG")).over(windowSpec) >= 3) & (col("gameDate") > lag(col("gameDate")).over(windowSpec)), True)).over(windowSpec) / col("playerGamesPlayedRolling"),
-    )
+        when(col("playerGamesPlayedRolling") > 1, count(when((lag(col("predictedSOG")).over(windowSpec) >= 3) & (col("gameDate") > lag(col("gameDate")).over(windowSpec)), True)).over(windowSpec) / col("playerGamesPlayedRolling"),
+    ).otherwise(lit(None)))
     .withColumn(
         "player_2+_SeasonMatchupHitRate",
         when(col("playerMatchupPlayedRolling") > 1, count(when((lag(col("predictedSOG")).over(matchupWindowSpec) >= 2) & (col("gameDate") > lag(col("gameDate")).over(matchupWindowSpec)), True)).over(matchupWindowSpec) / col("playerMatchupPlayedRolling"),
