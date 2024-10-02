@@ -4,9 +4,9 @@ resources:
     NHLPlayerPropDaily:
       name: NHLPlayerPropDaily
       schedule:
-        quartz_cron_expression: 31 0 12 * * ?
+        quartz_cron_expression: 46 0 8 * * ?
         timezone_id: UTC
-        pause_status: PAUSED
+        pause_status: UNPAUSED
 
       email_notifications:
         on_failure:
@@ -38,14 +38,23 @@ resources:
           notebook_task:
             notebook_path: ../src/transformation/pre_feat_eng.py
 
-        - task_key: create_feature_table
+        - task_key: re_train_model
           depends_on:
             - task_key: createPreFeatEngTable
+          condition_task:
+            op: EQUAL_TO
+            left: "{{tasks.createPreFeatEngTable.values.train_model}}"
+            right: "true"
+
+        - task_key: create_feature_table
+          depends_on:
+            - task_key: re_train_model
+              outcome: "true"
           for_each_task:
             inputs: "[25, 50, 100, 200]"
             concurrency: 4
             task:
-              task_key: create_feature_table_iteration
+              task_key: preprocess_and_feature_table_iteration
               notebook_task:
                 notebook_path: ../src/features/03-Feature-Engineering-v2.py
                 base_parameters:
@@ -53,18 +62,25 @@ resources:
                 source: WORKSPACE
               job_cluster_key: LR-ML
 
-        - task_key: re_train_model
+        - task_key: UpdateFeatureTables
           depends_on:
-            - task_key: create_feature_table
-          condition_task:
-            op: EQUAL_TO
-            left: "{{tasks.createPreFeatEngTable.values.train_model}}"
-            right: "true"
+            - task_key: re_train_model
+              outcome: "false"
+          for_each_task:
+            inputs: "[25, 50, 100, 200]"
+            concurrency: 4
+            task:
+              task_key: update_feature_table_iteration
+              notebook_task:
+                notebook_path: ../src/features/UpdateFeatureStores.py
+                base_parameters:
+                  feature_count: "{{input}}"
+                source: WORKSPACE
+              job_cluster_key: LR-ML
 
         - task_key: train_model
           depends_on:
-            - task_key: re_train_model
-              outcome: "true"
+            - task_key: create_feature_table
           for_each_task:
             inputs: "[25, 50, 100, 200]"
             concurrency: 4
@@ -88,8 +104,7 @@ resources:
         - task_key: predictSOG
           depends_on:
             - task_key: register_model
-            - task_key: re_train_model
-              outcome: "false"
+            - task_key: UpdateFeatureTables
           run_if: AT_LEAST_ONE_SUCCESS
           notebook_task:
             notebook_path: ../src/ML/SOGPredict_v2.py
@@ -138,7 +153,7 @@ resources:
         - name: time_col
           default: gameDate
         - name: train_model_param
-          default: true
+          default: false
         - name: n_estimators_param
           default: 100 # Prod use 100
         - name: trial_eval_param
