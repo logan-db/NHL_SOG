@@ -23,7 +23,7 @@ fs = FeatureEngineeringClient()
 # Create widgets with default values
 dbutils.widgets.text("n_estimators_param", "100", "Number of estimators")
 dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
-dbutils.widgets.text("feature_count", "10", "Number of features")
+dbutils.widgets.text("feature_count", "25", "Number of features")
 dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
 dbutils.widgets.text("time_col", "gameDate", "time_col")
 
@@ -604,7 +604,7 @@ def create_feature_store_tables(
 
     # Set as Champion
     print("Setting model as Champion...")
-    client = mlflow.tracking.MlflowClient()
+    # client = mlflow.tracking.MlflowClient()
     model_version_infos = client.search_model_versions(f"name = '{uc_model_name}'")
     new_model_version = max(
         [model_version_info.version for model_version_info in model_version_infos]
