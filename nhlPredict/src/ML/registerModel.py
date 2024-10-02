@@ -253,7 +253,7 @@ def retrain_objective(params, X_train=pd.DataFrame(), y_train=pd.DataFrame(), fu
 
         fe.log_model(
             model=pyfunc_model,
-            artifact_path="player_prediction_SOG",
+            artifact_path="model",
             flavor=mlflow.sklearn,
             training_set=training_set,
             registered_model_name=f"{catalog_param}.player_prediction_SOG",

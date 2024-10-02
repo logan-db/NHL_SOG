@@ -394,13 +394,13 @@ rf_pipeline = Pipeline(
 
 # COMMAND ----------
 
-feature_union = FeatureUnion(
-    [
-        ("mi_pipeline", mi_pipeline),
-        ("rfe_pipeline", rfe_pipeline),
-        ("rf_pipeline", rf_pipeline),
-    ]
-)
+# feature_union = FeatureUnion(
+#     [
+#         ("mi_pipeline", mi_pipeline),
+#         ("rfe_pipeline", rfe_pipeline),
+#         ("rf_pipeline", rf_pipeline),
+#     ]
+# )
 
 # COMMAND ----------
 
@@ -753,3 +753,43 @@ print(f"Feature Store table {table_name} created SUCCESSFULLY...")
 
 df = fs.read_table(name=table_name)
 display(df)
+
+# COMMAND ----------
+
+# DBTITLE 1,Indexing
+model_input = pre_feat_eng.toPandas()
+
+id_columns = ["gameId", "playerId"]
+
+id_data = model_input[id_columns]
+transformed_data = model_input.drop(columns=id_columns)
+
+id_data
+
+# COMMAND ----------
+
+# Ensure index alignment before concatenation
+transformed_data.index = id_data.index
+
+# COMMAND ----------
+
+import pandas as pd
+
+# Concatenate id_data with transformed_data
+final_data = pd.concat([id_data, transformed_data], axis=1)
+final_data
+
+# COMMAND ----------
+
+display(pre_feat_eng.filter(col('playerId')==8470604))
+display(pre_feat_eng.filter(col('playerId')==8484255))
+
+assert pre_feat_eng.filter(col('playerId')==8479318).select("shooterName").collect()[0][0] == "Auston Matthews"
+
+# COMMAND ----------
+
+display(pre_feat_eng.filter((col('playerId')==8479318) & (col('gameId')==2023020026))) # should be Auston Matthews, TOR vs MIN
+
+# COMMAND ----------
+
+
