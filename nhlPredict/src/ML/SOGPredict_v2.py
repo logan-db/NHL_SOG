@@ -108,6 +108,10 @@ pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng")
 
 # COMMAND ----------
 
+display(pre_feat_eng.filter(col("gameId").isNull()))
+
+# COMMAND ----------
+
 current_games_processed.count()
 
 # COMMAND ----------
@@ -117,6 +121,10 @@ current_games_processed.filter(col("gameId").isNull()).count()
 # COMMAND ----------
 
 gold_model_stats.filter(col("gameId").isNull()).count()
+
+# COMMAND ----------
+
+display(gold_model_stats.filter(col("gameId").isNull()))
 
 # COMMAND ----------
 

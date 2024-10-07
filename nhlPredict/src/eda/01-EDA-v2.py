@@ -10,6 +10,13 @@ from pyspark.sql.window import Window
 
 # COMMAND ----------
 
+# Use %run to execute the notebook containing the desired function
+%run "/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/utils/ingestionHelper"
+
+# Now you can use select_rename_columns as it has been defined in the executed notebook
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC USE CATALOG lr_nhl_demo
 
@@ -27,18 +34,13 @@ bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
 
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
 schedule_2024 = spark.table("dev.2024_25_official_nhl_schedule_by_day")
-silver_games_schedule = spark.table("dev.silver_games_schedule")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
 silver_schedule_2023_v2 = spark.table("dev.silver_schedule_2023_v2")
 silver_games_rankings = spark.table("dev.silver_games_rankings")
 
-silver_skaters_enriched = spark.table("dev.silver_skaters_enriched")
-silver_shots = spark.table("dev.silver_shots")
-silver_games_historical = spark.table("dev.silver_games_historical")
 silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
 gold_player_stats = spark.table("dev.gold_player_stats_v2")
-gold_game_stats = spark.table("dev.gold_game_stats")
-gold_game_stats_v2 = spark.table("dev.gold_game_stats_v2")
+gold_game_stats = spark.table("dev.gold_game_stats_v2")
 gold_model_data = spark.table("dev.gold_model_stats")
 gold_merged_stats = spark.table("dev.gold_merged_stats")
 gold_merged_stats_v2 = spark.table("dev.gold_merged_stats_v2")
@@ -47,20 +49,33 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 # COMMAND ----------
 
 # DBTITLE 1,General Discovery
-display(silver_games_rankings.filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
+display(gold_game_stats.orderBy(desc(col("gameDate"))))
+display(gold_player_stats.orderBy(desc(col("gameDate"))))
 
 
 # COMMAND ----------
 
-display(silver_games_historical_v2)
+display(gold_game_stats.join(
+        gold_player_stats.drop("gameId"),
+        how="left",
+        on=[
+            "team",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        ],
+    ).orderBy(desc(col("gameDate")))
+)
 
 # COMMAND ----------
 
 upcoming_games = gold_model_data_v2.filter(
     (col("gameId").isNull())
     # & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
-    & (col("gameDate") != "2024-01-17")
+    # & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    # & (col("gameDate") != "2024-01-17")
 )
 
 display(upcoming_games)
@@ -142,23 +157,46 @@ display(player_game_stats_v2.select(*select_cols))
 # COMMAND ----------
 
 # DBTITLE 1,Player Ranking Logic
+from pyspark.sql.functions import (
+    col,
+    when,
+    sum,
+    mean,
+    rank,
+    percent_rank,
+    round,
+    desc,
+    asc,
+)
+from pyspark.sql.window import Window
+
+silver_games_schedule = silver_games_schedule_v2
+
 # Create a window specification
 gameCountWindowSpec = (
     Window.partitionBy("playerTeam", "season")
     .orderBy("gameDate")
     .rowsBetween(Window.unboundedPreceding, 0)
 )
+matchupCountWindowSpec = (
+    Window.partitionBy("playerTeam", "opposingTeam", "season")
+    .orderBy("gameDate")
+    .rowsBetween(Window.unboundedPreceding, 0)
+)
 
 pk_norm = (
-    silver_games_schedule_v2
-    .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+    silver_games_schedule.withColumn(
+        "teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
+    )
+    .withColumn(
+        "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+    )
     .withColumn(
         "game_PP_goalsForPerPenalty",
         round(
             when(
                 col("game_Total_penaltiesAgainst") != 0,
-                col("game_PP_goalsFor")
-                / col("game_Total_penaltiesAgainst"),
+                col("game_PP_goalsFor") / col("game_Total_penaltiesAgainst"),
             ).otherwise(None),
             2,
         ),
@@ -168,8 +206,7 @@ pk_norm = (
         round(
             when(
                 col("game_Total_penaltiesFor") != 0,
-                col("game_PK_goalsAgainst")
-                / col("game_Total_penaltiesFor"),
+                col("game_PK_goalsAgainst") / col("game_Total_penaltiesFor"),
             ).otherwise(None),
             2,
         ),
@@ -179,8 +216,7 @@ pk_norm = (
         round(
             when(
                 col("game_Total_penaltiesAgainst") != 0,
-                col("game_PP_shotsOnGoalFor")
-                / col("game_Total_penaltiesAgainst"),
+                col("game_PP_shotsOnGoalFor") / col("game_Total_penaltiesAgainst"),
             ).otherwise(None),
             2,
         ),
@@ -190,8 +226,7 @@ pk_norm = (
         round(
             when(
                 col("game_Total_penaltiesAgainst") != 0,
-                col("game_PP_shotAttemptsFor")
-                / col("game_Total_penaltiesAgainst"),
+                col("game_PP_shotAttemptsFor") / col("game_Total_penaltiesAgainst"),
             ).otherwise(None),
             2,
         ),
@@ -201,8 +236,7 @@ pk_norm = (
         round(
             when(
                 col("game_Total_penaltiesFor") != 0,
-                col("game_PK_shotsOnGoalAgainst")
-                / col("game_Total_penaltiesFor"),
+                col("game_PK_shotsOnGoalAgainst") / col("game_Total_penaltiesFor"),
             ).otherwise(None),
             2,
         ),
@@ -212,11 +246,14 @@ pk_norm = (
         round(
             when(
                 col("game_Total_penaltiesFor") != 0,
-                col("game_PK_shotAttemptsAgainst")
-                / col("game_Total_penaltiesFor"),
+                col("game_PK_shotAttemptsAgainst") / col("game_Total_penaltiesFor"),
             ).otherwise(None),
             2,
         ),
+    )
+    .withColumn(
+        "isPlayoffGame",
+        when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)),
     )
 )
 
@@ -242,7 +279,6 @@ per_game_columns = [
     "game_Total_penaltiesAgainst",
 ]
 
-# Define columns to rank
 columns_to_rank = [
     "game_Total_goalsFor",
     "game_Total_goalsAgainst",
@@ -260,13 +296,10 @@ columns_to_rank = [
     "game_Total_penaltiesAgainst",
 ]
 
-# Get the maximum season
 max_season = pk_norm_filled.select(max("season")).collect()[0][0]
 
 count_rows = (
-    pk_norm_filled.filter(
-        (col("season") == max_season) & (col("gameId").isNotNull())
-    )
+    pk_norm_filled.filter((col("season") == max_season) & (col("gameId").isNotNull()))
     .groupBy("playerTeam", "season")
     .count()
     .select(min("count"))
@@ -279,11 +312,17 @@ if count_rows is None or count_rows < 3:
 else:
     print(f"Max Season for rankings: {max_season}")
 
-# # Group by playerTeam and season
+# Group by playerTeam and season
 grouped_df = (
-    pk_norm_filled
-    .filter(col("season") == max_season)
-    .groupBy("gameDate", "playerTeam", "season", "teamGamesPlayedRolling")
+    pk_norm_filled.filter(col("season") == max_season)
+    .groupBy(
+        "gameDate",
+        "playerTeam",
+        "season",
+        "teamGamesPlayedRolling",
+        "teamMatchupPlayedRolling",
+        "isPlayoffGame",
+    )
     .agg(
         *[sum(column).alias(f"sum_{column}") for column in columns_to_rank],
     )
@@ -297,60 +336,89 @@ for column in columns_to_rank:
     )
     rolling_column = f"rolling_{column}"
     rank_column = f"rank_rolling_{column}"
+    perc_rank_column = f"perc_rank_rolling_{column}"
 
-    # Define the window specification
-    rank_window_spec = Window.partitionBy("teamGamesPlayedRolling").orderBy(
-        desc(rolling_column)
+    # Determine the ordering based on column name
+    if "Against" in column:
+        order_col = asc(rolling_column)
+    else:
+        order_col = desc(rolling_column)
+
+    perc_rank_calc = 1 - percent_rank().over(
+        Window.partitionBy("teamGamesPlayedRolling").orderBy(order_col)
     )
 
     if column not in per_game_columns:
         # Rolling Sum Logic
         grouped_df = grouped_df.withColumn(
             rolling_column,
-            when(
-                col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")
-            ).otherwise(sum(f"sum_{column}").over(rolling_window_spec)),
+            when(col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")).otherwise(
+                sum(f"sum_{column}").over(rolling_window_spec)
+            ),
         )
         grouped_df = grouped_df.withColumn(
-            rank_column, dense_rank().over(rank_window_spec)
+            rank_column,
+            rank().over(
+                Window.partitionBy("teamGamesPlayedRolling").orderBy(order_col)
+            ),
+        )
+        grouped_df = grouped_df.withColumn(
+            perc_rank_column, round(perc_rank_calc * 100, 2)
         )
 
         grouped_df = grouped_df.withColumnRenamed(
             rolling_column, rolling_column.replace("game_", "sum_")
-        ).withColumnRenamed(
-            rank_column, rank_column.replace("game_", "sum_")
-        )
+        ).withColumnRenamed(rank_column, rank_column.replace("game_", "sum_"))
 
     else:
         # PerGame Rolling AVG Logic
-        # grouped_df = grouped_df.withColumn(f"sum_{game_column}PerGame", round(col(rolling_column) / col("teamGamesPlayedRolling"), 2))
         grouped_df = grouped_df.withColumn(
             rolling_column,
-            when(
-                col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")
-            ).otherwise(mean(f"sum_{column}").over(rolling_window_spec)),
+            when(col("teamGamesPlayedRolling") == 1, col(f"sum_{column}")).otherwise(
+                mean(f"sum_{column}").over(rolling_window_spec)
+            ),
         )
 
         grouped_df = grouped_df.withColumn(
-            rank_column, dense_rank().over(rank_window_spec)
+            rank_column,
+            rank().over(
+                Window.partitionBy("teamGamesPlayedRolling").orderBy(order_col)
+            ),
+        )
+        grouped_df = grouped_df.withColumn(
+            perc_rank_column, round(perc_rank_calc * 100, 2)
         )
 
         grouped_df = grouped_df.withColumnRenamed(
             rolling_column, rolling_column.replace("game_", "avg_")
-        ).withColumnRenamed(
-            rank_column, rank_column.replace("game_", "avg_")
-        )
+        ).withColumnRenamed(rank_column, rank_column.replace("game_", "avg_"))
 
-rank_roll_columns = list(set(grouped_df.columns) - set(['gameDate','playerTeam','season','teamGamesPlayedRolling']))
 
-# NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
-final_joined_rank = silver_games_schedule_v2.join(
-    grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
-).orderBy(desc("gameDate"), "playerTeam").drop(*per_game_columns)
+final_joined_rank = (
+    silver_games_schedule.join(
+        grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
+    )
+    .orderBy(desc("gameDate"), "playerTeam")
+    .drop(*per_game_columns)
+)
 
-display(final_joined_rank.withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)).filter(col('playerTeam')=="VAN").orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling"))
-        
-        # .select("gameDate", "playerTeam", "season", "sum_game_PP_goalsForPerPenalty", "rolling_sum_PP_goalsForPerPenalty", "rank_rolling_sum_PP_goalsForPerPenalty", "sum_game_Total_shotsOnGoalAgainst", "rolling_avg_Total_shotsOnGoalAgainst", "rank_rolling_avg_Total_shotsOnGoalAgainst")
+display(
+    final_joined_rank.filter(col("playerTeam") == "VAN")
+    .orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling")
+    .select(
+        "gameDate",
+        "playerTeam",
+        "season",
+        "sum_game_PP_goalsForPerPenalty",
+        "rolling_sum_PP_goalsForPerPenalty",
+        "rank_rolling_sum_PP_goalsForPerPenalty",
+        "perc_rank_rolling_game_PP_goalsForPerPenalty",
+        "sum_game_Total_shotsOnGoalAgainst",
+        "rolling_avg_Total_shotsOnGoalAgainst",
+        "rank_rolling_avg_Total_shotsOnGoalAgainst",
+        "perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+    )
+)
 
 # COMMAND ----------
 
@@ -662,7 +730,7 @@ display(
 
 # DBTITLE 1,% SOG Type
 display(
-    base.select(
+    gold_model_data_v2.select(
         *game_clean_cols,
         "player_total_shotsOnGoal",
         "predictedSOG",
@@ -1083,111 +1151,398 @@ playoff_teams
 
 # COMMAND ----------
 
-silver_games_schedule = bronze_schedule_2023_v2.join(
-    silver_games_historical_v2.withColumn(
-        "homeTeamCode",
-        when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
-    ).withColumn(
-        "awayTeamCode",
-        when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
-    ),
-    how="left",
-    on=[
-        col("homeTeamCode") == col("HOME"),
-        col("awayTeamCode") == col("AWAY"),
-        col("gameDate") == col("DATE"),
-    ],
+from datetime import date
+today_date = date.today()
+if str(today_date) <= str(bronze_schedule_2023_v2.select(min("DATE")).first()[0]):
+  print('yes')
+
+# COMMAND ----------
+
+select_cols = [
+    "playerId",
+    "season",
+    "name",
+    "gameId",
+    "playerTeam",
+    "opposingTeam",
+    "home_or_away",
+    "gameDate",
+    "position",
+    "icetime",
+    "shifts",
+    "onIce_corsiPercentage",
+    "offIce_corsiPercentage",
+    "onIce_fenwickPercentage",
+    "offIce_fenwickPercentage",
+    "iceTimeRank",
+    "I_F_primaryAssists",
+    "I_F_secondaryAssists",
+    "I_F_shotsOnGoal",
+    "I_F_missedShots",
+    "I_F_blockedShotAttempts",
+    "I_F_shotAttempts",
+    "I_F_points",
+    "I_F_goals",
+    "I_F_rebounds",
+    "I_F_reboundGoals",
+    "I_F_savedShotsOnGoal",
+    "I_F_savedUnblockedShotAttempts",
+    "I_F_hits",
+    "I_F_takeaways",
+    "I_F_giveaways",
+    "I_F_lowDangerShots",
+    "I_F_mediumDangerShots",
+    "I_F_highDangerShots",
+    "I_F_lowDangerGoals",
+    "I_F_mediumDangerGoals",
+    "I_F_highDangerGoals",
+    "I_F_unblockedShotAttempts",
+    "OnIce_F_shotsOnGoal",
+    "OnIce_F_missedShots",
+    "OnIce_F_blockedShotAttempts",
+    "OnIce_F_shotAttempts",
+    "OnIce_F_goals",
+    "OnIce_F_lowDangerShots",
+    "OnIce_F_mediumDangerShots",
+    "OnIce_F_highDangerShots",
+    "OnIce_F_lowDangerGoals",
+    "OnIce_F_mediumDangerGoals",
+    "OnIce_F_highDangerGoals",
+    "OnIce_A_shotsOnGoal",
+    "OnIce_A_shotAttempts",
+    "OnIce_A_goals",
+    "OffIce_F_shotAttempts",
+    "OffIce_A_shotAttempts",
+]
+
+# Call the function on the DataFrame
+player_game_stats_total = select_rename_columns(
+    player_game_stats_v2, #change
+    select_cols,
+    "player_Total_",
+    "all",
+)
+player_game_stats_pp = select_rename_columns(
+    player_game_stats_v2, select_cols, "player_PP_", "5on4"
+)
+player_game_stats_pk = select_rename_columns(
+    player_game_stats_v2, select_cols, "player_PK_", "4on5"
+)
+player_game_stats_ev = select_rename_columns(
+    player_game_stats_v2, select_cols, "player_EV_", "5on5"
 )
 
-home_silver_games_schedule = silver_games_schedule.filter(
-    col("gameId").isNull()
-).withColumn("team", col("HOME"))
-away_silver_games_schedule = silver_games_schedule.filter(
-    col("gameId").isNull()
-).withColumn("team", col("AWAY"))
+joined_player_stats = (
+    player_game_stats_total.join(
+        player_game_stats_pp,
+        [
+            "playerId",
+            "season",
+            "shooterName",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ],
+        "left",
+    )
+    .join(
+        player_game_stats_pk,
+        [
+            "playerId",
+            "season",
+            "shooterName",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ],
+        "left",
+    )
+    .join(
+        player_game_stats_ev,
+        [
+            "playerId",
+            "season",
+            "shooterName",
+            "gameId",
+            "playerTeam",
+            "opposingTeam",
+            "home_or_away",
+            "gameDate",
+            "position",
+        ],
+        "left",
+    )
+).alias("joined_player_stats")
 
-upcoming_final_clean = (
-    home_silver_games_schedule.union(away_silver_games_schedule)
-    .withColumn("season", lit(2023))
-    .withColumn(
-        "gameDate",
-        when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
-    )
-    .withColumn(
-        "playerTeam",
-        when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
-    )
-    .withColumn(
-        "opposingTeam",
-        when(col("playerTeam") == col("HOME"), col("AWAY")).otherwise(col("HOME")),
-    )
-    .withColumn(
+assert player_game_stats_total.count() == joined_player_stats.count(), print(
+    f"player_game_stats_total: {player_game_stats_total.count()} does NOT equal joined_player_stats: {joined_player_stats.count()}"
+)
+print("Assert for gold_player_stats_v2 passed")
+
+gold_shots_date = (
+    silver_games_schedule_v2
+    .select(
+        "team",
+        "gameId",
+        "season",
         "home_or_away",
-        when(col("playerTeam") == col("HOME"), lit("HOME")).otherwise(lit("AWAY")),
-    )
-)
-
-
-regular_season_schedule = (
-    silver_games_schedule.filter(col("gameId").isNotNull())
-    .unionAll(upcoming_final_clean)
-    .orderBy(desc("DATE"))
-)
-
-
-# Add logic to check if Playoffs, if so then add playoff games to schedule
-# Get Max gameDate from final dataframe
-max_reg_season_date = (
-    regular_season_schedule.filter(col("gameId").isNotNull())
-    .select(max("gameDate"))
-    .first()[0]
-)
-print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
-
-playoff_games = (
-    silver_games_historical_v2.filter(col("gameDate") > max_reg_season_date)
-    .withColumn(
-        "DATE",
-        col("gameDate"),
-    )
-    .withColumn(
-        "homeTeamCode",
-        when(col("home_or_away") == "HOME", col("team")).otherwise(col("opposingTeam")),
-    )
-    .withColumn(
-        "awayTeamCode",
-        when(col("home_or_away") == "AWAY", col("team")).otherwise(col("opposingTeam")),
-    )
-    .withColumn("season", lit(2023))
-    .withColumn(
+        "gameDate",
         "playerTeam",
-        when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
+        "opposingTeam",
     )
-    .withColumn(
-        "HOME",
-        when(col("home_or_away") == "HOME", col("playerTeam")).otherwise(
-            col("opposingTeam")
-        ),
-    )
-    .withColumn(
-        "AWAY",
-        when(col("home_or_away") == "AWAY", col("playerTeam")).otherwise(
-            col("opposingTeam")
-        ),
+    .join(
+        joined_player_stats,
+        how="left",
+        on=[
+            "playerTeam",
+            "gameId",
+            "gameDate",
+            "opposingTeam",
+            "season",
+            "home_or_away",
+        ],
     )
 )
 
-columns_to_add = ["DAY", "EASTERN", "LOCAL"]
-for column in columns_to_add:
-    playoff_games = playoff_games.withColumn(column, lit(None))
-
-if playoff_games:
-    print("Adding playoff games to schedule")
-    full_season_schedule = regular_season_schedule.unionByName(playoff_games)
+if (
+    str(today_date) <= str(bronze_schedule_2023_v2.select(min("DATE")).first()[0])
+    # date(2024, 10, 4) # First game of the following season
+    # <= dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]
+):
+    player_index_2023 = (
+        skaters_2023
+        .select("playerId", "season", "team", "name")
+        .filter(col("situation") == "all")
+        .distinct()
+        .unionByName(
+            skaters_2023
+            .select("playerId", "season", "team", "name")
+            .filter(col("situation") == "all")
+            .withColumn("season", lit(2024))
+            .distinct()
+        )
+    )
 else:
-    full_season_schedule = regular_season_schedule
+    player_index_2023 = (
+        skaters_2023
+        .select("playerId", "season", "team", "name")
+        .filter(col("situation") == "all")
+        .withColumn("season", lit(2024))
+        .distinct()
+    )
 
-display(full_season_schedule.orderBy(desc("DATE")))
+player_game_index_2023 = (
+    silver_games_schedule_v2
+    .select(
+        "team",
+        "gameId",
+        "season",
+        "home_or_away",
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+    )
+    .join(player_index_2023, how="left", on=["team", "season"])
+    .select("team", "playerId", "season", "name")
+    .distinct()
+    .withColumnRenamed("name", "shooterName")
+).alias("player_game_index_2023")
+
+silver_games_schedule = (
+    silver_games_schedule_v2
+    .select(
+        "team",
+        "gameId",
+        "season",
+        "home_or_away",
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+    )
+    .alias("silver_games_schedule")
+)
+
+for col_name in player_game_index_2023.columns:
+    player_game_index_2023 = player_game_index_2023.withColumnRenamed(
+        col_name, "index_" + col_name
+    )
+
+player_game_index_2023 = player_game_index_2023.alias("player_game_index_2023")
+
+upcoming_games_player_index = silver_games_schedule.filter(
+    col("gameId").isNull()
+).join(
+    player_game_index_2023,
+    how="left",
+    on=[col("index_team") == col("team"), col("index_season") == col("season")],
+)
+
+gold_shots_date_final = (
+    gold_shots_date.join(
+        upcoming_games_player_index.drop("gameId"),
+        how="left",
+        on=[
+            "team",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        ],
+    )
+    .withColumn(
+        "playerId",
+        when(col("playerId").isNull(), col("index_playerId")).otherwise(
+            col("playerId")
+        ),
+    )
+    .withColumn(
+        "shooterName",
+        when(col("shooterName").isNull(), col("index_shooterName")).otherwise(
+            col("shooterName")
+        ),
+    )
+    .drop("index_season", "index_team", "index_shooterName", "index_playerId")
+)
+
+# Define Windows (player last games, and players last matchups)
+windowSpec = Window.partitionBy("playerId", "playerTeam", "shooterName").orderBy(
+    col("gameDate")
+)
+last3WindowSpec = windowSpec.rowsBetween(-2, 0)
+last7WindowSpec = windowSpec.rowsBetween(-6, 0)
+matchupWindowSpec = Window.partitionBy(
+    "playerId", "playerTeam", "shooterName", "opposingTeam"
+).orderBy(col("gameDate"))
+matchupLast3WindowSpec = matchupWindowSpec.rowsBetween(-2, 0)
+matchupLast7WindowSpec = matchupWindowSpec.rowsBetween(-6, 0)
+
+reorder_list = [
+    "gameDate",
+    "gameId",
+    "season",
+    "position",
+    "home_or_away",
+    "isHome",
+    "isPlayoffGame",
+    "playerTeam",
+    "opposingTeam",
+    "playerId",
+    "shooterName",
+    "DAY",
+    "DATE",
+    "dummyDay",
+    "AWAY",
+    "HOME",
+    "team",
+    "homeTeamCode",
+    "awayTeamCode",
+    "playerGamesPlayedRolling",
+    "playerMatchupPlayedRolling",
+]
+
+# Create a window specification
+gameCountWindowSpec = (
+    Window.partitionBy("playerId", "season")
+    .orderBy("gameDate")
+    .rowsBetween(Window.unboundedPreceding, 0)
+)
+matchupCountWindowSpec = (
+    Window.partitionBy("playerId", "playerTeam", "opposingTeam", "season")
+    .orderBy("gameDate")
+    .rowsBetween(Window.unboundedPreceding, 0)
+)
+
+# Apply the count function within the window
+gold_shots_date_count = gold_shots_date_final.withColumn(
+    "playerGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
+).withColumn(
+    "playerMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+)
+
+columns_to_iterate = [
+    col for col in gold_shots_date_count.columns if col not in reorder_list
+]
+
+# Create a list of column expressions for lag and averages
+column_exprs = [
+    col(c) for c in gold_shots_date_count.columns
+]  # Start with all existing columns
+
+# might be nulls still for players that have just switched teams, will get imputed in Feat Engineering
+player_avg_exprs = {
+    col_name: round(
+        median(col(col_name)).over(Window.partitionBy("playerId", "playerTeam")), 2
+    )
+    for col_name in columns_to_iterate
+}
+playerMatch_avg_exprs = {
+    col_name: round(
+        median(col(col_name)).over(
+            Window.partitionBy("playerId", "playerTeam", "opposingTeam")
+        ),
+        2,
+    )
+    for col_name in columns_to_iterate
+}
+
+for column_name in columns_to_iterate:
+    player_avg = player_avg_exprs[column_name]
+    matchup_avg = playerMatch_avg_exprs[column_name]
+    column_exprs += [
+        when(
+            col("playerGamesPlayedRolling") > 1,
+            round(lag(col(column_name)).over(windowSpec), 2),
+        )
+        .otherwise(player_avg)
+        .alias(f"previous_{column_name}"),
+        when(
+            col("playerGamesPlayedRolling") > 3,
+            round(avg(col(column_name)).over(last3WindowSpec), 2),
+        )
+        .otherwise(round(player_avg, 2))
+        .alias(f"average_{column_name}_last_3_games"),
+        when(
+            col("playerGamesPlayedRolling") > 7,
+            round(avg(col(column_name)).over(last7WindowSpec), 2),
+        )
+        .otherwise(player_avg)
+        .alias(f"average_{column_name}_last_7_games"),
+        when(
+            col("playerMatchupPlayedRolling") > 1,
+            round(lag(col(column_name)).over(matchupWindowSpec), 2),
+        )
+        .otherwise(matchup_avg)
+        .alias(f"matchup_previous_{column_name}"),
+        when(
+            col("playerMatchupPlayedRolling") > 3,
+            round(avg(col(column_name)).over(matchupLast3WindowSpec), 2),
+        )
+        .otherwise(matchup_avg)
+        .alias(f"matchup_average_{column_name}_last_3_games"),
+        when(
+            col("playerMatchupPlayedRolling") > 7,
+            round(avg(col(column_name)).over(matchupLast7WindowSpec), 2),
+        )
+        .otherwise(matchup_avg)
+        .alias(f"matchup_average_{column_name}_last_7_games"),
+    ]
+
+# Apply all column expressions at once using select
+gold_player_stats = gold_shots_date_count.select(*column_exprs)
+
+display(gold_player_stats.orderBy(desc("gameDate")))
+
+
+# COMMAND ----------
+
+display(gold_shots_date_final.orderBy(desc("gameDate")))
 
 # COMMAND ----------
 
