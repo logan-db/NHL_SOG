@@ -17,6 +17,7 @@ bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
 team_code_mappings = spark.table("dev.team_code_mappings")
+silver_games_rankings = spark.table("dev.silver_games_rankings")
 
 silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
 gold_player_stats_v2 = spark.table("dev.gold_player_stats_v2")
@@ -38,6 +39,10 @@ display(gold_player_stats_v2)
 
 # COMMAND ----------
 
+display(silver_games_rankings)
+
+# COMMAND ----------
+
 game_clean_cols = ['DAY',
  'DATE',
  'EASTERN',
@@ -51,16 +56,16 @@ game_clean_cols = ['DAY',
  'gameDate',
  'opposingTeam',
  'gameId',
- 'game_Total_shotsOnGoalFor',
+ 'sum_game_Total_shotsOnGoalFor',
  'game_Total_missedShotsFor',
  'game_Total_blockedShotAttemptsFor',
- 'game_Total_shotAttemptsFor',
- 'game_Total_goalsFor',
- 'game_Total_penaltiesFor',
+ 'sum_game_Total_shotAttemptsFor',
+ 'sum_game_Total_goalsFor',
+ 'sum_game_Total_penaltiesFor',
  'game_Total_faceOffsWonFor',
  'game_Total_hitsFor',
- 'game_Total_goalsAgainst',
- 'game_Total_penaltiesAgainst',
+ 'sum_game_Total_goalsAgainst',
+ 'sum_game_Total_penaltiesAgainst',
  'game_Total_faceOffsWonAgainst',
  'game_Total_hitsAgainst',
  ]
@@ -243,8 +248,12 @@ clean_cols = ['team',
 
 # COMMAND ----------
 
-games_clean = silver_games_schedule_v2[[game_clean_cols]]
-games_clean = games_clean.withColumn("isWin", when(col("game_Total_goalsFor") > col("game_Total_goalsAgainst"), "Yes").otherwise("No")).filter(col("gameId").isNotNull())
+display(silver_games_rankings[[game_clean_cols]])
+
+# COMMAND ----------
+
+games_clean = silver_games_rankings[[game_clean_cols]]
+games_clean = games_clean.withColumn("isWin", when(col("sum_game_Total_goalsFor") > col("sum_game_Total_goalsAgainst"), "Yes").otherwise("No")).filter(col("gameId").isNotNull())
 display(games_clean)
 
 # COMMAND ----------
@@ -261,3 +270,7 @@ gold_player_stats_clean.write.format("delta").mode("overwrite").saveAsTable("lr_
 
 spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_game_stats_clean")
 games_clean.write.format("delta").mode("overwrite").saveAsTable("lr_nhl_demo.dev.gold_game_stats_clean")
+
+# COMMAND ----------
+
+

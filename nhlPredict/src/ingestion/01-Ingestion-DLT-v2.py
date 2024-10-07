@@ -661,8 +661,6 @@ def merge_games_data():
 # COMMAND ----------
 
 # DBTITLE 1,silver_games_rankings
-
-
 @dlt.table(
     name="silver_games_rankings",
     table_properties={"quality": "silver"},
@@ -777,7 +775,6 @@ def merge_games_data():
         "game_Total_penaltiesAgainst",
     ]
 
-    # Define columns to rank
     columns_to_rank = [
         "game_Total_goalsFor",
         "game_Total_goalsAgainst",
@@ -795,7 +792,6 @@ def merge_games_data():
         "game_Total_penaltiesAgainst",
     ]
 
-    # Get the maximum season
     max_season = pk_norm_filled.select(max("season")).collect()[0][0]
 
     count_rows = (
@@ -838,11 +834,17 @@ def merge_games_data():
         )
         rolling_column = f"rolling_{column}"
         rank_column = f"rank_rolling_{column}"
+        perc_rank_column = f"perc_rank_rolling_{column}"
 
-        # Define the window specification
-        rank_window_spec = Window.partitionBy(
-            "teamGamesPlayedRolling", "isPlayoffGame"
-        ).orderBy(desc(rolling_column))
+        # Determine the ordering based on column name
+        if "Against" in column:
+            order_col = asc(rolling_column)
+        else:
+            order_col = desc(rolling_column)
+
+        perc_rank_calc = 1 - percent_rank().over(
+            Window.partitionBy("teamGamesPlayedRolling").orderBy(order_col)
+        )
 
         if column not in per_game_columns:
             # Rolling Sum Logic
@@ -853,15 +855,21 @@ def merge_games_data():
                 ).otherwise(sum(f"sum_{column}").over(rolling_window_spec)),
             )
             grouped_df = grouped_df.withColumn(
-                rank_column, dense_rank().over(rank_window_spec)
+                rank_column,
+                rank().over(
+                    Window.partitionBy("teamGamesPlayedRolling").orderBy(order_col)
+                ),
             )
+            grouped_df = grouped_df.withColumn(
+                perc_rank_column, round(perc_rank_calc * 100, 2)
+            )
+
             grouped_df = grouped_df.withColumnRenamed(
                 rolling_column, rolling_column.replace("game_", "sum_")
             ).withColumnRenamed(rank_column, rank_column.replace("game_", "sum_"))
 
         else:
             # PerGame Rolling AVG Logic
-            # grouped_df = grouped_df.withColumn(f"sum_{game_column}PerGame", round(col(rolling_column) / col("teamGamesPlayedRolling"), 2))
             grouped_df = grouped_df.withColumn(
                 rolling_column,
                 when(
@@ -870,17 +878,18 @@ def merge_games_data():
             )
 
             grouped_df = grouped_df.withColumn(
-                rank_column, dense_rank().over(rank_window_spec)
+                rank_column,
+                rank().over(
+                    Window.partitionBy("teamGamesPlayedRolling").orderBy(order_col)
+                ),
+            )
+            grouped_df = grouped_df.withColumn(
+                perc_rank_column, round(perc_rank_calc * 100, 2)
             )
 
             grouped_df = grouped_df.withColumnRenamed(
                 rolling_column, rolling_column.replace("game_", "avg_")
             ).withColumnRenamed(rank_column, rank_column.replace("game_", "avg_"))
-
-    rank_roll_columns = list(
-        set(grouped_df.columns)
-        - set(["gameDate", "playerTeam", "season", "teamGamesPlayedRolling"])
-    )
 
     # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
     final_joined_rank = (
@@ -911,7 +920,6 @@ def merge_games_data():
     final_joined_rank_with_day = get_day_of_week(final_joined_rank, "DATE")
 
     return final_joined_rank_with_day
-
 
 # COMMAND ----------
 

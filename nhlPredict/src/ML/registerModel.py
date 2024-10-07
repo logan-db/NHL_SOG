@@ -375,72 +375,8 @@ print(result)
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Feature importance
-# MAGIC
-# MAGIC SHAP is a game-theoretic approach to explain machine learning models, providing a summary plot
-# MAGIC of the relationship between features and model output. Features are ranked in descending order of
-# MAGIC importance, and impact/color describe the correlation between the feature and the target variable.
-# MAGIC - Generating SHAP feature importance is a very memory intensive operation, so to ensure that AutoML can run trials without
-# MAGIC   running out of memory, we disable SHAP by default.<br />
-# MAGIC   You can set the flag defined below to `shap_enabled = True` and re-run this notebook to see the SHAP plots.
-# MAGIC - To reduce the computational overhead of each trial, a single example is sampled from the validation set to explain.<br />
-# MAGIC   For more thorough results, increase the sample size of explanations, or provide your own examples to explain.
-# MAGIC - SHAP cannot explain models using data with nulls; if your dataset has any, both the background data and
-# MAGIC   examples to explain will be imputed using the mode (most frequent values). This affects the computed
-# MAGIC   SHAP values, as the imputed samples may not match the actual data distribution.
-# MAGIC
-# MAGIC For more information on how to read Shapley values, see the [SHAP documentation](https://shap.readthedocs.io/en/latest/example_notebooks/overviews/An%20introduction%20to%20explainable%20AI%20with%20Shapley%20values.html).
-# MAGIC
-# MAGIC > **NOTE:** SHAP run may take a long time with the datetime columns in the dataset.
-
-# COMMAND ----------
-
 # Set this flag to True and re-run the notebook to see the SHAP plots
-shap_enabled = False
-
-# COMMAND ----------
-
-if shap_enabled:
-
-    model = "pass"
-
-    pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
-
-    preprocess_model_name = pp_champion_version.name
-    preprocess_model_version = pp_champion_version.version
-
-    preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
-    preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
-
-    mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
-
-
-    mlflow.autolog(disable=True)
-    mlflow.sklearn.autolog(disable=True)
-    from shap import KernelExplainer, summary_plot
-
-    # SHAP cannot explain models using data with nulls.
-    # To enable SHAP to succeed, both the background data and examples to explain are imputed with the mode (most frequent values).
-    mode = X.mode().iloc[0]
-
-    # Sample background data for SHAP Explainer. Increase the sample size to reduce variance.
-    train_sample = X.sample(
-        n=min(1000, X.shape[0]), random_state=729986891
-    ).fillna(mode)
-
-    # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
-    example = X.sample(
-        n=min(1000, X.shape[0]), random_state=729986891
-    ).fillna(mode)
-
-    # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
-    predict = lambda x: model.predict(
-        pd.DataFrame(x, columns=X.columns)
-    )
-    explainer = KernelExplainer(predict, train_sample, link="identity")
-    shap_values = explainer.shap_values(example, l1_reg=False, nsamples=1000)
-    summary_plot(shap_values, example)
+shap_enabled = True
 
 # COMMAND ----------
 

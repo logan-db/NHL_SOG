@@ -18,7 +18,7 @@ import requests
 import pandas as pd
 import json
 
-from pyspark.sql.functions import *
+from pyspark.sql.functions import col, lit, when
 from databricks.feature_engineering import FeatureEngineeringClient
 
 from pyspark.sql.functions import monotonically_increasing_id, col, row_number
@@ -216,6 +216,58 @@ display(upcoming_predictions_full.select(target_col, "predictedSOG", "*"))
 # COMMAND ----------
 
 upcoming_predictions_full.schema.simpleString() == hist_predictions.schema.simpleString()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Feature Importances
+
+# COMMAND ----------
+
+def generate_shap_explanation(model, X, sample_size, shap_enabled=True):
+    if not shap_enabled:
+        return None
+      
+    from shap import KernelExplainer, summary_plot
+
+    mlflow.autolog(disable=True)
+    mlflow.sklearn.autolog(disable=True)
+
+    # SHAP cannot explain models using data with nulls.
+    # To enable SHAP to succeed, both the background data and examples to explain are imputed with the mode (most frequent values).
+    mode = X.mode().iloc[0]
+
+    # Sample background data for SHAP Explainer. Increase the sample size to reduce variance.
+    train_sample = X.sample(
+        n=min(sample_size, X.shape[0]), random_state=729986891
+    ).fillna(mode)
+
+    # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
+    example = X.sample(
+        n=min(sample_size, X.shape[0]), random_state=729986891
+    ).fillna(mode)
+
+    # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
+    predict = lambda x: model.predict(
+        pd.DataFrame(x, columns=X.columns)
+    )
+    explainer = KernelExplainer(predict, train_sample, link="identity")
+    shap_values = explainer.shap_values(example, l1_reg=False, nsamples=sample_size)
+    
+    # Generate and return the summary plot
+    return summary_plot(shap_values, example)
+
+# COMMAND ----------
+
+upcoming_games_processed['gameId'] = upcoming_games_processed['gameId'].astype(str)
+upcoming_games_processed
+
+# COMMAND ----------
+
+# Usage:
+shap_plot = generate_shap_explanation(model, upcoming_games_processed, sample_size=2000, shap_enabled=False)
+if shap_plot is not None:
+    display(shap_plot)
 
 # COMMAND ----------
 
