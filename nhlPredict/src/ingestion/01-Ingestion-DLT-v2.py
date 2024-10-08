@@ -1241,7 +1241,7 @@ def aggregate_games_data():
     )
 
     if (
-        str(today_date) <= str(dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0])
+        str(today_date) >= str(dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]) # SETTING TO ALWAYS BE TRUE FOR NOW
     ):
         player_index_2023 = (
             dlt.read("bronze_skaters_2023_v2")

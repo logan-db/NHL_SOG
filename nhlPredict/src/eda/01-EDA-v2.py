@@ -48,6 +48,16 @@ gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
 
 # COMMAND ----------
 
+bronze_player_game_stats_v2 = spark.table("lr_nhl_demo.dev.bronze_player_game_stats_v2")
+
+display(bronze_player_game_stats_v2)
+
+# COMMAND ----------
+
+display(silver_games_historical_v2.orderBy(desc(col("gameDate"))))
+
+# COMMAND ----------
+
 # DBTITLE 1,General Discovery
 display(gold_game_stats.orderBy(desc(col("gameDate"))))
 display(gold_player_stats.orderBy(desc(col("gameDate"))))
@@ -1158,6 +1168,15 @@ if str(today_date) <= str(bronze_schedule_2023_v2.select(min("DATE")).first()[0]
 
 # COMMAND ----------
 
+from datetime import date
+
+# Get current date
+today_date = date.today()
+today_date
+
+# COMMAND ----------
+
+# DBTITLE 1,gold_player_stats
 select_cols = [
     "playerId",
     "season",
@@ -1217,19 +1236,19 @@ select_cols = [
 
 # Call the function on the DataFrame
 player_game_stats_total = select_rename_columns(
-    player_game_stats_v2, #change
+    spark.table("lr_nhl_demo.dev.bronze_player_game_stats_v2"),
     select_cols,
     "player_Total_",
     "all",
 )
 player_game_stats_pp = select_rename_columns(
-    player_game_stats_v2, select_cols, "player_PP_", "5on4"
+    spark.table("lr_nhl_demo.dev.bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4"
 )
 player_game_stats_pk = select_rename_columns(
-    player_game_stats_v2, select_cols, "player_PK_", "4on5"
+    spark.table("lr_nhl_demo.dev.bronze_player_game_stats_v2"), select_cols, "player_PK_", "4on5"
 )
 player_game_stats_ev = select_rename_columns(
-    player_game_stats_v2, select_cols, "player_EV_", "5on5"
+    spark.table("lr_nhl_demo.dev.bronze_player_game_stats_v2"), select_cols, "player_EV_", "5on5"
 )
 
 joined_player_stats = (
@@ -1286,7 +1305,7 @@ assert player_game_stats_total.count() == joined_player_stats.count(), print(
 print("Assert for gold_player_stats_v2 passed")
 
 gold_shots_date = (
-    silver_games_schedule_v2
+    spark.table("lr_nhl_demo.dev.silver_games_schedule_v2")
     .select(
         "team",
         "gameId",
@@ -1310,18 +1329,21 @@ gold_shots_date = (
     )
 )
 
+comparison_date = str(today_date)
+first_date_data = str(spark.table("lr_nhl_demo.dev.bronze_schedule_2023_v2").select(min("DATE")).first()[0])
+
+print(f"comparison_date: {comparison_date}, first_date_data: {first_date_data}")
+
 if (
-    str(today_date) <= str(bronze_schedule_2023_v2.select(min("DATE")).first()[0])
-    # date(2024, 10, 4) # First game of the following season
-    # <= dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]
+    comparison_date >= first_date_data # SET TO ALWAYS BE TRUE CURRENTLY
 ):
     player_index_2023 = (
-        skaters_2023
+        spark.table("lr_nhl_demo.dev.bronze_skaters_2023_v2")
         .select("playerId", "season", "team", "name")
         .filter(col("situation") == "all")
         .distinct()
         .unionByName(
-            skaters_2023
+            spark.table("lr_nhl_demo.dev.bronze_skaters_2023_v2")
             .select("playerId", "season", "team", "name")
             .filter(col("situation") == "all")
             .withColumn("season", lit(2024))
@@ -1330,15 +1352,14 @@ if (
     )
 else:
     player_index_2023 = (
-        skaters_2023
+        spark.table("lr_nhl_demo.dev.bronze_skaters_2023_v2")
         .select("playerId", "season", "team", "name")
         .filter(col("situation") == "all")
-        .withColumn("season", lit(2024))
         .distinct()
     )
 
 player_game_index_2023 = (
-    silver_games_schedule_v2
+    spark.table("lr_nhl_demo.dev.silver_games_schedule_v2")
     .select(
         "team",
         "gameId",
@@ -1355,7 +1376,7 @@ player_game_index_2023 = (
 ).alias("player_game_index_2023")
 
 silver_games_schedule = (
-    silver_games_schedule_v2
+    spark.table("lr_nhl_demo.dev.silver_games_schedule_v2")
     .select(
         "team",
         "gameId",
@@ -1535,10 +1556,29 @@ for column_name in columns_to_iterate:
     ]
 
 # Apply all column expressions at once using select
-gold_player_stats = gold_shots_date_count.select(*column_exprs)
+gold_player_stats_test = gold_shots_date_count.select(*column_exprs)
 
-display(gold_player_stats.orderBy(desc("gameDate")))
+# Count rows where playerId is null
+print(f"PlayerId Null Rows: {gold_player_stats_test.filter(col('playerId').isNull()).count()}")
 
+display(gold_player_stats_test.orderBy(desc("gameDate")))
+
+
+# COMMAND ----------
+
+display(gold_player_stats_test.filter(col('playerId').isNull()))
+
+# COMMAND ----------
+
+upcoming_games_player_index = silver_games_schedule_v2.filter(
+    col("gameId").isNull()
+).join(
+    player_game_index_2023,
+    how="left",
+    on=[col("index_team") == col("team"), col("index_season") == col("season")],
+)
+
+display(upcoming_games_player_index.orderBy(desc("gameDate")))
 
 # COMMAND ----------
 
