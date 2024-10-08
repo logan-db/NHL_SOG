@@ -660,6 +660,7 @@ def merge_games_data():
 
 # COMMAND ----------
 
+
 # DBTITLE 1,silver_games_rankings
 @dlt.table(
     name="silver_games_rankings",
@@ -921,6 +922,7 @@ def merge_games_data():
 
     return final_joined_rank_with_day
 
+
 # COMMAND ----------
 
 # DBTITLE 1,silver_skaters_team_game_v2
@@ -1080,8 +1082,8 @@ def merge_games_data():
 # DBTITLE 1,gold_player_stats_v2
 
 
-@dlt.expect_or_fail("playerId is not null", "playerId IS NOT NULL")
-@dlt.expect_or_fail("shooterName is not null", "shooterName IS NOT NULL")
+@dlt.expect("playerId is not null", "playerId IS NOT NULL")
+@dlt.expect("shooterName is not null", "shooterName IS NOT NULL")
 @dlt.table(
     name="gold_player_stats_v2",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -1240,9 +1242,9 @@ def aggregate_games_data():
         )
     )
 
-    if (
-        str(today_date) >= str(dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]) # SETTING TO ALWAYS BE TRUE FOR NOW
-    ):
+    if str(today_date) >= str(
+        dlt.read("bronze_schedule_2023_v2").select(min("DATE")).first()[0]
+    ):  # SETTING TO ALWAYS BE TRUE FOR NOW
         player_index_2023 = (
             dlt.read("bronze_skaters_2023_v2")
             .select("playerId", "season", "team", "name")
