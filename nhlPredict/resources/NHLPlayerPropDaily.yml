@@ -1,0 +1,169 @@
+# The main job for nhlPredict.
+resources:
+  jobs:
+    NHLPlayerPropDaily:
+      name: NHLPlayerPropDaily
+      schedule:
+        quartz_cron_expression: 46 0 8 * * ?
+        timezone_id: UTC
+        pause_status: UNPAUSED
+
+      email_notifications:
+        on_failure:
+          - logan.rupert@databricks.com
+
+      tasks:
+        - task_key: createVols
+          notebook_task:
+            notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
+        
+        - task_key: ingest_transform_job
+          depends_on:
+              - task_key: createVols
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
+            full_refresh: false
+
+        - task_key: Write_out_Delta_Tables
+          depends_on:
+            - task_key: ingest_transform_job
+          spark_python_task:
+            # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
+            python_file: ../src/transformation/solidify_gold_tables_v2.py
+          environment_key: Default
+
+        - task_key: createPreFeatEngTable
+          depends_on:
+            - task_key: Write_out_Delta_Tables
+          notebook_task:
+            notebook_path: ../src/transformation/pre_feat_eng.py
+
+        - task_key: re_train_model
+          depends_on:
+            - task_key: createPreFeatEngTable
+          condition_task:
+            op: EQUAL_TO
+            left: "{{tasks.createPreFeatEngTable.values.train_model}}"
+            right: "true"
+
+        - task_key: create_feature_table
+          depends_on:
+            - task_key: re_train_model
+              outcome: "true"
+          for_each_task:
+            inputs: "[25, 50, 100, 200]"
+            concurrency: 4
+            task:
+              task_key: preprocess_and_feature_table_iteration
+              notebook_task:
+                notebook_path: ../src/features/03-Feature-Engineering-v2.py
+                base_parameters:
+                  feature_count: "{{input}}"
+                source: WORKSPACE
+              job_cluster_key: LR-ML
+
+        - task_key: UpdateFeatureTables
+          depends_on:
+            - task_key: re_train_model
+              outcome: "false"
+          for_each_task:
+            inputs: "[25, 50, 100, 200]"
+            concurrency: 4
+            task:
+              task_key: update_feature_table_iteration
+              notebook_task:
+                notebook_path: ../src/features/UpdateFeatureStores.py
+                base_parameters:
+                  feature_count: "{{input}}"
+                source: WORKSPACE
+              job_cluster_key: LR-ML
+
+        - task_key: train_model
+          depends_on:
+            - task_key: create_feature_table
+          for_each_task:
+            inputs: "[25, 50, 100, 200]"
+            concurrency: 4
+            task:
+              task_key: train_model_iteration
+              notebook_task:
+                notebook_path: ../src/ML/model_training/Predict_SOG_v2-Manual.py
+                base_parameters:
+                  feature_count: "{{input}}"
+                source: WORKSPACE
+              job_cluster_key: LR-ML
+            
+        - task_key: register_model
+          depends_on:
+            - task_key: train_model
+          notebook_task:
+            notebook_path: ../src/ML/registerModel.py
+            source: WORKSPACE
+          job_cluster_key: LR-ML
+
+        - task_key: predictSOG
+          depends_on:
+            - task_key: register_model
+            - task_key: UpdateFeatureTables
+          run_if: AT_LEAST_ONE_SUCCESS
+          notebook_task:
+            notebook_path: ../src/ML/SOGPredict_v2.py
+            source: WORKSPACE
+          job_cluster_key: LR-ML
+
+        - task_key: BI_Prep
+          depends_on:
+            - task_key: predictSOG
+          notebook_task:
+            notebook_path: ../src/BI/05-Prep-Predicton-Data.py
+            source: WORKSPACE
+
+        - task_key: genie_prep
+          depends_on:
+            - task_key: predictSOG
+          notebook_task:
+            notebook_path: ../src/genie/Prep Genie Data.py
+            source: WORKSPACE
+            
+      job_clusters:
+        - job_cluster_key: LR-ML
+          new_cluster:
+            cluster_name: ""
+            spark_version: 15.3.x-cpu-ml-scala2.12
+            aws_attributes:
+              first_on_demand: 1
+              availability: SPOT_WITH_FALLBACK
+              zone_id: us-west-2a
+              spot_bid_price_percent: 100
+              ebs_volume_count: 0
+            node_type_id: i3.4xlarge
+            custom_tags:
+              computeType: ML_Job
+            enable_elastic_disk: true
+            data_security_mode: SINGLE_USER
+            runtime_engine: STANDARD
+            autoscale:
+              min_workers: 2
+              max_workers: 8
+      parameters:
+        - name: catalog
+          default: lr_nhl_demo.dev
+        - name: target_col
+          default: player_Total_shotsOnGoal
+        - name: time_col
+          default: gameDate
+        - name: train_model_param
+          default: false
+        - name: n_estimators_param
+          default: 100 # Prod use 100
+        - name: trial_eval_param
+          default: 200 # Prod use 200
+        - name: trial_experiment_param
+          default: 4320825364109465
+        - name: training_experiment_param
+          default: 4320825364109641
+      environments:
+        - environment_key: Default
+          spec:
+            client: "1"
+
