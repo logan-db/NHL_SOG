@@ -153,12 +153,12 @@ resources:
       tags:
         dev: logan_rupert
         frequency: monthly
-        stage: ${bundle.target}
+        stage: ${bundle.environment}
       queue:
         enabled: true
       parameters:
         - name: catalog
-          default: lr_nhl_demo.dev
+          default: lr_nhl_demo.${bundle.environment}
         - name: target_col
           default: player_Total_shotsOnGoal
         - name: time_col
