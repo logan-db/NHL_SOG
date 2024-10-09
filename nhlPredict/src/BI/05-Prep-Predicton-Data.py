@@ -153,8 +153,8 @@ game_clean_cols = [
 # MAGIC   round(predictedSOG, 2) as predictedSOG,
 # MAGIC   opponent_average_rank_rolling_avg_Total_shotsOnGoalAgainst_last_7_games AS oppSOGAgainstRank,
 # MAGIC   opponent_previous_rank_rolling_avg_Total_penaltiesFor as oppPenaltiesRank,
-# MAGIC   opponent_average_rank_rolling_avg_Total_shotsOnGoalAgainst_last_7_games
-# MAGIC   average_rank_rolling_sum_PP_SOGForPerPenalty_last_7_games AS PPSOGRank,
+# MAGIC   opponent_average_rank_rolling_avg_Total_shotsOnGoalAgainst_last_7_games,
+# MAGIC   average_rank_rolling_sum_PP_SOGForPerPenalty_last_7_games as PPSOGRank,
 # MAGIC   previous_player_Total_shotsOnGoal
 # MAGIC FROM
 # MAGIC   lr_nhl_demo.dev.clean_prediction_v2
@@ -242,5 +242,3 @@ display(
 )
 
 # COMMAND ----------
-
-

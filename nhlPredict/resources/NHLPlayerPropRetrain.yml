@@ -3,6 +3,9 @@ resources:
   jobs:
     NHLPlayerPropRetrain:
       name: NHLPlayerPropRetrain
+      description: Monthly retraining workflow. Ingests data, creates dynamic feature
+        tables, trains and tunes model and dynamically registers the best
+        performing model.
       schedule:
         quartz_cron_expression: 31 0 12 * * ?
         timezone_id: UTC
@@ -130,9 +133,19 @@ resources:
             autoscale:
               min_workers: 2
               max_workers: 8
+      git_source:
+        git_url: https://github.com/logan-db/NHL_SOG.git
+        git_provider: gitHub
+        git_branch: develop
+      tags:
+        dev: logan_rupert
+        frequency: monthly
+        stage: ${bundle.target}
+      queue:
+        enabled: true
       parameters:
         - name: catalog
-          default: lr_nhl_demo.dev
+          default: lr_nhl_demo.${bundle.target}
         - name: target_col
           default: player_Total_shotsOnGoal
         - name: time_col
