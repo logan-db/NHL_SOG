@@ -45,23 +45,79 @@ gold_model_data = spark.table("dev.gold_model_stats")
 gold_merged_stats = spark.table("dev.gold_merged_stats")
 gold_merged_stats_v2 = spark.table("dev.gold_merged_stats_v2")
 gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
-
-# COMMAND ----------
-
-bronze_player_game_stats_v2 = spark.table("lr_nhl_demo.dev.bronze_player_game_stats_v2")
-
-display(bronze_player_game_stats_v2)
-
-# COMMAND ----------
-
-display(silver_games_historical_v2.orderBy(desc(col("gameDate"))))
+clean_prediction_v2 = spark.table("dev.clean_prediction_v2")
 
 # COMMAND ----------
 
 # DBTITLE 1,General Discovery
-display(gold_game_stats.orderBy(desc(col("gameDate"))))
-display(gold_player_stats.orderBy(desc(col("gameDate"))))
+display(
+    clean_prediction_v2.filter((col("playerTeam") == "TOR") & (col("shooterName") == 'Auston Matthews'))
+    .orderBy(desc("gameDate"), "teamGamesPlayedRolling")
+    .select(
+        "gameDate",
+        "shooterName",
+        "playerTeam",
+        "opposingTeam",
+        "season",
+        "previous_sum_game_Total_penaltiesAgainst",
+        "previous_sum_game_Total_penaltiesFor",
 
+        # Prediction & Actual
+        round(col("predictedSOG"), 2).alias("predictedSOG"),
+        col("player_total_shotsOnGoal").alias("playerSOG"),
+
+        # Player Stats - Last 1/3/7 Games
+        col("previous_player_Total_shotsOnGoal").alias("playerLastSOG"),
+        col("average_player_Total_shotsOnGoal_last_3_games").alias("playerAvgSOGLast3"),
+        col("average_player_Total_shotsOnGoal_last_7_games").alias("playerAvgSOGLast7"),
+
+        # Player Team Ranks - Last 7 Games Rolling Avg
+        col("previous_perc_rank_rolling_game_Total_goalsFor").alias("teamGoalsForRank%"),
+        col("previous_perc_rank_rolling_game_Total_shotsOnGoalFor").alias("teamSOGForRank%"),
+        col("previous_perc_rank_rolling_game_PP_SOGForPerPenalty").alias("teamPPSOGRank%"),
+
+        # Opponent Team Ranks - Last 7 Games Rolling Avg
+        col("opponent_previous_perc_rank_rolling_game_Total_goalsAgainst").alias("oppGoalsAgainstRank%"),
+        col("opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst").alias("oppSOGAgainstRank%"),
+        col("opponent_previous_perc_rank_rolling_game_Total_penaltiesFor").alias("oppPenaltiesRank%"),
+        col("opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty").alias("oppPKSOGRank%"),
+
+        # # OPPONENT
+        # opponent_previous_perc_rank_rolling_game_Total_shotAttemptsAgainst
+
+        # # TEAM
+        # previous_rolling_avg_Total_goalsFor
+        # previous_rolling_sum_PP_SOGAttemptsForPerPenalty
+        # previous_perc_rank_rolling_game_PP_SOGAttemptsForPerPenalty
+    )
+)
+
+# COMMAND ----------
+
+display(
+    spark.table("lr_nhl_demo.dev.gold_game_stats_clean")
+    .filter(col("gameId").isNotNull())
+    .orderBy(desc("gameDate")
+    ))
+
+# COMMAND ----------
+
+# opponent_previous_sum_game_Total_shotAttemptsAgainst
+# opponent_average_sum_game_Total_shotAttemptsAgainst_last_3_games
+# opponent_average_sum_game_Total_shotAttemptsAgainst_last_7_games
+
+# ALL the same value, what one to use? same with Ranks
+
+# opponent_average_rolling_avg_Total_goalsAgainst_last_7_games What is average_rolling_avg?
+
+
+
+# COMMAND ----------
+
+# Listing all columns that contain 'opponent'
+opponent_columns = [c for c in clean_prediction_v2.columns if 'opponent' in c]
+
+display(clean_prediction_v2.select(opponent_columns))
 
 # COMMAND ----------
 
@@ -89,13 +145,6 @@ upcoming_games = gold_model_data_v2.filter(
 )
 
 display(upcoming_games)
-
-# COMMAND ----------
-
-# FIX NULLS IN COLUMNS: position
-# TEST FEATURE TABLE LOOP
-# TEST TRIAL LOOP
-# UPDATE REGISTER MODEL / RETRAIN MODEL LOGIC
 
 # COMMAND ----------
 
@@ -715,13 +764,17 @@ final_joined_rank = (
 )
 
 display(
-    final_joined_rank.filter(col("playerTeam") == "VAN")
+    final_joined_rank.filter(col("playerTeam") == "TOR")
     .orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling")
     .select(
         "gameDate",
         "playerTeam",
+        "opposingTeam",
         "season",
+        "sum_game_Total_penaltiesFor",
+        "sum_game_Total_penaltiesAgainst",
         "sum_game_PP_goalsForPerPenalty",
+        "game_PP_goalsFor",
         "rolling_sum_PP_goalsForPerPenalty",
         "rank_rolling_sum_PP_goalsForPerPenalty",
         "perc_rank_rolling_game_PP_goalsForPerPenalty",
@@ -731,10 +784,6 @@ display(
         "perc_rank_rolling_game_Total_shotsOnGoalAgainst",
     )
 )
-
-# COMMAND ----------
-
-# RANKS 1 is BEST, 100% is BEST
 
 # COMMAND ----------
 
@@ -805,10 +854,6 @@ grouped_df.count()
 
 # COMMAND ----------
 
-display(gold_game_stats_v2)
-
-# COMMAND ----------
-
 display(gold_game_stats_v2.select(*[col for col in gold_game_stats_v2.columns if 'opp' in col]))
 
 # COMMAND ----------
@@ -829,66 +874,7 @@ display(
 
 # COMMAND ----------
 
-upcoming_games = gold_model_data_v2.filter(
-    (col("gameId").isNull())
-    # & (col("playerGamesPlayedRolling") > 0)
-    # & (col("rolling_playerTotalTimeOnIceInGame") > 180)
-    & (col("gameDate") != "2024-01-17")
-)
-
-display(upcoming_games.orderBy("gameDate", "shooterName"))
-
-# COMMAND ----------
-
-from datetime import date
-
-# Convert current_date to datetime.date object
-current_date = date.today()
-
-if current_date <= schedule_2024.select(min("DATE")).first()[0]:
-    player_index_2023 = (skaters_2023
-            .select("playerId", "season", "team", "name")
-            .filter(col("situation") == "all")
-            .unionByName(
-                skaters_2023.select("playerId", "season", "team", "name")
-                .filter(col("situation") == "all")
-                .withColumn("season", lit(2024))
-                .distinct()
-            ))
-else:
-    player_index_2023 = (skaters_2023
-            .select("playerId", "season", "team", "name")
-            .filter(col("situation") == "all")
-    )
-
-test = (silver_games_schedule_v2
- .select(
-            "team",
-            "gameId",
-            "season",
-            "home_or_away",
-            "gameDate",
-            "playerTeam",
-            "opposingTeam",
-        )
-        .join(player_index_2023, how="left", on=["team", "season"])
-        .select("team", "playerId", "season", "name")
-        .distinct()
-        .withColumnRenamed("name", "shooterName")
-    ).alias("player_game_index_2023")
-
-display(test.orderBy(desc('season')))
-
-# Checking for uniqueness of gameId and shooterName in gold_model_data_v2
-unique_test_check = test.groupBy("playerId", "shooterName", "season").agg(count("*").alias("count")).filter("count > 1")
-
-display(unique_test_check)
-
-# Assert that there are no duplicate records
-assert unique_test_check.count() == 0, f"{unique_test_check.count()} Duplicate records found in unique_test_check"
-
-# COMMAND ----------
-
+# DBTITLE 1,team ABV
 nhl_team_city_to_abbreviation = {
     "Anaheim": "ANA",
     "Boston": "BOS",
