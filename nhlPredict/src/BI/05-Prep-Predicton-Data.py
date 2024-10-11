@@ -182,28 +182,6 @@ clean_prediction_edit = (
             2,
         )),
     )
-    .withColumn(
-        "previous_SOG%_PP",
-        round(
-            when(
-                col("previous_player_Total_shotsOnGoal") != 0,
-                col("previous_player_PP_shotsOnGoal")
-                / col("previous_player_Total_shotsOnGoal"),
-            ).otherwise(None),
-            2,
-        ),
-    )
-    .withColumn(
-        "previous_SOG%_EV",
-        round(
-            when(
-                col("previous_player_Total_shotsOnGoal") != 0,
-                col("previous_player_EV_shotsOnGoal")
-                / col("previous_player_Total_shotsOnGoal"),
-            ).otherwise(None),
-            2,
-        ),
-    )
     .orderBy(
         desc("gameDate"),
         desc("absVarianceAvgLast7SOG"),
