@@ -95,8 +95,8 @@ display(
 # COMMAND ----------
 
 display(
-    spark.table("lr_nhl_demo.dev.gold_game_stats_clean")
-    .filter(col("gameId").isNotNull())
+    gold_model_data_v2
+    .filter(col("gameId").isNull())
     .orderBy(desc("gameDate")
     ))
 
