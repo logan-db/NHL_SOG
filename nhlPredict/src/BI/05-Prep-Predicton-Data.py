@@ -167,12 +167,9 @@ game_clean_cols = [
 
 # COMMAND ----------
 
-base = spark.table("lr_nhl_demo.dev.clean_prediction_v2")
-
-# COMMAND ----------
-
+# DBTITLE 0,dunffctbhgkdjnivtejvhbhtjllctujbekdg
 clean_prediction_edit = (
-    base.withColumn(
+    clean_prediction.withColumn(
         "predictedSOG", round(col("predictedSOG"), 2)
     ).withColumn(
         "absVarianceAvgLast7SOG",
@@ -198,6 +195,34 @@ clean_prediction_edit.count()
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC SELECT 
+# MAGIC     gameDate,
+# MAGIC     shooterName,
+# MAGIC     playerTeam,
+# MAGIC     opposingTeam,
+# MAGIC     season,
+# MAGIC     absVarianceAvgLast7SOG,
+# MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
+# MAGIC     -- player_total_shotsOnGoal AS playerSOG,
+# MAGIC     `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
+# MAGIC     `average_player_SOG%_EV_last_7_games` AS `playerLast7EVSOG%`,
+# MAGIC     previous_player_Total_shotsOnGoal AS playerLastSOG,
+# MAGIC     average_player_Total_shotsOnGoal_last_3_games AS playerAvgSOGLast3,
+# MAGIC     average_player_Total_shotsOnGoal_last_7_games AS playerAvgSOGLast7,
+# MAGIC     previous_perc_rank_rolling_game_Total_goalsFor AS `teamGoalsForRank%`,
+# MAGIC     previous_perc_rank_rolling_game_Total_shotsOnGoalFor AS `teamSOGForRank%`,
+# MAGIC     previous_perc_rank_rolling_game_PP_SOGForPerPenalty AS `teamPPSOGRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
+# MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
+# MAGIC WHERE gameId IS NULL and gameDate = to_date(current_date())
+# MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
+
+# COMMAND ----------
+
 display(
     clean_prediction_edit.filter((col("playerTeam") == "TOR") & (col("shooterName") == 'Auston Matthews'))
     .orderBy(desc("gameDate"), "teamGamesPlayedRolling")
@@ -214,8 +239,8 @@ display(
         col("player_total_shotsOnGoal").alias("playerSOG"),
 
         # Player Stats - Last 1/3/7 Games
-        col("previous_SOG%_PP").alias("playerLastPPSOG%"),
-        col("previous_SOG%_EV").alias("playerLastEVSOG%"),
+        col("previous_player_SOG%_PP").alias("playerLastPPSOG%"),
+        col("previous_player_SOG%_EV").alias("playerLastEVSOG%"),
         col("previous_player_Total_shotsOnGoal").alias("playerLastSOG"),
         col("average_player_Total_shotsOnGoal_last_3_games").alias("playerAvgSOGLast3"),
         col("average_player_Total_shotsOnGoal_last_7_games").alias("playerAvgSOGLast7"),

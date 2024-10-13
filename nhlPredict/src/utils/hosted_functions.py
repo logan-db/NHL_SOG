@@ -15,6 +15,34 @@ from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC SELECT 
+# MAGIC     gameDate,
+# MAGIC     shooterName,
+# MAGIC     playerTeam,
+# MAGIC     opposingTeam,
+# MAGIC     season,
+# MAGIC     absVarianceAvgLast7SOG,
+# MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
+# MAGIC     -- player_total_shotsOnGoal AS playerSOG,
+# MAGIC     `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
+# MAGIC     `average_player_SOG%_EV_last_7_games` AS `playerLast7EVSOG%`,
+# MAGIC     previous_player_Total_shotsOnGoal AS playerLastSOG,
+# MAGIC     average_player_Total_shotsOnGoal_last_3_games AS playerAvgSOGLast3,
+# MAGIC     average_player_Total_shotsOnGoal_last_7_games AS playerAvgSOGLast7,
+# MAGIC     previous_perc_rank_rolling_game_Total_goalsFor AS `teamGoalsForRank%`,
+# MAGIC     previous_perc_rank_rolling_game_Total_shotsOnGoalFor AS `teamSOGForRank%`,
+# MAGIC     previous_perc_rank_rolling_game_PP_SOGForPerPenalty AS `teamPPSOGRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
+# MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
+# MAGIC WHERE gameId IS NULL
+# MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
+
+# COMMAND ----------
+
 df = spark.table("lr_nhl_demo.dev.bronze_schedule_2023_v2")
 
 # COMMAND ----------

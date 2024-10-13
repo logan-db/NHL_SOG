@@ -52,9 +52,9 @@ clean_prediction_v2 = spark.table("dev.clean_prediction_v2")
 # DBTITLE 1,General Discovery
 display(
     clean_prediction_v2.filter((col("playerTeam") == "TOR") & (col("shooterName") == 'Auston Matthews'))
-    .orderBy(desc("gameDate"), "teamGamesPlayedRolling")
     .select(
         "gameDate",
+        "gameId",
         "shooterName",
         "playerTeam",
         "opposingTeam",
@@ -90,6 +90,7 @@ display(
         # previous_rolling_sum_PP_SOGAttemptsForPerPenalty
         # previous_perc_rank_rolling_game_PP_SOGAttemptsForPerPenalty
     )
+    .orderBy(desc("gameDate"), "teamGamesPlayedRolling")
 )
 
 # COMMAND ----------
