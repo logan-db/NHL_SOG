@@ -9,7 +9,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install -r /local_disk0/user_tmp_data/spark-3149c5ec-6bd4-4c44-abb3-f0/tmpnk8koxnj/requirements.txt
+# %pip install -r /local_disk0/user_tmp_data/spark-3149c5ec-6bd4-4c44-abb3-f0/tmpnk8koxnj/requirements.txt
 
 # COMMAND ----------
 
@@ -232,6 +232,10 @@ upcoming_predictions_full.schema.simpleString() == hist_predictions.schema.simpl
 
 # COMMAND ----------
 
+model
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Feature Importances
 
@@ -272,13 +276,17 @@ def generate_shap_explanation(model, X, sample_size, shap_enabled=True):
 
 # COMMAND ----------
 
+current_games_processed_pd = current_games_processed.toPandas()
+
+# COMMAND ----------
+
 upcoming_games_processed['gameId'] = upcoming_games_processed['gameId'].astype(str)
 upcoming_games_processed
 
 # COMMAND ----------
 
 # Usage:
-shap_plot = generate_shap_explanation(model, upcoming_games_processed, sample_size=2000, shap_enabled=False)
+shap_plot = generate_shap_explanation(model, current_games_processed_pd, sample_size=50, shap_enabled=True)
 if shap_plot is not None:
     display(shap_plot)
 

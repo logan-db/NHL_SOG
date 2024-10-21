@@ -96,6 +96,34 @@ display(
 # COMMAND ----------
 
 display(
+    clean_prediction_v2.filter(col("playerTeam") == "CHI")
+    .orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling")
+    .select(
+        "gameDate",
+        "shooterName",
+        "playerTeam",
+        "opposingTeam",
+        "season",
+        "teamGamesPlayedRolling",
+        "previous_sum_game_Total_penaltiesFor",
+        "previous_sum_game_Total_penaltiesAgainst",
+        "previous_sum_game_PP_goalsFor",
+        "previous_rolling_game_PP_goalsFor",
+        "previous_rolling_game_Total_penaltiesAgainst",
+        "previous_rolling_game_PP_goalsForPerPenalty",
+        "previous_rank_rolling_game_PP_goalsForPerPenalty",
+        "previous_perc_rank_rolling_game_PP_goalsForPerPenalty",
+        "previous_sum_game_Total_shotsOnGoalAgainst",
+        "previous_rolling_game_Total_shotsOnGoalAgainst",
+        "previous_rolling_per_game_Total_shotsOnGoalAgainst",
+        "previous_rank_rolling_game_Total_shotsOnGoalAgainst",
+        "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+    )
+)
+
+# COMMAND ----------
+
+display(
     gold_model_data_v2
     .filter(col("gameId").isNull())
     .orderBy(desc("gameDate")
