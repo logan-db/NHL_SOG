@@ -286,7 +286,7 @@ upcoming_games_processed
 # COMMAND ----------
 
 # Usage:
-shap_plot = generate_shap_explanation(model, current_games_processed_pd, sample_size=50, shap_enabled=True)
+shap_plot = generate_shap_explanation(model, current_games_processed_pd, sample_size=50, shap_enabled=False)
 if shap_plot is not None:
     display(shap_plot)
 
