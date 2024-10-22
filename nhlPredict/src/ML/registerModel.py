@@ -18,6 +18,11 @@ dbutils.widgets.text("training_experiment_param", "4320825364109641", "training_
 
 # COMMAND ----------
 
+# TESTING
+feature_count_param = 100
+
+# COMMAND ----------
+
 trial_experiment_param = str(dbutils.widgets.get("trial_experiment_param"))
 training_experiment_param = str(dbutils.widgets.get("training_experiment_param"))
 
@@ -137,7 +142,73 @@ pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng").select(
 
 # COMMAND ----------
 
-from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
+from pyspark.sql.functions import udf, col, when, lit, coalesce
+from pyspark.sql.types import DoubleType
+
+def handle_null_feature(df, feature_column, fallback_value):
+    """
+    Handle null values in a feature column using withColumn approach.
+    
+    :param df: The input DataFrame
+    :param feature_column: The name of the column to handle null values
+    :param fallback_value: The value to use when the feature is null
+    :return: DataFrame with null values handled
+    """
+    return df.withColumn(
+        feature_column,
+        coalesce(col(feature_column), lit(fallback_value))
+    )
+
+# Example usage:
+# df = handle_null_feature(df, "some_feature", 0.0)
+  
+spark.udf.register("lr_nhl_demo.dev.handle_null_feature", handle_null_feature)
+
+# COMMAND ----------
+
+# TEST
+
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+from pyspark.sql.functions import lit, col
+
+# Define the schema for the new row
+schema = StructType([
+    StructField("gameId", StringType(), False),
+    StructField("playerId", StringType(), True),
+    StructField(target_col, DoubleType(), False)
+])
+
+# Create a new DataFrame with the single row
+new_row = spark.createDataFrame(
+    [("20241010", None, 4.0)],
+    schema
+)
+
+# Union the new row with the existing DataFrame
+pre_feat_eng_updated = pre_feat_eng.union(new_row)
+
+display(pre_feat_eng_updated.filter(col("playerId").isNull()))
+
+# COMMAND ----------
+
+def fill_customer_features(data):
+  ''' Returns DataFrame with Nulls Fixed
+  '''
+  pass
+
+customer_transactions = {"YOUR DATAFRAME"}
+new_df = fill_customer_features(customer_transactions)
+
+# UPDATING FEATURE STORE
+fe.write_table(
+  df=new_df,
+  name='{FEATURE STORE NAME}',
+  mode='merge'
+)
+
+# COMMAND ----------
+
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup, FeatureFunction
 
 fe = FeatureEngineeringClient()
 
@@ -147,17 +218,31 @@ feature_lookups = [
         table_name=f"{catalog_param}.player_features_{feature_count_param}",
         feature_names=None,  # Include all features
         lookup_key=id_columns,  # The key column used for joining
-    )
+    ),
+    FeatureFunction(
+    udf_name="lr_nhl_demo.dev.handle_null_feature",
+    input_bindings={
+        "df":pre_feat_eng_updated,
+        "feature_value": "playerId",
+        "fallback_value": '9999-9'
+    },
+    output_name="playerId"  # This matches the original column name
+)
 ]
 
 training_set = fe.create_training_set(
-    df=pre_feat_eng,
+    df=pre_feat_eng_updated,
     feature_lookups=feature_lookups,
     label=target_col,
-    exclude_columns=id_columns,
+    # exclude_columns=id_columns,
 )
 
-training_df = training_set.load_df().toPandas()
+# training_df = training_set.load_df().toPandas()
+
+# COMMAND ----------
+
+# TEST
+display(training_set.load_df().filter(col('playerId') == '9999-9'))
 
 # COMMAND ----------
 

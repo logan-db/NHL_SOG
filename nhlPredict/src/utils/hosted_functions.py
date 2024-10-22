@@ -1,4 +1,31 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC ## Feature Functions
+
+# COMMAND ----------
+
+from pyspark.sql.functions import udf
+from pyspark.sql.types import DoubleType
+
+@udf(returnType=DoubleType())
+def handle_null_feature(feature_value, fallback_value):
+    if feature_value is None:
+        return fallback_value
+    return feature_value
+  
+spark.udf.register("lr_nhl_demo.dev.handle_null_feature", handle_null_feature)
+
+# COMMAND ----------
+
+spark.udf.register("lr_nhl_demo.dev.handle_null_feature", handle_null_feature)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Other Functions
+
+# COMMAND ----------
+
 from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
 # COMMAND ----------
