@@ -941,8 +941,8 @@ def merge_games_data():
 
 # COMMAND ----------
 
-
 # DBTITLE 1,silver_players_ranked
+
 @dlt.table(
     name="silver_players_ranked",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -1291,6 +1291,9 @@ def clean_rank_players():
             grouped_df = grouped_df.withColumn(
                 perc_rank_column, round(perc_rank_calc * 100, 2)
             )
+    
+    for column in per_game_columns:
+        grouped_df = grouped_df.drop(f"sum_{column}")
 
     final_joined_player_rank = (
         joined_player_stats_silver.join(
@@ -1299,7 +1302,6 @@ def clean_rank_players():
             on=["playerId", "shooterName", "gameDate", "playerTeam", "season"],
         )
         .orderBy(desc("gameDate"), "playerTeam")
-        .drop(*per_game_columns)
     )
 
     return final_joined_player_rank
