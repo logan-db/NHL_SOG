@@ -943,6 +943,7 @@ def merge_games_data():
 
 # DBTITLE 1,silver_players_ranked
 
+
 @dlt.table(
     name="silver_players_ranked",
     # comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -1291,18 +1292,15 @@ def clean_rank_players():
             grouped_df = grouped_df.withColumn(
                 perc_rank_column, round(perc_rank_calc * 100, 2)
             )
-    
+
     for column in per_game_columns:
         grouped_df = grouped_df.drop(f"sum_{column}")
 
-    final_joined_player_rank = (
-        joined_player_stats_silver.join(
-            grouped_df,
-            how="left",
-            on=["playerId", "shooterName", "gameDate", "playerTeam", "season"],
-        )
-        .orderBy(desc("gameDate"), "playerTeam")
-    )
+    final_joined_player_rank = joined_player_stats_silver.join(
+        grouped_df,
+        how="left",
+        on=["playerId", "shooterName", "gameDate", "playerTeam", "season"],
+    ).orderBy(desc("gameDate"), "playerTeam")
 
     return final_joined_player_rank
 
@@ -1463,7 +1461,14 @@ def aggregate_games_data():
         )
         .join(
             dlt.read("silver_players_ranked").drop(
-                "teamGamesPlayedRolling", "teamMatchupPlayedRolling", "isPlayoffGame"
+                "teamGamesPlayedRolling",
+                "teamMatchupPlayedRolling",
+                "isPlayoffGame",
+                "game_Total_penaltiesAgainst",
+                "rolling_game_Total_penaltiesAgainst",
+                "rolling_per_game_game_Total_penaltiesAgainst",
+                "rank_rolling_game_Total_penaltiesAgainst",
+                "perc_rank_rolling_game_Total_penaltiesAgainst",
             ),
             how="left",
             on=[
