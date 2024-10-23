@@ -984,7 +984,7 @@ def clean_rank_players():
   joined_player_stats_silver = (
       joined_player_stats
       .join(
-          silver_games_schedule_v2.select(
+          dlt.read("silver_games_schedule_v2").select(
           "gameId",
           "season",
           "home_or_away",
