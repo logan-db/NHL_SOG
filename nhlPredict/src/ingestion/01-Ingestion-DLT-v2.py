@@ -918,19 +918,19 @@ def clean_rank_players():
 
   # Call the function on the DataFrame
   player_game_stats_total = select_rename_columns(
-      dlt.read("player_game_stats_v2"),
+      dlt.read("bronze_player_game_stats_v2"),
       select_cols,
       "player_Total_",
       "all",
   )
   player_game_stats_pp = select_rename_columns(
-      dlt.read("player_game_stats_v2"), select_cols, "player_PP_", "5on4"
+      dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4"
   )
   player_game_stats_pk = select_rename_columns(
-      dlt.read("player_game_stats_v2"), select_cols, "player_PK_", "4on5"
+      dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PK_", "4on5"
   )
   player_game_stats_ev = select_rename_columns(
-      dlt.read("player_game_stats_v2"), select_cols, "player_EV_", "5on5"
+      dlt.read("bronze_player_game_stats_v2"), select_cols, "player_EV_", "5on5"
   )
 
   joined_player_stats = (
