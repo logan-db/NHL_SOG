@@ -9,7 +9,11 @@ resources:
       photon: false
       libraries:
         - notebook:
-            path: ../src/ingestion/01-Ingestion-DLT-v2.py
+            path: ../src/ingestion/01-bronze-ingestion.py
+        - notebook:
+            path: ../src/ingestion/02-silver-transform.py
+        - notebook:
+            path: ../src/ingestion/03-gold-agg.py
       serverless: true
       catalog: lr_nhl_demo
       configuration:
