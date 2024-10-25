@@ -140,18 +140,6 @@ display(
 
 # COMMAND ----------
 
-# opponent_previous_sum_game_Total_shotAttemptsAgainst
-# opponent_average_sum_game_Total_shotAttemptsAgainst_last_3_games
-# opponent_average_sum_game_Total_shotAttemptsAgainst_last_7_games
-
-# ALL the same value, what one to use? same with Ranks
-
-# opponent_average_rolling_avg_Total_goalsAgainst_last_7_games What is average_rolling_avg?
-
-
-
-# COMMAND ----------
-
 # Listing all columns that contain 'opponent'
 opponent_columns = [c for c in clean_prediction_v2.columns if 'opponent' in c]
 

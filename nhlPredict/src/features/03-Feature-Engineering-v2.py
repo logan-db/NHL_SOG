@@ -399,6 +399,11 @@ rf_pipeline = Pipeline(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Define Pre-Processing Pipeline
 # MAGIC - Dynamic Feature Selection based on 'feature_counts' list
 # MAGIC - Creates associated Feature Tables, with only preprocessed and selected features
@@ -413,11 +418,13 @@ import tempfile
 import yaml
 import pandas as pd
 import numpy as np
+from xgboost import XGBRegressor
 from mlflow.models import infer_signature
 from mlflow.pyfunc import PythonModel
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import SelectFromModel
+from sklearn.decomposition import PCA
 from sklearn import set_config
 
 
@@ -450,7 +457,7 @@ class PreprocessModel(PythonModel):
 
 
 def create_feature_store_tables(
-    X_train, y_train, col_selector, preprocessor, n_estimators, feature_counts
+    X_train, y_train, col_selector, preprocessor, feature_counts, featSelectionModel
 ):
     """
     Create a single preprocess model and use it to create multiple Feature Store tables for different feature counts.
@@ -489,10 +496,14 @@ def create_feature_store_tables(
             (
                 "feature_selector",
                 SelectFromModel(
-                    RandomForestRegressor(n_estimators=n_estimators, random_state=42),
+                    featSelectionModel,
                     max_features=feature_counts,
-                    threshold=-np.inf,
+                    threshold=-np.inf  # This ensures we select based on max_features, not threshold
                 ),
+            # (
+            #     "pca",
+            #     PCA(n_components='mle', random_state=42)
+            # ),
             ),
         ]
     )
@@ -656,7 +667,6 @@ def create_feature_store_tables(
 
     print(f"Feature Store table {table_name} created SUCCESSFULLY...")
 
-
 # COMMAND ----------
 
 # Convert pre_feat_eng to Pandas DataFrame
@@ -668,9 +678,19 @@ y = pre_feat_eng_pd[target_col]
 
 # COMMAND ----------
 
+featSelectionModel = XGBRegressor(
+    n_estimators=n_estimators_param,
+    learning_rate=0.1,
+    max_depth=5,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42
+)
+# featSelectionModel = RandomForestRegressor(n_estimators=n_estimators_param, random_state=42)
+
 print(f"Feature Engineering Pipeline RUNNING on {feature_count_param} features")
 create_feature_store_tables(
-    X, y, col_selector, preprocessor, n_estimators_param, feature_count_param
+    X, y, col_selector, preprocessor, feature_count_param, featSelectionModel
 )
 print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features")
 
@@ -821,5 +841,3 @@ assert (
 display(
     pre_feat_eng.filter((col("playerId") == 8479318) & (col("gameId") == 2023020026))
 )  # should be Auston Matthews, TOR vs MIN
-
-# COMMAND ----------
