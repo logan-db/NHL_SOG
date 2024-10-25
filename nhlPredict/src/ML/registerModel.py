@@ -31,14 +31,30 @@ catalog_param = dbutils.widgets.get("catalog").lower()
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from datetime import datetime, timedelta
 
 def get_best_run(experiment_id, metric_name):
     client = MlflowClient()
+    
+    # Calculate the timestamp for 24 hours ago
+    twenty_four_hours_ago = int((datetime.now() - timedelta(hours=24)).timestamp() * 1000)
+    
+    # Add filter for runs in the last 24 hours
+    filter_string = f"attributes.start_time > {twenty_four_hours_ago}"
+    
     runs = client.search_runs(
-        experiment_id, order_by=[f"metrics.{metric_name} DESC"], max_results=1
+        experiment_id,
+        filter_string=filter_string,
+        order_by=[f"metrics.{metric_name} DESC"],
+        max_results=1
     )
-    return runs[0]
+    
+    if runs:
+        return runs[0]
+    else:
+        return None  # Return None if no runs are found in the last 24 hours
 
+# COMMAND ----------
 
 metric_name = "test_r2_score"
 best_run = get_best_run(trial_experiment_param, metric_name)

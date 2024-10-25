@@ -52,9 +52,7 @@ clean_prediction_v2 = spark.table("dev.clean_prediction_v2")
 
 # COMMAND ----------
 
-display(
-  gold_player_stats.filter(col('playerId').isNull())
-)
+pre_feat_eng = spark.table("lr_nhl_demo.dev.pre_feat_eng")
 
 # COMMAND ----------
 
