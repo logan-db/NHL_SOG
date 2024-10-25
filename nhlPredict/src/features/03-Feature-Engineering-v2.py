@@ -601,7 +601,7 @@ def create_feature_store_tables(
 
     model_version_infos = client.search_model_versions(f"name = '{uc_model_name}'")
     new_model_version = max(
-        [model_version_info.version for model_version_info in model_version_infos]
+        [int(model_version_info.version) for model_version_info in model_version_infos]
     )
     client.set_registered_model_alias(uc_model_name, "champion", new_model_version)
 
@@ -609,7 +609,9 @@ def create_feature_store_tables(
 
     pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
 
-    assert int(pp_champion_version.version) == new_model_version, "Preprocess Model version mismatch"
+    assert (
+        int(pp_champion_version.version) == new_model_version
+    ), "Preprocess Model version mismatch"
 
     preprocess_model_name = pp_champion_version.name
     preprocess_model_version = pp_champion_version.version
@@ -710,7 +712,9 @@ print(f"Model set as Champion for {uc_model_name} version {new_model_version}...
 
 pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
 
-assert int(pp_champion_version.version) == new_model_version, "Preprocess Model version mismatch"
+assert (
+    int(pp_champion_version.version) == new_model_version
+), "Preprocess Model version mismatch"
 
 preprocess_model_name = pp_champion_version.name
 preprocess_model_version = pp_champion_version.version
@@ -802,15 +806,20 @@ final_data
 
 # COMMAND ----------
 
-display(pre_feat_eng.filter(col('playerId')==8470604))
-display(pre_feat_eng.filter(col('playerId')==8484255))
+display(pre_feat_eng.filter(col("playerId") == 8470604))
+display(pre_feat_eng.filter(col("playerId") == 8484255))
 
-assert pre_feat_eng.filter(col('playerId')==8479318).select("shooterName").collect()[0][0] == "Auston Matthews"
+assert (
+    pre_feat_eng.filter(col("playerId") == 8479318)
+    .select("shooterName")
+    .collect()[0][0]
+    == "Auston Matthews"
+)
 
 # COMMAND ----------
 
-display(pre_feat_eng.filter((col('playerId')==8479318) & (col('gameId')==2023020026))) # should be Auston Matthews, TOR vs MIN
+display(
+    pre_feat_eng.filter((col("playerId") == 8479318) & (col("gameId") == 2023020026))
+)  # should be Auston Matthews, TOR vs MIN
 
 # COMMAND ----------
-
-

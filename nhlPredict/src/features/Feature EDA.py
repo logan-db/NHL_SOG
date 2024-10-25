@@ -361,7 +361,7 @@ model_version_infos = client.search_model_versions(
     "name = 'lr_nhl_demo.dev.preprocess_model'"
 )
 new_model_version = max(
-    [model_version_info.version for model_version_info in model_version_infos]
+    [int(model_version_info.version) for model_version_info in model_version_infos]
 )
 client.set_registered_model_alias(
     "lr_nhl_demo.dev.preprocess_model", "champion", new_model_version
@@ -463,7 +463,7 @@ model_version_infos = client.search_model_versions(
     "name = 'lr_nhl_demo.dev.preprocess_model'"
 )
 new_model_version = max(
-    [model_version_info.version for model_version_info in model_version_infos]
+    [int(model_version_info.version) for model_version_info in model_version_infos]
 )
 client.set_registered_model_alias(
     "lr_nhl_demo.dev.preprocess_model", "champion", new_model_version
@@ -495,7 +495,7 @@ model_version_infos = client.search_model_versions(
     "name = 'lr_nhl_demo.dev.preprocess_model'"
 )
 new_model_version = max(
-    [model_version_info.version for model_version_info in model_version_infos]
+    [int(model_version_info.version) for model_version_info in model_version_infos]
 )
 client.set_registered_model_alias(
     "lr_nhl_demo.dev.preprocess_model", "champion", new_model_version
