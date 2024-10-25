@@ -367,12 +367,12 @@ def aggregate_games_data():
         f"PlayerId Null Rows: {gold_player_stats.filter(col('playerId').isNull()).count()}"
     )
 
-    # assert (
-    #     gold_player_stats.filter(
-    #         (col("playerId").isNull()) & (col("playerTeam") != "UTA")
-    #     ).count()
-    #     == 0
-    # ), f"PlayerId Null Rows {gold_player_stats.filter(col('playerId').isNull()).count()}"
+    assert (
+        gold_player_stats.filter(
+            (col("playerId").isNull()) & (col("playerTeam") != "UTA")
+        ).count()
+        == 0
+    ), f"PlayerId Null Rows {gold_player_stats.filter(col('playerId').isNull()).count()}"
 
     return gold_player_stats
 

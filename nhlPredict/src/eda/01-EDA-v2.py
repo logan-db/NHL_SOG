@@ -52,6 +52,12 @@ clean_prediction_v2 = spark.table("dev.clean_prediction_v2")
 
 # COMMAND ----------
 
+display(
+  gold_player_stats.filter(col('playerId').isNull())
+)
+
+# COMMAND ----------
+
 # DBTITLE 1,General Discovery
 display(
     clean_prediction_v2.filter((col("playerTeam") == "TOR") & (col("shooterName") == 'Auston Matthews'))

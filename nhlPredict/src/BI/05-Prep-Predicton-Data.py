@@ -25,6 +25,22 @@ display(predictSOG_hist.orderBy("gameDate", "shooterName"))
 
 # COMMAND ----------
 
+# Get the columns of both dataframes
+columns_upcoming = set(predictSOG_upcoming.columns)
+columns_hist = set(predictSOG_hist.columns)
+
+# Find columns that are in predictSOG_upcoming but not in predictSOG_hist
+columns_not_in_hist = columns_upcoming - columns_hist
+
+# Find columns that are in predictSOG_hist but not in predictSOG_upcoming
+columns_not_in_upcoming = columns_hist - columns_upcoming
+
+# Display the results
+display(spark.createDataFrame([(col,) for col in columns_not_in_hist], ["Columns not in predictSOG_hist"]))
+display(spark.createDataFrame([(col,) for col in columns_not_in_upcoming], ["Columns not in predictSOG_upcoming"]))
+
+# COMMAND ----------
+
 full_prediction = predictSOG_hist.unionByName(predictSOG_upcoming).orderBy(
     desc("gameDate")
 )
