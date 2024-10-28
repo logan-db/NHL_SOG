@@ -33,78 +33,53 @@ display(full_prediction)
 
 # COMMAND ----------
 
-windowSpec = Window.partitionBy("playerTeam", "playerId").orderBy("gameDate")
+from pyspark.sql.functions import when, lit, col, lag, count, sum, desc
+from pyspark.sql.window import Window
+
+windowSpec = Window.partitionBy("playerTeam", "playerId", "season").orderBy("gameDate")
 matchupWindowSpec = Window.partitionBy(
-    "playerTeam", "opposingTeam", "playerId"
+    "playerTeam", "opposingTeam", "playerId", "season"
 ).orderBy("gameDate")
 
 clean_prediction = (
     full_prediction.withColumn(
         "SOG_2+",
-        when(col(target_col) >= 2, lit("Yes"))
+        when(col(target_col) >= 2, lit(1))
         .when(col(target_col).isNull(), lit(None))
-        .otherwise(lit("No")),
+        .otherwise(lit(0)),
     )
     .withColumn(
         "SOG_3+",
-        when(col(target_col) >= 3, lit("Yes"))
+        when(col(target_col) >= 3, lit(1))
         .when(col(target_col).isNull(), lit(None))
-        .otherwise(lit("No")),
+        .otherwise(lit(0)),
     )
     .withColumn(
         "player_2+_SeasonHitRate",
         when(
             col("playerGamesPlayedRolling") > 1,
-            count(
-                when(
-                    (lag(col("predictedSOG")).over(windowSpec) >= 2)
-                    & (col("gameDate") > lag(col("gameDate")).over(windowSpec)),
-                    True,
-                )
-            ).over(windowSpec)
-            / col("playerGamesPlayedRolling"),
+            sum("SOG_2+").over(windowSpec) / col("playerGamesPlayedRolling"),
         ).otherwise(lit(None)),
     )
     .withColumn(
         "player_3+_SeasonHitRate",
         when(
             col("playerGamesPlayedRolling") > 1,
-            count(
-                when(
-                    (lag(col("predictedSOG")).over(windowSpec) >= 3)
-                    & (col("gameDate") > lag(col("gameDate")).over(windowSpec)),
-                    True,
-                )
-            ).over(windowSpec)
-            / col("playerGamesPlayedRolling"),
+            sum("SOG_3+").over(windowSpec) / col("playerGamesPlayedRolling"),
         ).otherwise(lit(None)),
     )
     .withColumn(
         "player_2+_SeasonMatchupHitRate",
         when(
             col("playerMatchupPlayedRolling") > 1,
-            count(
-                when(
-                    (lag(col("predictedSOG")).over(matchupWindowSpec) >= 2)
-                    & (col("gameDate") > lag(col("gameDate")).over(matchupWindowSpec)),
-                    True,
-                )
-            ).over(matchupWindowSpec)
-            / col("playerMatchupPlayedRolling"),
+            sum("SOG_2+").over(matchupWindowSpec) / col("playerMatchupPlayedRolling"),
         ).otherwise(lit(None)),
     )
     .withColumn(
         "player_3+_SeasonMatchupHitRate",
         when(
             col("playerMatchupPlayedRolling") > 1,
-            count(
-                when(
-                    (lag(col("predictedSOG")).over(matchupWindowSpec) >= 3)
-                    & (col("gameDate") > lag(col("gameDate")).over(matchupWindowSpec)),
-                    True,
-                )
-            ).over(matchupWindowSpec)
-            / col("playerMatchupPlayedRolling"),
+            sum("SOG_3+").over(matchupWindowSpec) / col("playerMatchupPlayedRolling"),
         ).otherwise(lit(None)),
     )
     .orderBy(desc("gameDate"))
@@ -112,7 +87,7 @@ clean_prediction = (
 
 # COMMAND ----------
 
-display(clean_prediction.filter(col("shooterName") == "Auston Matthews"))
+display(clean_prediction.filter(col("shooterName") == "Auston Matthews").select("*", "gameDate", "player_Total_shotsOnGoal", "playerGamesPlayedRolling"))
 
 # COMMAND ----------
 
@@ -168,6 +143,8 @@ game_clean_cols = [
 # COMMAND ----------
 
 # DBTITLE 0,dunffctbhgkdjnivtejvhbhtjllctujbekdg
+lastGameWindowSpec = Window.partitionBy("playerTeam", "playerId").orderBy(desc("gameDate"))
+
 clean_prediction_edit = (
     clean_prediction.withColumn(
         "predictedSOG", round(col("predictedSOG"), 2)
@@ -178,6 +155,16 @@ clean_prediction_edit = (
             col("predictedSOG") - col("average_player_Total_shotsOnGoal_last_7_games"),
             2,
         )),
+    )
+    .withColumn(
+        "is_within_30_days",
+        when(datediff(current_date(), to_date(col("gameDate"))) <= 30, lit(True))
+        .otherwise(lit(False))
+    )
+    .withColumn(
+        "is_last_played_game",
+        when(row_number().over(lastGameWindowSpec) == 1, lit(True))
+        .otherwise(lit(False))
     )
     .orderBy(
         desc("gameDate"),
@@ -204,6 +191,8 @@ display(
         "playerTeam",
         "opposingTeam",
         "season",
+        "is_within_30_days",
+        "is_last_played_game",
         "absVarianceAvgLast7SOG",
 
         # Prediction & Actual
@@ -247,11 +236,6 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC DROP TABLE lr_nhl_demo.dev.clean_prediction_summary 
-
-# COMMAND ----------
-
-# MAGIC %sql
 # MAGIC CREATE TABLE IF NOT EXISTS lr_nhl_demo.dev.clean_prediction_summary (
 # MAGIC     gameDate DATE COMMENT 'The date of the game',
 # MAGIC     shooterName STRING COMMENT 'Name of the player',
@@ -276,35 +260,6 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 # MAGIC COMMENT 'Summary of clean predictions for NHL games';
 # MAGIC
 # MAGIC INSERT INTO lr_nhl_demo.dev.clean_prediction_summary
-# MAGIC SELECT 
-# MAGIC     gameDate,
-# MAGIC     shooterName,
-# MAGIC     playerTeam,
-# MAGIC     opposingTeam,
-# MAGIC     season,
-# MAGIC     absVarianceAvgLast7SOG,
-# MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
-# MAGIC     `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
-# MAGIC     `average_player_SOG%_EV_last_7_games` AS `playerLast7EVSOG%`,
-# MAGIC     previous_player_Total_shotsOnGoal AS playerLastSOG,
-# MAGIC     average_player_Total_shotsOnGoal_last_3_games AS playerAvgSOGLast3,
-# MAGIC     average_player_Total_shotsOnGoal_last_7_games AS playerAvgSOGLast7,
-# MAGIC     previous_perc_rank_rolling_game_Total_goalsFor AS `teamGoalsForRank%`,
-# MAGIC     previous_perc_rank_rolling_game_Total_shotsOnGoalFor AS `teamSOGForRank%`,
-# MAGIC     previous_perc_rank_rolling_game_PP_SOGForPerPenalty AS `teamPPSOGRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
-# MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
-# MAGIC WHERE gameId IS NULL
-# MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
-
-# COMMAND ----------
-
-# DBTITLE 1,clean_prediction_summary
-# MAGIC %sql
-# MAGIC CREATE TABLE IF NOT EXISTS lr_nhl_demo.dev.clean_prediction_summary AS
 # MAGIC SELECT 
 # MAGIC     gameDate,
 # MAGIC     shooterName,
