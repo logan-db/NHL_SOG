@@ -1,4 +1,4 @@
-from nhlPredict.main import get_taxis, get_spark
+from nhlPredict.main.src.utils import get_taxis, get_spark
 
 
 def test_main():

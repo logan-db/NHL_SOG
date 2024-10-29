@@ -440,10 +440,11 @@ def merge_games_data():
         .rowsBetween(Window.unboundedPreceding, 0)
     )
 
+    lastGameWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
+
     pk_norm = (
-        silver_games_schedule.withColumn(
-            "teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec)
-        )
+        silver_games_schedule.filter(col("gameId").isNotNull())
+        .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
         .withColumn(
             "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
         )
@@ -494,18 +495,27 @@ def merge_games_data():
     ]
 
     # Group by playerTeam and season
-    grouped_df = pk_norm.groupBy(
-        "gameDate",
-        "playerTeam",
-        "season",
-        "teamGamesPlayedRolling",
-        "teamMatchupPlayedRolling",
-        "isPlayoffGame",
-    ).agg(
-        *[
-            sum(column).alias(f"sum_{column}")
-            for column in per_game_columns + base_columns
-        ]
+    grouped_df = (
+        pk_norm.groupBy(
+            "gameDate",
+            "playerTeam",
+            "season",
+            "teamGamesPlayedRolling",
+            "teamMatchupPlayedRolling",
+            "isPlayoffGame",
+        )
+        .agg(
+            *[
+                sum(column).alias(f"sum_{column}")
+                for column in per_game_columns + base_columns
+            ]
+        )
+        .withColumn(
+            "is_last_played_game",
+            when(row_number().over(lastGameWindowSpec) == 1, lit(True)).otherwise(
+                lit(False)
+            ),
+        )
     )
 
     for column in base_columns + columns_to_rank:
@@ -525,12 +535,6 @@ def merge_games_data():
                 if "Against" not in column
                 else asc(rolling_per_game_column)
             )
-            perc_rank_calc = 1 - percent_rank().over(
-                Window.partitionBy("teamGamesPlayedRolling", "season").orderBy(
-                    order_col
-                )
-            )
-
             # Create Rolling Sum
             grouped_df = grouped_df.withColumn(
                 rolling_column,
@@ -552,24 +556,50 @@ def merge_games_data():
 
                 grouped_df = grouped_df.withColumn(
                     rank_column,
-                    rank().over(
-                        Window.partitionBy("teamGamesPlayedRolling", "season").orderBy(
-                            order_col
-                        )
+                    when(
+                        grouped_df.is_last_played_game == True,
+                        rank().over(
+                            Window.partitionBy("is_last_played_game", "season").orderBy(
+                                order_col
+                            )
+                        ),
+                    ).otherwise(
+                        rank().over(
+                            Window.partitionBy(
+                                "teamGamesPlayedRolling", "season"
+                            ).orderBy(order_col)
+                        ),
                     ),
                 )
                 grouped_df = grouped_df.withColumn(
-                    perc_rank_column, round(perc_rank_calc * 100, 2)
+                    perc_rank_column,
+                    when(
+                        grouped_df.is_last_played_game == True,
+                        round(
+                            1
+                            - percent_rank().over(
+                                Window.partitionBy(
+                                    "is_last_played_game", "season"
+                                ).orderBy(order_col)
+                            ),
+                            2,
+                        ),
+                    ).otherwise(
+                        round(
+                            1
+                            - percent_rank().over(
+                                Window.partitionBy(
+                                    "teamGamesPlayedRolling", "season"
+                                ).orderBy(order_col)
+                            ),
+                            2,
+                        )
+                    ),
                 )
 
         if column not in per_game_columns + base_columns:
             order_col = (
                 desc(rolling_column) if "Against" not in column else asc(rolling_column)
-            )
-            perc_rank_calc = 1 - percent_rank().over(
-                Window.partitionBy("teamGamesPlayedRolling", "season").orderBy(
-                    order_col
-                )
             )
             # Dynamic rolling sum logic
             # Get rolling sum of base columns: CREATE LOGIC ON THIS
@@ -632,14 +662,45 @@ def merge_games_data():
 
             grouped_df = grouped_df.withColumn(
                 rank_column,
-                rank().over(
-                    Window.partitionBy("teamGamesPlayedRolling", "season").orderBy(
-                        order_col
-                    )
+                when(
+                    grouped_df.is_last_played_game == True,
+                    rank().over(
+                        Window.partitionBy("is_last_played_game", "season").orderBy(
+                            order_col
+                        )
+                    ),
+                ).otherwise(
+                    rank().over(
+                        Window.partitionBy("teamGamesPlayedRolling", "season").orderBy(
+                            order_col
+                        )
+                    ),
                 ),
             )
             grouped_df = grouped_df.withColumn(
-                perc_rank_column, round(perc_rank_calc * 100, 2)
+                perc_rank_column,
+                when(
+                    grouped_df.is_last_played_game == True,
+                    round(
+                        1
+                        - percent_rank().over(
+                            Window.partitionBy("is_last_played_game", "season").orderBy(
+                                order_col
+                            )
+                        ),
+                        2,
+                    ),
+                ).otherwise(
+                    round(
+                        1
+                        - percent_rank().over(
+                            Window.partitionBy(
+                                "teamGamesPlayedRolling", "season"
+                            ).orderBy(order_col)
+                        ),
+                        2,
+                    )
+                ),
             )
 
     # NEED TO JOIN ABOVE ROLLING AND RANK CODE BACK to main dataframe
@@ -672,30 +733,6 @@ def merge_games_data():
 
     return final_joined_rank_with_day
 
-
-# COMMAND ----------
-
-# DBTITLE 1,silver_skaters_team_game_v2
-# @dlt.table(
-#     name="silver_skaters_team_game_v2",
-#     # comment="Raw Ingested NHL data on games from 2008 - Present",
-#     table_properties={"quality": "silver"},
-# )
-# def merge_games_data():
-
-#     skaters_team_game = (
-#         dlt.read("silver_games_historical_v2")
-#         .join(
-#             dlt.read("silver_skaters_enriched_v2").filter(col("situation") == "all"),
-#             ["team", "season"],
-#             how="inner",
-#         )
-#         .withColumn("gameId", col("gameId").cast("string"))
-#         .withColumn("playerId", col("playerId").cast("string"))
-#         .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
-#         .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
-#     )
-#     return skaters_team_game
 
 # COMMAND ----------
 
@@ -992,7 +1029,7 @@ def clean_rank_players():
                     ),
                 )
                 grouped_df = grouped_df.withColumn(
-                    perc_rank_column, round(perc_rank_calc * 100, 2)
+                    perc_rank_column, round(perc_rank_calc, 2)
                 )
 
         if column not in per_game_columns + base_columns:
@@ -1048,7 +1085,7 @@ def clean_rank_players():
                 ),
             )
             grouped_df = grouped_df.withColumn(
-                perc_rank_column, round(perc_rank_calc * 100, 2)
+                perc_rank_column, round(perc_rank_calc, 2)
             )
 
     for column in per_game_columns:
@@ -1060,130 +1097,4 @@ def clean_rank_players():
         on=["playerId", "shooterName", "gameDate", "playerTeam", "season"],
     ).orderBy(desc("gameDate"), "playerTeam")
 
-    return final_joined_player_rank
-
-
-# COMMAND ----------
-
-# DBTITLE 1,silver_shots_v2
-# @dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
-# @dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
-# @dlt.table(
-#     name="silver_shots_v2",
-#     # comment="Raw Ingested NHL data on games from 2008 - Present",
-#     table_properties={"quality": "silver"},
-# )
-# def clean_shots_data():
-
-#     shots_filtered = (
-#         dlt.read("bronze_shots_2023_v2")
-#         .select(
-#             "shotID",
-#             "game_id",
-#             "teamCode",
-#             "shooterName",
-#             "shooterPlayerId",
-#             "season",
-#             "event",
-#             "team",
-#             "homeTeamCode",
-#             "awayTeamCode",
-#             "goalieIdForShot",
-#             "goalieNameForShot",
-#             "isPlayoffGame",
-#             "lastEventTeam",
-#             "location",
-#             "goal",
-#             # "goalieIdForShot",
-#             # "goalieNameForShot",
-#             "homeSkatersOnIce",
-#             "awaySkatersOnIce",
-#             "shooterTimeOnIce",
-#             "shooterTimeOnIceSinceFaceoff",
-#             "shotDistance",
-#             "shotOnEmptyNet",
-#             "shotRebound",
-#             "shotRush",
-#             "shotType",
-#             "shotWasOnGoal",
-#             "speedFromLastEvent",
-#         )
-#         .withColumn("shooterPlayerId", col("shooterPlayerId").cast("string"))
-#         .withColumn("shooterPlayerId", regexp_replace("shooterPlayerId", "\\.0$", ""))
-#         .withColumn("game_id", col("game_id").cast("string"))
-#         .withColumn("game_id", regexp_replace("game_id", "\\.0$", ""))
-#         .withColumn("game_id", concat_ws("0", "season", "game_id"))
-#         .withColumn("goalieIdForShot", col("goalieIdForShot").cast("string"))
-#         .withColumn("goalieIdForShot", regexp_replace("goalieIdForShot", "\\.0$", ""))
-#         .withColumnRenamed("team", "home_or_away")
-#         .withColumnsRenamed(
-#             {
-#                 "game_id": "gameId",
-#                 "shooterPlayerId": "playerId",
-#                 # "team": "home_or_away",
-#                 "teamCode": "team",
-#             }
-#         )
-#         .withColumn(
-#             "isPowerPlay",
-#             when(
-#                 (col("team") == col("homeTeamCode"))
-#                 & (col("homeSkatersOnIce") > col("awaySkatersOnIce")),
-#                 1,
-#             )
-#             .when(
-#                 (col("team") == col("awayTeamCode"))
-#                 & (col("homeSkatersOnIce") < col("awaySkatersOnIce")),
-#                 1,
-#             )
-#             .otherwise(0),
-#         )
-#         .withColumn(
-#             "isPenaltyKill",
-#             when(
-#                 (col("team") == col("homeTeamCode"))
-#                 & (col("homeSkatersOnIce") < col("awaySkatersOnIce")),
-#                 1,
-#             )
-#             .when(
-#                 (col("team") == col("awayTeamCode"))
-#                 & (col("homeSkatersOnIce") > col("awaySkatersOnIce")),
-#                 1,
-#             )
-#             .otherwise(0),
-#         )
-#         .withColumn(
-#             "isEvenStrength",
-#             when(
-#                 (col("team") == col("homeTeamCode"))
-#                 & (col("homeSkatersOnIce") == col("awaySkatersOnIce")),
-#                 1,
-#             )
-#             .when(
-#                 (col("team") == col("awayTeamCode"))
-#                 & (col("homeSkatersOnIce") == col("awaySkatersOnIce")),
-#                 1,
-#             )
-#             .otherwise(0),
-#         )
-#         .withColumn(
-#             "powerPlayShotsOnGoal",
-#             when((col("isPowerPlay") == 1) & (col("shotWasOnGoal") == 1), 1).otherwise(
-#                 0
-#             ),
-#         )
-#         .withColumn(
-#             "penaltyKillShotsOnGoal",
-#             when(
-#                 (col("isPenaltyKill") == 1) & (col("shotWasOnGoal") == 1), 1
-#             ).otherwise(0),
-#         )
-#         .withColumn(
-#             "evenStrengthShotsOnGoal",
-#             when(
-#                 (col("isEvenStrength") == 1) & (col("shotWasOnGoal") == 1), 1
-#             ).otherwise(0),
-#         )
-#     )
-
-#     return shots_filtered
+    return final_joined_player_rank.drop("is_last_played_game")

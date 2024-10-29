@@ -6,7 +6,7 @@ resources:
       target: ${bundle.environment}
       continuous: false
       channel: PREVIEW
-      photon: false
+      photon: true
       libraries:
         - notebook:
             path: ../src/ingestion/01-bronze-ingestion.py
