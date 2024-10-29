@@ -512,9 +512,7 @@ def merge_games_data():
         )
         .withColumn(
             "is_last_played_game",
-            when(row_number().over(lastGameWindowSpec) == 1, lit(True)).otherwise(
-                lit(False)
-            ),
+            when(row_number().over(lastGameWindowSpec) == 1, lit(1)).otherwise(lit(0)),
         )
     )
 
@@ -557,7 +555,7 @@ def merge_games_data():
                 grouped_df = grouped_df.withColumn(
                     rank_column,
                     when(
-                        grouped_df.is_last_played_game == True,
+                        grouped_df.is_last_played_game == 1,
                         rank().over(
                             Window.partitionBy("is_last_played_game", "season").orderBy(
                                 order_col
@@ -574,7 +572,7 @@ def merge_games_data():
                 grouped_df = grouped_df.withColumn(
                     perc_rank_column,
                     when(
-                        grouped_df.is_last_played_game == True,
+                        grouped_df.is_last_played_game == 1,
                         round(
                             1
                             - percent_rank().over(
