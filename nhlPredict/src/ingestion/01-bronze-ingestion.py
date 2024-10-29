@@ -51,32 +51,6 @@ today_date = date.today()
 
 # COMMAND ----------
 
-# DBTITLE 1,bronze_shots_2023_v2
-# @dlt.table(name="bronze_shots_2023_v2", comment="Raw Ingested NHL data on Shots in 2023")
-# def ingest_shot_data():
-#     shots_file_path = download_unzip_and_save_as_table(
-#         shots_url, tmp_base_path, "shots_2023", file_format=".zip"
-#     )
-#     return spark.read.format("csv").option("header", "true").load(shots_file_path)
-
-# COMMAND ----------
-
-# DBTITLE 1,bronze_teams_2023_v2
-# @dlt.table(name="bronze_teams_2023_v2", comment="Raw Ingested NHL data on Teams in 2023")
-# def ingest_teams_data():
-#     teams_file_path = download_unzip_and_save_as_table(
-#         teams_url, tmp_base_path, "teams_2023", file_format=".csv"
-#     )
-#     return (
-#         spark.read.format("csv")
-#         .option("header", "true")
-#         .option("inferSchema", "true")
-#         .load(teams_file_path)
-#     )
-#     # return spark.table("lr_nhl_demo.dev.bronze_teams_2023")
-
-# COMMAND ----------
-
 # DBTITLE 1,bronze_skaters_2023_v2
 
 
@@ -108,28 +82,6 @@ def ingest_skaters_data():
 
     return skaters_df
 
-
-# COMMAND ----------
-
-# DBTITLE 1,bronze_lines_2023_v2
-# @dlt.table(name="bronze_lines_2023_v2", comment="Raw Ingested NHL data on lines in 2023")
-# def ingest_lines_data():
-#     lines_file_path = download_unzip_and_save_as_table(
-#         lines_url, tmp_base_path, "lines_2023", file_format=".csv"
-#     )
-#     # return (
-#     #   spark.readStream.format("cloudFiles")
-#     #     .option("cloudFiles.format", "csv")
-#     #     .option("cloudFiles.inferColumnTypes", "true")
-#     #     .option("header", "true")
-#     #     .load(f"{tmp_base_path}lines_2023/")
-#     #   )
-#     return (
-#         spark.read.format("csv")
-#         .option("header", "true")
-#         .option("inferSchema", "true")
-#         .load(lines_file_path)
-#     )
 
 # COMMAND ----------
 
@@ -166,14 +118,6 @@ def ingest_schedule_data():
     # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
     return spark.table("lr_nhl_demo.dev.2024_25_official_nhl_schedule_by_day")
 
-
-# @dlt.table(
-#     name="bronze_schedule_2023_v2",
-#     table_properties={"quality": "bronze"},
-# )
-# def ingest_schedule_data():
-#     # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
-#     return spark.table("lr_nhl_demo.dev.2023_24_official_nhl_schedule_by_day")
 
 # COMMAND ----------
 

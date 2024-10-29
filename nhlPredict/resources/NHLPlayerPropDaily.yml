@@ -4,7 +4,7 @@ resources:
     NHLPlayerPropDaily:
       name: NHLPlayerPropDaily
       schedule:
-        quartz_cron_expression: 46 0 8 * * ?
+        quartz_cron_expression: 46 0 13 * * ?
         timezone_id: UTC
         pause_status: UNPAUSED
 
@@ -15,7 +15,7 @@ resources:
       tasks:
         - task_key: createVols
           notebook_task:
-            notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
+            notebook_path: ../src/setup/01-Ingestion-createVols.sql
         
         - task_key: ingest_transform_job
           depends_on:
