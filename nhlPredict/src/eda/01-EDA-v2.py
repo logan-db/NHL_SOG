@@ -300,19 +300,19 @@ select_cols = [
 
 # Call the function on the DataFrame
 player_game_stats_total = select_rename_columns(
-    player_game_stats_v2,
+    bronze_player_game_stats_v2,
     select_cols,
     "player_Total_",
     "all",
 )
 player_game_stats_pp = select_rename_columns(
-    player_game_stats_v2, select_cols, "player_PP_", "5on4"
+    bronze_player_game_stats_v2, select_cols, "player_PP_", "5on4"
 )
 player_game_stats_pk = select_rename_columns(
-    player_game_stats_v2, select_cols, "player_PK_", "4on5"
+    bronze_player_game_stats_v2, select_cols, "player_PK_", "4on5"
 )
 player_game_stats_ev = select_rename_columns(
-    player_game_stats_v2, select_cols, "player_EV_", "5on5"
+    bronze_player_game_stats_v2, select_cols, "player_EV_", "5on5"
 )
 
 joined_player_stats = (
@@ -596,7 +596,7 @@ final_joined_player_rank = (
     .orderBy(desc("gameDate"), "playerTeam")
 )
 
-display(final_joined_player_rank)
+display(final_joined_player_rank.filter(col("shooterName")=='Connor Bedard'))
 
 
 # COMMAND ----------
@@ -675,7 +675,8 @@ matchupCountWindowSpec = (
 )
 
 pk_norm = (
-    silver_games_schedule.filter(col("gameId").isNotNull())
+    silver_games_schedule
+    .filter(col("gameId").isNotNull())
     .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
     .withColumn(
         "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
