@@ -19,12 +19,9 @@ sys.path.append(spark.conf.get("bundle.sourcePath", "."))
 import glob
 from datetime import date
 from pyspark.sql.functions import *
-from pyspark.sql.window import Window
-from pyspark.sql import DataFrame
 from utils.ingestionHelper import (
     download_unzip_and_save_as_table,
 )
-from utils.nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
 # COMMAND ----------
 

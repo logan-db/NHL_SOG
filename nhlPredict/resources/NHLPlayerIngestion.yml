@@ -20,7 +20,7 @@ resources:
         bundle.sourcePath: /Workspace/${workspace.file_path}/src
         tmp_base_path: /Volumes/lr_nhl_demo/dev/
         base_shots_download_url: https://peter-tanner.com/moneypuck/downloads/
-        base_download_url: https://moneypuck.com/moneypuck/playerData/seasonSummary/2023/regular/
+        base_download_url: https://moneypuck.com/moneypuck/playerData/seasonSummary/2024/regular/
         games_download_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv
         player_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/regular/skaters/
         one_time_load: true
