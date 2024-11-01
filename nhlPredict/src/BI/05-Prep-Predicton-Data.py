@@ -144,6 +144,7 @@ game_clean_cols = [
 
 # DBTITLE 0,dunffctbhgkdjnivtejvhbhtjllctujbekdg
 lastGameWindowSpec = Window.partitionBy("playerTeam", "playerId").orderBy(desc("gameDate"))
+lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
 
 clean_prediction_edit = (
     clean_prediction.withColumn(
@@ -164,6 +165,11 @@ clean_prediction_edit = (
     .withColumn(
         "is_last_played_game",
         when(row_number().over(lastGameWindowSpec) == 1, lit(True))
+        .otherwise(lit(False))
+    )
+    .withColumn(
+        "is_last_played_game_team",
+        when(row_number().over(lastGameTeamWindowSpec) == 1, lit(True))
         .otherwise(lit(False))
     )
     .orderBy(
@@ -193,6 +199,7 @@ display(
         "season",
         "is_within_30_days",
         "is_last_played_game",
+        "is_last_played_game_team",
         "absVarianceAvgLast7SOG",
 
         # Prediction & Actual

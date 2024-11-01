@@ -941,6 +941,45 @@ display(
 
 # COMMAND ----------
 
+display(gold_merged_stats_v2
+        .filter(
+        col("playerTeam") == "ANA")
+        .select(
+        "gameDate",
+        "gameId",
+        "shooterName",
+        "playerTeam",
+        "opposingTeam",
+        "season",
+        "teamGamesPlayedRolling",
+        "previous_sum_game_Total_penaltiesFor",
+        "previous_sum_game_Total_penaltiesAgainst",
+        "previous_sum_game_PP_goalsFor",
+        "previous_rolling_game_PP_goalsFor",
+        "previous_rolling_game_Total_penaltiesAgainst",
+        "previous_rolling_game_PP_goalsForPerPenalty",
+        "previous_rank_rolling_game_PP_goalsForPerPenalty",
+        "previous_perc_rank_rolling_game_PP_goalsForPerPenalty",
+        "previous_sum_game_Total_shotsOnGoalAgainst",
+        "previous_rolling_game_Total_shotsOnGoalAgainst",
+        "previous_rolling_per_game_Total_shotsOnGoalAgainst",
+        "previous_rank_rolling_game_Total_shotsOnGoalAgainst",
+        "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+    )
+        .orderBy(desc("gameDate"))
+        )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT season, gameDate, playerTeam, previous_rolling_per_game_Total_shotsOnGoalFor, previous_perc_rank_rolling_game_Total_shotsOnGoalFor
+# MAGIC FROM lr_nhl_demo.dev.gold_model_stats_v2
+# MAGIC GROUP BY season, gameDate, playerTeam, previous_rolling_per_game_Total_shotsOnGoalFor, previous_perc_rank_rolling_game_Total_shotsOnGoalFor
+# MAGIC HAVING season = 2024 
+# MAGIC ORDER BY playerTeam, gameDate DESC;
+
+# COMMAND ----------
+
 display(
     gold_game_stats.filter(
         # (col("playerTeam") == "CHI") &
