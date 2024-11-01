@@ -1095,4 +1095,4 @@ def clean_rank_players():
         on=["playerId", "shooterName", "gameDate", "playerTeam", "season"],
     ).orderBy(desc("gameDate"), "playerTeam")
 
-    return final_joined_player_rank.drop("is_last_played_game")
+    return final_joined_player_rank
