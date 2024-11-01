@@ -440,7 +440,7 @@ def merge_games_data():
         .rowsBetween(Window.unboundedPreceding, 0)
     )
 
-    lastGameWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
+    lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
 
     pk_norm = (
         silver_games_schedule.filter(col("gameId").isNotNull())
@@ -511,8 +511,10 @@ def merge_games_data():
             ]
         )
         .withColumn(
-            "is_last_played_game",
-            when(row_number().over(lastGameWindowSpec) == 1, lit(1)).otherwise(lit(0)),
+            "is_last_played_game_team",
+            when(row_number().over(lastGameTeamWindowSpec) == 1, lit(1)).otherwise(
+                lit(0)
+            ),
         )
     )
 
@@ -555,11 +557,11 @@ def merge_games_data():
                 grouped_df = grouped_df.withColumn(
                     rank_column,
                     when(
-                        grouped_df.is_last_played_game == 1,
+                        grouped_df.is_last_played_game_team == 1,
                         rank().over(
-                            Window.partitionBy("is_last_played_game", "season").orderBy(
-                                order_col
-                            )
+                            Window.partitionBy(
+                                "is_last_played_game_team", "season"
+                            ).orderBy(order_col)
                         ),
                     ).otherwise(
                         rank().over(
@@ -572,12 +574,12 @@ def merge_games_data():
                 grouped_df = grouped_df.withColumn(
                     perc_rank_column,
                     when(
-                        grouped_df.is_last_played_game == 1,
+                        grouped_df.is_last_played_game_team == 1,
                         round(
                             1
                             - percent_rank().over(
                                 Window.partitionBy(
-                                    "is_last_played_game", "season"
+                                    "is_last_played_game_team", "season"
                                 ).orderBy(order_col)
                             ),
                             2,
@@ -661,11 +663,11 @@ def merge_games_data():
             grouped_df = grouped_df.withColumn(
                 rank_column,
                 when(
-                    grouped_df.is_last_played_game == True,
+                    grouped_df.is_last_played_game_team == True,
                     rank().over(
-                        Window.partitionBy("is_last_played_game", "season").orderBy(
-                            order_col
-                        )
+                        Window.partitionBy(
+                            "is_last_played_game_team", "season"
+                        ).orderBy(order_col)
                     ),
                 ).otherwise(
                     rank().over(
@@ -678,13 +680,13 @@ def merge_games_data():
             grouped_df = grouped_df.withColumn(
                 perc_rank_column,
                 when(
-                    grouped_df.is_last_played_game == True,
+                    grouped_df.is_last_played_game_team == True,
                     round(
                         1
                         - percent_rank().over(
-                            Window.partitionBy("is_last_played_game", "season").orderBy(
-                                order_col
-                            )
+                            Window.partitionBy(
+                                "is_last_played_game_team", "season"
+                            ).orderBy(order_col)
                         ),
                         2,
                     ),
@@ -917,6 +919,10 @@ def clean_rank_players():
             "isPlayoffGame",
             when(col("teamGamesPlayedRolling") > 82, lit(1)).otherwise(lit(0)),
         )
+        # .withColumn(
+        #     "is_last_played_game",
+        #     when(row_number().over(lastGameWindowSpec) == 1, lit(1)).otherwise(lit(0)),
+        # )
     )
 
     # iceTimeRank
