@@ -141,8 +141,10 @@ display(gold_model_stats.filter(col("gameId").isNull()))
 upcoming_games = gold_model_stats.filter(
     (col("gameId").isNull())
     # & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 300)
     & (col("gameDate") != "2024-01-17")
+).withColumn(
+    "is_last_played_game_team", when(col("gameId").isNull(), lit(1)).otherwise(lit(0))
 )
 
 display(upcoming_games)
@@ -218,11 +220,16 @@ upcoming_predictions = fe.score_batch(
 
 # COMMAND ----------
 
-upcoming_predictions_full = upcoming_predictions.withColumn("gameId", lit("None").cast("string")).join(
-    upcoming_games.withColumn("gameId", lit("None").cast("string")),
-    how="left",
-    on=["gameId", "playerId"],
-).withColumnRenamed("prediction", "predictedSOG").withColumn("gameId", lit(None).cast("string"))
+upcoming_predictions_full = (
+    upcoming_predictions.withColumn("gameId", lit("None").cast("string"))
+    .join(
+        upcoming_games.withColumn("gameId", lit("None").cast("string")),
+        how="left",
+        on=["gameId", "playerId"],
+    )
+    .withColumnRenamed("prediction", "predictedSOG")
+    .withColumn("gameId", lit(None).cast("string"))
+)
 
 display(upcoming_predictions_full.select(target_col, "predictedSOG", "*"))
 
@@ -241,10 +248,11 @@ model
 
 # COMMAND ----------
 
+
 def generate_shap_explanation(model, X, sample_size, shap_enabled=True):
     if not shap_enabled:
         return None
-      
+
     from shap import KernelExplainer, summary_plot
 
     mlflow.autolog(disable=True)
@@ -260,19 +268,18 @@ def generate_shap_explanation(model, X, sample_size, shap_enabled=True):
     ).fillna(mode)
 
     # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
-    example = X.sample(
-        n=min(sample_size, X.shape[0]), random_state=729986891
-    ).fillna(mode)
+    example = X.sample(n=min(sample_size, X.shape[0]), random_state=729986891).fillna(
+        mode
+    )
 
     # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
-    predict = lambda x: model.predict(
-        pd.DataFrame(x, columns=X.columns)
-    )
+    predict = lambda x: model.predict(pd.DataFrame(x, columns=X.columns))
     explainer = KernelExplainer(predict, train_sample, link="identity")
     shap_values = explainer.shap_values(example, l1_reg=False, nsamples=sample_size)
-    
+
     # Generate and return the summary plot
     return summary_plot(shap_values, example)
+
 
 # COMMAND ----------
 
@@ -280,13 +287,15 @@ current_games_processed_pd = current_games_processed.toPandas()
 
 # COMMAND ----------
 
-upcoming_games_processed['gameId'] = upcoming_games_processed['gameId'].astype(str)
+upcoming_games_processed["gameId"] = upcoming_games_processed["gameId"].astype(str)
 upcoming_games_processed
 
 # COMMAND ----------
 
 # Usage:
-shap_plot = generate_shap_explanation(model, current_games_processed_pd, sample_size=50, shap_enabled=False)
+shap_plot = generate_shap_explanation(
+    model, current_games_processed_pd, sample_size=50, shap_enabled=False
+)
 if shap_plot is not None:
     display(shap_plot)
 
@@ -297,16 +306,12 @@ if shap_plot is not None:
 
 # COMMAND ----------
 
-hist_predictions.write.format("delta").option(
-    "mergeSchema", "true"
-).mode("overwrite").saveAsTable(
-    f"{catalog_param}.predictSOG_hist_v2"
-)
-upcoming_predictions_full.write.format("delta").option(
-    "mergeSchema", "true"
-).mode("overwrite").saveAsTable(
-    f"{catalog_param}.predictSOG_upcoming_v2"
-)
+hist_predictions.write.format("delta").option("mergeSchema", "true").mode(
+    "overwrite"
+).saveAsTable(f"{catalog_param}.predictSOG_hist_v2")
+upcoming_predictions_full.write.format("delta").option("mergeSchema", "true").mode(
+    "overwrite"
+).saveAsTable(f"{catalog_param}.predictSOG_upcoming_v2")
 
 # COMMAND ----------
 
