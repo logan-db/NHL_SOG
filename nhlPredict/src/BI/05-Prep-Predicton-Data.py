@@ -169,8 +169,8 @@ clean_prediction_edit = (
     )
     .withColumn(
         "is_last_played_game_team",
-        when(row_number().over(lastGameTeamWindowSpec) == 1, lit(True))
-        .otherwise(lit(False))
+        when(row_number().over(lastGameTeamWindowSpec) == 1, lit(1))
+        .otherwise(lit(0))
     )
     .orderBy(
         desc("gameDate"),
@@ -185,6 +185,14 @@ display(clean_prediction_edit)
 # COMMAND ----------
 
 clean_prediction_edit.count()
+
+# COMMAND ----------
+
+display(
+    clean_prediction_edit.filter(
+      col("is_last_played_game_team") == 1
+    )
+)
 
 # COMMAND ----------
 
@@ -236,9 +244,24 @@ display(
 
 # COMMAND ----------
 
+# spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.clean_prediction_v2")
+
+# COMMAND ----------
+
 clean_prediction_edit.write.format("delta").mode("overwrite").option(
     "mergeSchema", "true"
 ).saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
+
+# COMMAND ----------
+
+display(
+    spark.table("lr_nhl_demo.dev.clean_prediction_v2")
+    .select("gameDate", "playerTeam", "opposingTeam", "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+    "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", "is_last_played_game_team")
+    .filter(
+      col("is_last_played_game_team") == 1
+    )
+)
 
 # COMMAND ----------
 
@@ -249,6 +272,7 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 # MAGIC     playerTeam STRING COMMENT 'Team of the player',
 # MAGIC     opposingTeam STRING COMMENT 'Opposing team',
 # MAGIC     season INT COMMENT 'Season year',
+# MAGIC     is_last_played_game_team INT COMMENT 'Is the last played game for the player team',
 # MAGIC     absVarianceAvgLast7SOG DOUBLE COMMENT 'Absolute variance of average shots on goal in the last 7 games of the player against the players predicted Shots on Goal',
 # MAGIC     predictedSOG DOUBLE COMMENT 'Predicted shots on goal for the player',
 # MAGIC     `playerLast7PPSOG%` DOUBLE COMMENT 'Player last 7 games power play shots on goal to player total shots on goal percentage',
@@ -273,6 +297,7 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 # MAGIC     playerTeam,
 # MAGIC     opposingTeam,
 # MAGIC     season,
+# MAGIC     is_last_played_game_team,
 # MAGIC     absVarianceAvgLast7SOG,
 # MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
 # MAGIC     `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
@@ -288,7 +313,35 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 # MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
 # MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
 # MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
-# MAGIC WHERE gameId IS NULL
+# MAGIC WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
+# MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT 
+# MAGIC     gameDate,
+# MAGIC     shooterName,
+# MAGIC     playerTeam,
+# MAGIC     opposingTeam,
+# MAGIC     season,
+# MAGIC     is_last_played_game_team,
+# MAGIC     absVarianceAvgLast7SOG,
+# MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
+# MAGIC     `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
+# MAGIC     `average_player_SOG%_EV_last_7_games` AS `playerLast7EVSOG%`,
+# MAGIC     previous_player_Total_shotsOnGoal AS playerLastSOG,
+# MAGIC     average_player_Total_shotsOnGoal_last_3_games AS playerAvgSOGLast3,
+# MAGIC     average_player_Total_shotsOnGoal_last_7_games AS playerAvgSOGLast7,
+# MAGIC     previous_perc_rank_rolling_game_Total_goalsFor AS `teamGoalsForRank%`,
+# MAGIC     previous_perc_rank_rolling_game_Total_shotsOnGoalFor AS `teamSOGForRank%`,
+# MAGIC     previous_perc_rank_rolling_game_PP_SOGForPerPenalty AS `teamPPSOGRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
+# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
+# MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
+# MAGIC WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
 # MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
 
 # COMMAND ----------
