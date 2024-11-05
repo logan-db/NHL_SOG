@@ -708,6 +708,10 @@ def merge_games_data():
         silver_games_schedule.join(
             grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
         )
+        .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+        .withColumn(
+            "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+        )
         .orderBy(desc("gameDate"), "playerTeam")
         .drop(*per_game_columns)
         .withColumn(

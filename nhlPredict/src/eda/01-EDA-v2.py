@@ -911,6 +911,10 @@ final_joined_rank = (
     silver_games_schedule.join(
         grouped_df, how="left", on=["gameDate", "playerTeam", "season"]
     )
+    .withColumn("teamGamesPlayedRolling", count("gameId").over(gameCountWindowSpec))
+    .withColumn(
+        "teamMatchupPlayedRolling", count("gameId").over(matchupCountWindowSpec)
+    )
     .orderBy(desc("gameDate"), "playerTeam")
     .drop(*per_game_columns)
 )
@@ -918,17 +922,19 @@ final_joined_rank = (
 display(
     final_joined_rank
     .filter(
-        # (col("playerTeam") == "CHI") 
-        (col("season") == 2024)
-        & (col("is_last_played_game") == True)
+        (col("playerTeam") == "CHI") 
+        & (col("season") == 2024)
+        # & (col("is_last_played_game") == True)
     )
-    .orderBy("gameDate", "playerTeam", "teamGamesPlayedRolling")
+    .orderBy(desc("gameDate"), "playerTeam", "teamGamesPlayedRolling")
     .select(
+        "gameId",
         "gameDate",
         "playerTeam",
         "opposingTeam",
         "season",
         "teamGamesPlayedRolling",
+        "teamMatchupPlayedRolling",
         "sum_game_Total_penaltiesFor",
         "sum_game_Total_penaltiesAgainst",
         "sum_game_PP_goalsFor",
@@ -1160,19 +1166,27 @@ column_exprs = [
     col(c) for c in gold_games_count.columns
 ]  # Start with all existing columns
 game_avg_exprs = {
-    col_name: round(median(col(col_name)).over(Window.partitionBy("playerTeam")), 2)
+    col_name: round(
+        mean(col(col_name)).over(
+            Window.partitionBy("playerTeam").orderBy(col("gameDate"))
+        ),
+        2,
+    )
     for col_name in columns_to_iterate
 }
 opponent_game_avg_exprs = {
     col_name: round(
-        median(col(col_name)).over(Window.partitionBy("opposingTeam")), 2
+        mean(col(col_name)).over(
+            Window.partitionBy("opposingTeam").orderBy(col("gameDate"))
+        ),
+        2,
     )
     for col_name in columns_to_iterate
 }
 matchup_avg_exprs = {
     col_name: round(
-        median(col(col_name)).over(
-            Window.partitionBy("playerTeam", "opposingTeam")
+        mean(col(col_name)).over(
+            Window.partitionBy("playerTeam", "opposingTeam").orderBy(col("gameDate"))
         ),
         2,
     )
@@ -1245,11 +1259,149 @@ gold_game_stats = gold_games_count.select(*column_exprs).withColumn(
     "previous_opposingTeam", lag(col("opposingTeam")).over(windowSpec)
 )
 
-display(gold_game_stats
+display(
+    gold_game_stats.select(
+        "season",
+        "gameDate",
+        "teamGamesPlayedRolling",
+        "playerTeam",
+        "opposingTeam",
+        "rolling_per_game_Total_shotsOnGoalAgainst",
+        "previous_rolling_per_game_Total_shotsOnGoalAgainst",
+        "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+        # "opponent_rolling_per_game_Total_shotsOnGoalAgainst",
+        "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+        "is_last_played_game_team",
+    ).filter(
+        # (col("is_last_played_game_team").isNull())
+        (col("playerTeam") == "CHI")
+        & (col("season") == 2024)
+        )
+    .orderBy(desc("gameDate"))
+)
+
+# COMMAND ----------
+
+display(gold_player_stats
+                .select(
+            "season", 
+            "gameDate", 
+            "shooterName",
+            "playerTeam",
+            "opposingTeam",
+            # "previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            # "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            # "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            # "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            # "is_last_played_game_team"
+        ).orderBy(desc("gameDate")))
+display(gold_game_stats        
         .select(
             "season", 
             "gameDate", 
             "playerTeam",
+            "opposingTeam",
+            "previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            "is_last_played_game_team"
+        ).orderBy(desc("gameDate")))
+
+# COMMAND ----------
+
+# DBTITLE 1,gold_merged_stats
+
+gold_player_stats = spark.table("dev.gold_player_stats_v2").alias("gold_player_stats")
+gold_game_stats = spark.table("dev.gold_game_stats_v2").alias("gold_game_stats")
+
+
+lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
+
+gold_merged_stats = (
+    gold_game_stats.join(
+        gold_player_stats,
+        how="left",
+        on=[
+            "gameId",
+            "team",
+            "season",
+            "home_or_away",
+            "gameDate",
+            "playerTeam",
+            "opposingTeam",
+        ],
+    )
+    .withColumn(
+        "is_last_played_game_team",
+        when(
+            (row_number().over(lastGameTeamWindowSpec) == 1)
+            & (col("season") == 2024),
+            lit(1),
+        ).otherwise(lit(0)),
+    )
+    .alias("gold_merged_stats")
+)
+
+schedule_shots = (
+    gold_merged_stats.drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
+    .withColumn("isHome", when(col("home_or_away") == "HOME", 1).otherwise(0))
+    .withColumn(
+        "dummyDay",
+        when(col("DAY") == "Mon", 1)
+        .when(col("DAY") == "Tue", 2)
+        .when(col("DAY") == "Wed", 3)
+        .when(col("DAY") == "Thu", 4)
+        .when(col("DAY") == "Fri", 5)
+        .when(col("DAY") == "Sat", 6)
+        .when(col("DAY") == "Sun", 7)
+        .otherwise(0),
+    )
+    .withColumn("gameId", col("gameId").cast("string"))
+    .withColumn("playerId", col("playerId").cast("string"))
+    .withColumn("gameId", regexp_replace("gameId", "\\.0$", ""))
+    .withColumn("playerId", regexp_replace("playerId", "\\.0$", ""))
+)
+
+reorder_list = [
+    "gameDate",
+    "gameId",
+    "season",
+    "position",
+    "home_or_away",
+    "isHome",
+    "isPlayoffGame",
+    "is_last_played_game_team",
+    "playerTeam",
+    "opposingTeam",
+    "playerId",
+    "shooterName",
+    "DAY",
+    "DATE",
+    "dummyDay",
+    "AWAY",
+    "HOME",
+    "previous_opposingTeam",
+    "playerGamesPlayedRolling",
+    "playerMatchupPlayedRolling",
+    "teamGamesPlayedRolling",
+    "teamMatchupPlayedRolling",
+    "player_Total_shotsOnGoal",
+]
+
+schedule_shots_reordered = schedule_shots.select(
+    *reorder_list,
+    *[col for col in schedule_shots.columns if col not in reorder_list],
+)
+
+display(schedule_shots_reordered
+        .select(
+            "season", 
+            "gameDate", 
+            "playerTeam",
+            "previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
             "opposingTeam",
             "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
             "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
@@ -1261,10 +1413,52 @@ display(gold_game_stats
                         )
         )
 
+# COMMAND ----------
+
+display(spark.table("dev.gold_merged_stats_v2")
+        .select(
+            "season", 
+            "gameDate", 
+            "playerTeam",
+            "previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            "opposingTeam",
+            "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            "is_last_played_game_team"
+        )
+        .filter(
+            (col("is_last_played_game_team") == 1)
+            & (col("season") == 2024)
+                        )
+        )
 
 # COMMAND ----------
 
-display(gold_merged_stats_v2
+display(spark.table("dev.gold_model_stats_v2")
+        .select(
+            "season", 
+            "gameDate", 
+            "playerTeam",
+            "previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            "opposingTeam",
+            "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
+            "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", 
+            "is_last_played_game_team"
+        )
+        .filter(
+            (col("is_last_played_game_team") == 1)
+            & (col("season") == 2024)
+                        )
+        )
+
+# COMMAND ----------
+
+# DBTITLE 1,test opponent ranks
+# Build unit test that checks for 32 records and max is 1 and min is 0 with the appropriate SOGA values
+
+display(pre_feat_eng # gold_model_data also
         .select(
             "season", 
             "gameDate", 
@@ -1275,8 +1469,8 @@ display(gold_merged_stats_v2
             "is_last_played_game_team"
         )
         .filter(
-            (col("is_last_played_game_team") == 1)
-            & (col("season") == 2024)
+            # (col("is_last_played_game_team") == 1)
+            (col("season") == 2024)
         )
         .groupBy(
             "season", 
@@ -1288,6 +1482,7 @@ display(gold_merged_stats_v2
             mean("opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst"), 
             mean("opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst"), 
         )
+        .orderBy("avg(opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst)")
         )
 
 # COMMAND ----------
