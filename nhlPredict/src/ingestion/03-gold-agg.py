@@ -544,23 +544,29 @@ def merge_player_game_stats():
 
     lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
 
-    gold_merged_stats = gold_game_stats.join(
-        gold_player_stats.drop("gameId"),
-        how="left",
-        on=[
-            "team",
-            "season",
-            "home_or_away",
-            "gameDate",
-            "playerTeam",
-            "opposingTeam",
-        ],
-    ).withColumn(
+    gold_merged_stats = (
+        gold_game_stats.join(
+            gold_player_stats.drop("gameId"),
+            how="left",
+            on=[
+                "team",
+                "season",
+                "home_or_away",
+                "gameDate",
+                "playerTeam",
+                "opposingTeam",
+            ],
+        )
+        .withColumn(
             "is_last_played_game_team",
-            when((row_number().over(lastGameTeamWindowSpec) == 1) & (season == 2024), lit(1)).otherwise(
-                lit(0)
-            ),
-        ).alias("gold_merged_stats")
+            when(
+                (row_number().over(lastGameTeamWindowSpec) == 1)
+                & (col("season") == 2024),
+                lit(1),
+            ).otherwise(lit(0)),
+        )
+        .alias("gold_merged_stats")
+    )
 
     schedule_shots = (
         gold_merged_stats.drop("EASTERN", "LOCAL", "homeTeamCode", "awayTeamCode")
