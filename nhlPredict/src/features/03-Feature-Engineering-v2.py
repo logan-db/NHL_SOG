@@ -418,6 +418,7 @@ import tempfile
 import yaml
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from xgboost import XGBRegressor
 from mlflow.models import infer_signature
 from mlflow.pyfunc import PythonModel
@@ -493,23 +494,42 @@ def create_feature_store_tables(
         [
             ("column_selector", col_selector),
             ("preprocessor", preprocessor),
-            (
-                "feature_selector",
-                SelectFromModel(
-                    featSelectionModel,
-                    max_features=feature_counts,
-                    threshold=-np.inf  # This ensures we select based on max_features, not threshold
-                ),
             # (
-            #     "pca",
-            #     PCA(n_components='mle', random_state=42)
+            #     "feature_selector",
+            #     SelectFromModel(
+            #         featSelectionModel,
+            #         max_features=feature_counts,
+            #         threshold=-np.inf,  # This ensures we select based on max_features, not threshold
+            #     ),
             # ),
-            ),
+            ("pca", PCA(n_components="mle", random_state=42)),
         ]
     )
 
     # Fit the pipeline on the full dataset, excluding id columns
     preprocess_pipeline.fit(X_train.drop(columns=id_columns), y_train)
+
+    # Get the PCA step from the pipeline
+    pca = preprocess_pipeline.named_steps["pca"]
+
+    # Calculate cumulative explained variance ratio
+    cumulative_variance_ratio = np.cumsum(pca.explained_variance_ratio_)
+
+    # Plot the elbow curve
+    plt.figure(figsize=(10, 6))
+    plt.plot(
+        range(1, len(cumulative_variance_ratio) + 1), cumulative_variance_ratio, "bo-"
+    )
+    plt.xlabel("Number of Components")
+    plt.ylabel("Cumulative Explained Variance Ratio")
+    plt.title("Elbow Curve for PCA")
+    plt.axhline(y=0.95, color="r", linestyle="--", label="95% Explained Variance")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Print the number of components used
+    print(f"Number of PCA components used: {pca.n_components_}")
 
     # Get the current working directory
     cwd = os.getcwd()
@@ -559,6 +579,13 @@ def create_feature_store_tables(
     tmp_dir = tempfile.mkdtemp()
 
     client = mlflow.tracking.MlflowClient()
+
+    # Download and log PCA Plot
+    plt.savefig(f"{artifact_uri_base_path}/pcaPlot.png")
+
+    client.log_artifact(
+        run_id=run_id, local_path=f"{artifact_uri_base_path}/pcaPlot.png", artifact_path=file_name
+    )
 
     print("DOWNLOAD START - CONDA")
     # Fix conda.yaml
@@ -693,6 +720,10 @@ create_feature_store_tables(
     X, y, col_selector, preprocessor, feature_count_param, featSelectionModel
 )
 print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features")
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
