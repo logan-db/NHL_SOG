@@ -494,14 +494,14 @@ def create_feature_store_tables(
         [
             ("column_selector", col_selector),
             ("preprocessor", preprocessor),
-            # (
-            #     "feature_selector",
-            #     SelectFromModel(
-            #         featSelectionModel,
-            #         max_features=feature_counts,
-            #         threshold=-np.inf,  # This ensures we select based on max_features, not threshold
-            #     ),
-            # ),
+            (
+                "feature_selector",
+                SelectFromModel(
+                    featSelectionModel,
+                    max_features=feature_counts,
+                    threshold=-np.inf,  # This ensures we select based on max_features, not threshold
+                ),
+            ),
             ("pca", PCA(n_components="mle", random_state=42)),
         ]
     )
@@ -526,7 +526,6 @@ def create_feature_store_tables(
     plt.axhline(y=0.95, color="r", linestyle="--", label="95% Explained Variance")
     plt.legend()
     plt.grid(True)
-    plt.show()
 
     # Print the number of components used
     print(f"Number of PCA components used: {pca.n_components_}")
@@ -556,7 +555,7 @@ def create_feature_store_tables(
     pyfunc_preprocess_model = PreprocessModel(preprocess_pipeline, id_columns)
 
     # Save the model using MLflow
-    with mlflow.start_run() as run:
+    with mlflow.start_run(experiment_id="2716391597912916") as run:
         mlflow.pyfunc.save_model(
             path=path,
             python_model=pyfunc_preprocess_model,
@@ -582,10 +581,12 @@ def create_feature_store_tables(
 
     # Download and log PCA Plot
     plt.savefig(f"{artifact_uri_base_path}/pcaPlot.png")
-
+    plt.show()
+    
     client.log_artifact(
         run_id=run_id, local_path=f"{artifact_uri_base_path}/pcaPlot.png", artifact_path=file_name
     )
+    plt.close()
 
     print("DOWNLOAD START - CONDA")
     # Fix conda.yaml
@@ -723,7 +724,7 @@ print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features"
 
 # COMMAND ----------
 
-
+# mlflow.end_run()
 
 # COMMAND ----------
 

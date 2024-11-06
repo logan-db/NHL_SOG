@@ -711,3 +711,21 @@ def make_model_ready():
     )
 
     return gold_model_data
+
+# COMMAND ----------
+
+from pyspark.sql.functions import expr
+
+@dlt.table(
+    name="test_streaming_table",
+    comment="This is a dummy streaming table for testing purposes",
+    table_properties={"quality": "gold"}
+)
+def create_dummy_streaming_table():
+    return (
+        spark.readStream.format("rate")
+        .option("rowsPerSecond", 1)
+        .load()
+        .selectExpr("value as id", "timestamp as event_time")
+        .withColumn("dummy_data", expr("concat('Dummy Data ', id)"))
+    )
