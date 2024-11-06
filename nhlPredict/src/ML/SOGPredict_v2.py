@@ -320,6 +320,18 @@ upcoming_predictions_full.write.format("delta").option("mergeSchema", "true").mo
 
 # COMMAND ----------
 
+display(hist_predictions)
+
+# COMMAND ----------
+
+hist_predictions.filter(col("player_Total_shotsOnGoal").isNull()).count()
+
+# COMMAND ----------
+
+hist_predictions = hist_predictions.filter(col("player_Total_shotsOnGoal").isNotNull())
+
+# COMMAND ----------
+
 # Create a RegressionEvaluator object
 evaluator = RegressionEvaluator(labelCol=target_col, predictionCol="predictedSOG")
 
@@ -347,41 +359,47 @@ print("R-squared (R2):", r2)
 # Mean Absolute Error (MAE): 0.47950652547740785
 # R-squared (R2): 0.8060065636721716
 
+# Nov 2024
+# Mean Squared Error (MSE): 0.27762309930571993
+# Root Mean Squared Error (RMSE): 0.27762309930571993
+# Mean Absolute Error (MAE): 0.13782869423650476
+# R-squared (R2): 0.9678125738510455
+
 # COMMAND ----------
 
-import pandas as pd
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-import numpy as np
+# import pandas as pd
+# from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+# import numpy as np
 
-predict_hist_games_df_pd = hist_predictions.toPandas()
+# predict_hist_games_df_pd = hist_predictions.toPandas()
 
-# Calculate R2
-r2 = r2_score(
-    predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
-)
+# # Calculate R2
+# r2 = r2_score(
+#     predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
+# )
 
-# Calculate MSE
-mse = mean_squared_error(
-    predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
-)
+# # Calculate MSE
+# mse = mean_squared_error(
+#     predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
+# )
 
-# Calculate RMSE (Root Mean Squared Error)
-rmse = np.sqrt(mse)
+# # Calculate RMSE (Root Mean Squared Error)
+# rmse = np.sqrt(mse)
 
-# Calculate MAE (Mean Absolute Error)
-mae = mean_absolute_error(
-    predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
-)
+# # Calculate MAE (Mean Absolute Error)
+# mae = mean_absolute_error(
+#     predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
+# )
 
-print(f"R2 Score: {r2:.4f}")
-print(f"MSE: {mse:.4f}")
-print(f"RMSE: {rmse:.4f}")
-print(f"MAE: {mae:.4f}")
+# print(f"R2 Score: {r2:.4f}")
+# print(f"MSE: {mse:.4f}")
+# print(f"RMSE: {rmse:.4f}")
+# print(f"MAE: {mae:.4f}")
 
-# R2 Score: 0.8060
-# MSE: 0.4680
-# RMSE: 0.6841
-# MAE: 0.4795
+# # R2 Score: 0.8060
+# # MSE: 0.4680
+# # RMSE: 0.6841
+# # MAE: 0.4795
 
 # COMMAND ----------
 

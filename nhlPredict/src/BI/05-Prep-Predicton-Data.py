@@ -142,7 +142,6 @@ game_clean_cols = [
 
 # COMMAND ----------
 
-# DBTITLE 0,dunffctbhgkdjnivtejvhbhtjllctujbekdg
 lastGameWindowSpec = Window.partitionBy("playerTeam", "playerId").orderBy(desc("gameDate"))
 lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
 
