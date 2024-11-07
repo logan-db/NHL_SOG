@@ -15,11 +15,12 @@ latest_games = (
   spark.table("dev.clean_prediction_summary")
     .filter(
     (col("gameId").isNull())
-    & (col("is_last_played_game_team") == 1)
+    & (col("is_last_played_game") == True)
     & (col("season") == 2024)
     # & (col("shooterName") == "Alex Ovechkin")
           )
     .orderBy(desc("predictedSOG"), "gameDate")
+    .limit(100)
 )
 
 # COMMAND ----------
@@ -102,16 +103,25 @@ df_out = (
   )
 )
 
-display(df_out)
+# COMMAND ----------
+
+# DBTITLE 1,Join Explanations to BI table
+BI_Explanations = (
+  spark.table("dev.clean_prediction_v2")
+  .orderBy(desc("predictedSOG"), "gameDate")
+  .join(df_out.select("gameId", "playerId", "gameDate", "Explanation"), how='left', on=["gameId", "playerId", "gameDate"])
+
+)
+display(BI_Explanations)
 
 # COMMAND ----------
 
 # DBTITLE 1,Save Dataframe to UC
-df_out.write.format("delta").mode("overwrite").option(
+BI_Explanations.write.format("delta").mode("overwrite").option(
     "mergeSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.llm_summary")
+).saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
 
-print("Data written to table: lr_nhl_demo.dev.llm_summary")
+print("Data written to table: lr_nhl_demo.dev.clean_prediction_v2")
 
 # COMMAND ----------
 
