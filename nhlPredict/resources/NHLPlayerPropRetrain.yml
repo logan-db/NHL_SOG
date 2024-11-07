@@ -103,6 +103,13 @@ resources:
             notebook_path: ../src/BI/05-Prep-Predicton-Data.py
             source: WORKSPACE
 
+        - task_key: generate_explanations
+          depends_on:
+            - task_key: BI_Prep
+          notebook_task:
+            notebook_path: ../src/BI/LLMGenerate.py
+            source: WORKSPACE
+
         - task_key: genie_prep
           depends_on:
             - task_key: predictSOG
