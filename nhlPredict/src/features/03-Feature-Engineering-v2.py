@@ -502,7 +502,7 @@ def create_feature_store_tables(
                     threshold=-np.inf,  # This ensures we select based on max_features, not threshold
                 ),
             ),
-            ("pca", PCA(n_components="mle", random_state=42)),
+            ("pca", PCA(n_components=0.95, random_state=42)),
         ]
     )
 
