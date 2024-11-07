@@ -1,15 +1,129 @@
 # Databricks notebook source
-# Imports
-from pyspark.sql.functions import *
+# DBTITLE 1,Imports
+from pyspark.sql.functions import col, expr, desc
 
 # COMMAND ----------
 
+# DBTITLE 1,Catalog Setup
 # MAGIC %sql
 # MAGIC USE CATALOG lr_nhl_demo
 
 # COMMAND ----------
 
-latest_games = spark.table("dev.clean_prediction_summary")
+# DBTITLE 1,Define Latest Games Dataset
+latest_games = (
+  spark.table("dev.clean_prediction_summary")
+    .filter(
+    (col("gameId").isNull())
+    & (col("is_last_played_game_team") == 1)
+    & (col("season") == 2024)
+    # & (col("shooterName") == "Alex Ovechkin")
+          )
+    .orderBy(desc("predictedSOG"), "gameDate")
+)
+
+# COMMAND ----------
+
+# DBTITLE 1,Parse metadata
+# Initialize an empty dictionary to store column names and values
+column_value_dict = {}
+
+# Get the first row of the DataFrame
+first_row = latest_games.limit(1).collect()[0]
+
+# Iterate through each column in the DataFrame
+for column in latest_games.columns:
+    if '%' in column:
+        # If the column name contains '%', wrap it in backticks
+        column_name = f"`{column}`"
+    else:
+        column_name = column
+    
+    # Get the value for this column from the first row
+    value = first_row[column]
+    
+    # Add the column name and value to the dictionary
+    column_value_dict[column_name] = value
+
+# Print the resulting dictionary
+cleaned_col_vals = str(column_value_dict).replace("{", "").replace("}", "").replace("'", "")
+print(cleaned_col_vals)
+
+column_comments = {
+    col.name: col.metadata.get("comment", None)
+    for col in latest_games.schema.fields
+    if "comment" in col.metadata
+}
+
+modified_comments = str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+
+input_column_names = []
+
+for column in latest_games.columns:
+    if '%' in column:
+        input_column_names.append(f"`{column}`")
+    else:
+        input_column_names.append(column)
+
+input_column_names_clean = str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+print(input_column_names_clean)
+
+# COMMAND ----------
+
+# DBTITLE 1,Setup Prompt and Call AI_Query()
+endpoint_name = "databricks-meta-llama-3-1-70b-instruct"
+
+prompt = f"""
+You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the players next games shots on goal (predictedSOG). The input is a row of NHL statistics of a players previous games along with the players predicted shots on goal for the next game (predictedSOG). Use the input row and provide analysis on why the model predicted this predictedSOG value. 
+
+When analyzing the stats, use the following schema comments to understand what each column/statistic means in order to better explain: 
+
+{modified_comments}
+      
+State the predictedSOG value along with other statistics during your Analysis.
+
+Input Row Data:
+
+"""
+
+# Use ai_query for batch inference
+ai_query_expr = f"""
+ai_query('{endpoint_name}', 
+    request => '{prompt}' || STRING(struct(*)),
+    returnType => 'STRING'
+    ) AS Explanation
+"""
+
+df_out = (
+  latest_games
+  .selectExpr(
+    "*",
+    ai_query_expr
+  )
+)
+
+display(df_out)
+
+# COMMAND ----------
+
+# DBTITLE 1,Save Dataframe to UC
+df_out.write.format("delta").mode("overwrite").option(
+    "mergeSchema", "true"
+).saveAsTable("lr_nhl_demo.dev.llm_summary")
+
+print("Data written to table: lr_nhl_demo.dev.llm_summary")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Testing Logic --> SKIPPED
+
+# COMMAND ----------
+
+testing = True
+
+if testing:
+  dbutils.notebook.exit("Exiting the notebook as requested.")
 
 # COMMAND ----------
 
