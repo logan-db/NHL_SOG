@@ -264,14 +264,18 @@ display(
 
 # COMMAND ----------
 
+# DBTITLE 1,clean_prediction_summary
 # MAGIC %sql
-# MAGIC CREATE TABLE IF NOT EXISTS lr_nhl_demo.dev.clean_prediction_summary (
+# MAGIC CREATE OR REPLACE TABLE lr_nhl_demo.dev.clean_prediction_summary (
+# MAGIC     gameId STRING COMMENT 'The ID of the game',
+# MAGIC     playerId STRING COMMENT 'The ID of the player',
 # MAGIC     gameDate DATE COMMENT 'The date of the game',
 # MAGIC     shooterName STRING COMMENT 'Name of the player',
 # MAGIC     playerTeam STRING COMMENT 'Team of the player',
 # MAGIC     opposingTeam STRING COMMENT 'Opposing team',
 # MAGIC     season INT COMMENT 'Season year',
-# MAGIC     is_last_played_game_team INT COMMENT 'Is the last played game for the player team',
+# MAGIC     is_last_played_game BOOLEAN COMMENT 'Is the last played game for the player',
+# MAGIC     is_last_played_game_team INT COMMENT 'Is the last played game for the playerTeam',
 # MAGIC     absVarianceAvgLast7SOG DOUBLE COMMENT 'Absolute variance of average shots on goal in the last 7 games of the player against the players predicted Shots on Goal',
 # MAGIC     predictedSOG DOUBLE COMMENT 'Predicted shots on goal for the player',
 # MAGIC     `playerLast7PPSOG%` DOUBLE COMMENT 'Player last 7 games power play shots on goal to player total shots on goal percentage',
@@ -285,17 +289,23 @@ display(
 # MAGIC     `oppGoalsAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total goals against. Higher is better',
 # MAGIC     `oppSOGAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total shots on goal against. Higher is better',
 # MAGIC     `oppPenaltiesRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total penalties for. Higher is better',
-# MAGIC     `oppPKSOGRank%` DOUBLE COMMENT 'Opponent Team percentage rank of penalty kill shots on goal against per penalty. Higher is better'
+# MAGIC     `oppPKSOGRank%` DOUBLE COMMENT 'Opponent Team percentage rank of penalty kill shots on goal against per penalty. Higher is better',
+# MAGIC     matchup_previous_player_Total_shotsOnGoal DOUBLE COMMENT 'Total shots on goal by the player the last game they played against this opposingTeam',
+# MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games DOUBLE COMMENT 'Average shots on goal by the player over the last 3 games they played against this opposingTeam',
+# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games DOUBLE COMMENT 'Average shots on goal by the player over the last 7 games they played against this opposingTeam'
 # MAGIC )
 # MAGIC COMMENT 'Summary of clean predictions for NHL games';
 # MAGIC
 # MAGIC INSERT INTO lr_nhl_demo.dev.clean_prediction_summary
 # MAGIC SELECT 
+# MAGIC     gameId,
+# MAGIC     playerId,
 # MAGIC     gameDate,
 # MAGIC     shooterName,
 # MAGIC     playerTeam,
 # MAGIC     opposingTeam,
 # MAGIC     season,
+# MAGIC     is_last_played_game,
 # MAGIC     is_last_played_game_team,
 # MAGIC     absVarianceAvgLast7SOG,
 # MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
@@ -310,9 +320,13 @@ display(
 # MAGIC     opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
 # MAGIC     opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
 # MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
+# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`,
+# MAGIC     matchup_previous_player_Total_shotsOnGoal,
+# MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games,
+# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games
 # MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
-# MAGIC WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
+# MAGIC -- WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
+# MAGIC WHERE gameDate IS NOT NULL
 # MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
 
 # COMMAND ----------
@@ -340,7 +354,7 @@ display(
 # MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
 # MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`
 # MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
-# MAGIC WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
+# MAGIC WHERE gameId IS NULL AND is_last_played_game = True AND season = 2024
 # MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
 
 # COMMAND ----------

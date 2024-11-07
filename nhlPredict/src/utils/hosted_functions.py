@@ -1,4 +1,9 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC ## NHL City Abbreviation Function
+
+# COMMAND ----------
+
 from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
 # COMMAND ----------
@@ -15,9 +20,316 @@ from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Player Prediction Analysis Function
+
+# COMMAND ----------
+
+# DBTITLE 1,Prod
+from pyspark.sql.functions import col, expr
+
+input_dataframe = (
+  spark.table("lr_nhl_demo.dev.clean_prediction_summary")
+    .filter(
+    (col("gameId").isNull())
+    & (col("is_last_played_game_team") == 1)
+    & (col("season") == 2024)
+    # & (col("shooterName") == "Alex Ovechkin")
+          )
+)
+
+# Initialize an empty dictionary to store column names and values
+column_value_dict = {}
+
+# Get the first row of the DataFrame
+first_row = input_dataframe.limit(1).collect()[0]
+
+# Iterate through each column in the DataFrame
+for column in input_dataframe.columns:
+    if '%' in column:
+        # If the column name contains '%', wrap it in backticks
+        column_name = f"`{column}`"
+    else:
+        column_name = column
+    
+    # Get the value for this column from the first row
+    value = first_row[column]
+    
+    # Add the column name and value to the dictionary
+    column_value_dict[column_name] = value
+
+# Print the resulting dictionary
+cleaned_col_vals = str(column_value_dict).replace("{", "").replace("}", "").replace("'", "")
+print(cleaned_col_vals)
+
+column_comments = {
+    col.name: col.metadata.get("comment", None)
+    for col in input_dataframe.schema.fields
+    if "comment" in col.metadata
+}
+
+modified_comments = str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+
+input_column_names = []
+
+for column in input_dataframe.columns:
+    if '%' in column:
+        input_column_names.append(f"`{column}`")
+    else:
+        input_column_names.append(column)
+
+input_column_names_clean = str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+
+endpoint_name = "databricks-meta-llama-3-1-70b-instruct"
+
+prompt = f"""
+You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the players next games shots on goal (predictedSOG). The input is a row of NHL statistics of a players previous games along with the players predicted shots on goal for the next game (predictedSOG). Use the input row and provide analysis on why the model predicted this predictedSOG value. 
+
+When analyzing the stats, use the following schema comments to understand what each column/statistic means in order to better explain: 
+
+{modified_comments}
+      
+
+Print out the following Input Row Data that you are using in your analysis.
+
+Input Row Data:
+{cleaned_col_vals}
+
+"""
+# State the predictedSOG value along with other statistics during your Analysis.
+
+# Use ai_query for batch inference
+ai_query_expr = f"""
+ai_query('{endpoint_name}', 
+CONCAT('{prompt}')) as Explanation
+"""
+
+df_out = (
+  input_dataframe
+  .selectExpr(
+    "*",
+    ai_query_expr
+  )
+)
+
+# Write to the output table
+display(df_out)
+
+# COMMAND ----------
+
+# DBTITLE 1,Dev
+from pyspark.sql.functions import col, expr, desc
+
+input_dataframe = (
+  spark.table("lr_nhl_demo.dev.clean_prediction_summary")
+    .filter(
+    (col("gameId").isNull())
+    & (col("is_last_played_game_team") == 1)
+    & (col("season") == 2024)
+    # & (col("shooterName") == "Alex Ovechkin")
+          )
+    .orderBy(desc("predictedSOG"), "gameDate")
+    .limit(3)
+)
+
+# Initialize an empty dictionary to store column names and values
+column_value_dict = {}
+
+# Get the first row of the DataFrame
+first_row = input_dataframe.limit(1).collect()[0]
+
+# Iterate through each column in the DataFrame
+for column in input_dataframe.columns:
+    if '%' in column:
+        # If the column name contains '%', wrap it in backticks
+        column_name = f"`{column}`"
+    else:
+        column_name = column
+    
+    # Get the value for this column from the first row
+    value = first_row[column]
+    
+    # Add the column name and value to the dictionary
+    column_value_dict[column_name] = value
+
+# Print the resulting dictionary
+cleaned_col_vals = str(column_value_dict).replace("{", "").replace("}", "").replace("'", "")
+print(cleaned_col_vals)
+
+column_comments = {
+    col.name: col.metadata.get("comment", None)
+    for col in input_dataframe.schema.fields
+    if "comment" in col.metadata
+}
+
+modified_comments = str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+
+input_column_names = []
+
+for column in input_dataframe.columns:
+    if '%' in column:
+        input_column_names.append(f"`{column}`")
+    else:
+        input_column_names.append(column)
+
+input_column_names_clean = str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+print(input_column_names_clean)
+
+endpoint_name = "databricks-meta-llama-3-1-70b-instruct"
+
+prompt = f"""
+You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the players next games shots on goal (predictedSOG). The input is a row of NHL statistics of a players previous games along with the players predicted shots on goal for the next game (predictedSOG). Use the input row and provide analysis on why the model predicted this predictedSOG value. 
+
+When analyzing the stats, use the following schema comments to understand what each column/statistic means in order to better explain: 
+
+{modified_comments}
+      
+State the predictedSOG value along with other statistics during your Analysis.
+
+Input Row Data:
+
+"""
+
+# Use ai_query for batch inference
+ai_query_expr = f"""
+ai_query('{endpoint_name}', 
+    request => '{prompt}' || STRING(struct(*)),
+    returnType => 'STRING'
+    ) AS Explanation
+"""
+
+df_out = (
+  input_dataframe
+  .selectExpr(
+    "*",
+    ai_query_expr
+  )
+)
+
+# Write to the output table
+display(df_out)
+
+# COMMAND ----------
+
+column_comments = {col.name: col.metadata.get('comment', None) for col in spark.table("lr_nhl_demo.dev.clean_prediction_summary").schema.fields if 'comment' in col.metadata}
+
+modified_comments = str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+print(modified_comments)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC DESCRIBE TABLE lr_nhl_demo.dev.clean_prediction_summary;
+# MAGIC
+
+# COMMAND ----------
+
+from pyspark.sql.functions import col, expr
+
+input_dataframe = (
+  spark.table("lr_nhl_demo.dev.clean_prediction_summary")
+    .filter(
+    (col("gameId").isNull())
+    & (col("is_last_played_game_team") == 1)
+    & (col("season") == 2024)
+    & (col("shooterName") == "Alex Ovechkin")
+          )
+)
+
+input_column_names = []
+
+for column in input_dataframe.columns:
+    if '%' in column:
+        input_column_names.append(f"`{column}`")
+    else:
+        input_column_names.append(column)
+
+input_column_names_clean = str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+input_column_names_clean
+
+# COMMAND ----------
+
+column_comments = {
+    col.name: col.metadata.get("comment", None)
+    for col in input_dataframe.schema.fields
+    if "comment" in col.metadata
+}
+
+modified_comments = str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+
+input_column_names = []
+
+for column in input_dataframe.columns:
+    if '%' in column:
+        input_column_names.append(f"`{column}`")
+    else:
+        input_column_names.append(column)
+
+input_column_names_clean = str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+
+endpoint_name = "databricks-meta-llama-3-1-70b-instruct"
+
+prompt = f"""
+You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the players next games shots on goal (predictedSOG). The input is a row of NHL statistics of a players previous games along with the players predicted shots on goal for the next game (predictedSOG). Use the input row and provide analysis on why the model predicted this predictedSOG value. 
+
+When analyzing the stats, use the following schema comments to understand what each column/statistic means in order to better explain: 
+
+{modified_comments}
+      
+
+Print out the following Input Row Data that you are using in your analysis.
+
+Input Row Data:
+{cleaned_col_vals}
+
+"""
+# State the predictedSOG value along with other statistics during your Analysis.
+
+# Use ai_query for batch inference
+ai_query_expr = f"""
+ai_query('{endpoint_name}', 
+CONCAT('{prompt}')) as Explanation
+"""
+
+df_out = (
+  input_dataframe
+  .selectExpr(
+    "*",
+    ai_query_expr
+  )
+)
+
+# Write to the output table
+display(df_out)
+# .write.mode("overwrite").option("mergeSchema", "true").saveAsTable(output_table_name)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT
+# MAGIC   *,
+# MAGIC   ai_query(
+# MAGIC     'databricks-meta-llama-3-1-70b-instruct',
+# MAGIC     CONCAT(
+# MAGIC       'You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the player\'s next game\'s shots on goal (predictedSOG). The input is a row of NHL statistics of a player\'s previous games along with the player\'s predicted shots on goal for the next game (predictedSOG). Please use the input row and provide analysis on why the model predicted this predictedSOG value. 
+# MAGIC
+# MAGIC       When analyzing the stats, use the following to understand what each column/statistic means: ', column_comments'
+# MAGIC       
+# MAGIC       Input Row: ', shooterName, predictedSOG, playerLastSOG, playerAvgSOGLast7, matchup_average_player_Total_shotsOnGoal_last_7_games)
+# MAGIC   ) AS Explanation
+# MAGIC FROM lr_nhl_demo.dev.clean_prediction_summary
+# MAGIC WHERE gameId IS NULL AND season = 2024 AND is_last_played_game_team = 1 AND shooterName = "Alex Ovechkin";
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC SELECT *
 # MAGIC FROM lr_nhl_demo.dev.clean_prediction_summary
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Latest Stats Functions
 
 # COMMAND ----------
 
