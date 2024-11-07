@@ -106,22 +106,21 @@ df_out = (
 # COMMAND ----------
 
 # DBTITLE 1,Join Explanations to BI table
-BI_Explanations = (
-  spark.table("dev.clean_prediction_v2")
-  .orderBy(desc("predictedSOG"), "gameDate")
-  .join(df_out.select("gameId", "playerId", "gameDate", "Explanation"), how='left', on=["gameId", "playerId", "gameDate"])
-
-)
-display(BI_Explanations)
+# BI_Explanations = (
+#   spark.table("dev.clean_prediction_v2")
+#   .join(df_out.select("playerId", "gameDate", "Explanation"), how='left', on=["playerId", "gameDate"])
+#   .orderBy(desc("predictedSOG"), "gameDate")
+# )
+# display(BI_Explanations)
 
 # COMMAND ----------
 
 # DBTITLE 1,Save Dataframe to UC
-BI_Explanations.write.format("delta").mode("overwrite").option(
+df_out.write.format("delta").mode("overwrite").option(
     "mergeSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
+).saveAsTable("lr_nhl_demo.dev.llm_summary")
 
-print("Data written to table: lr_nhl_demo.dev.clean_prediction_v2")
+print("Data written to table: lr_nhl_demo.dev.llm_summary")
 
 # COMMAND ----------
 
@@ -134,6 +133,35 @@ testing = True
 
 if testing:
   dbutils.notebook.exit("Exiting the notebook as requested.")
+
+# COMMAND ----------
+
+display(df_out)
+
+# COMMAND ----------
+
+display(spark.table("dev.clean_prediction_v2")
+        .filter(col("gameId").isNull())
+        .select("gameId", "playerId", "gameDate", "shooterName", "predictedSOG")
+        .orderBy("gameDate", desc("predictedSOG"))
+        )
+
+# COMMAND ----------
+
+test_out = df_out.orderBy("gameDate", desc("predictedSOG")).limit(1)
+display(test_out)
+
+test_base = (spark.table("dev.clean_prediction_v2")
+        .filter(col("gameId").isNull())
+        .select("gameId", "playerId", "gameDate", "shooterName", "predictedSOG")
+        .orderBy("gameDate", desc("predictedSOG"))
+        .limit(1)
+)
+display(test_base)
+
+display(
+  test_base.join(test_out.select("gameId", "playerId", "gameDate", "Explanation"), how='left', on=["playerId", "gameDate"])
+)
 
 # COMMAND ----------
 
