@@ -147,9 +147,9 @@ resources:
         - name: train_model_param
           default: true
         - name: n_estimators_param
-          default: 100 # Prod use 100
+          default: 200 # Prod use 100
         - name: trial_eval_param
-          default: 200 # Prod use 200
+          default: 300 # Prod use 200
         - name: trial_experiment_param
           default: 4320825364109465
         - name: training_experiment_param
