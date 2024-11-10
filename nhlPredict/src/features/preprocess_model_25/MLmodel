@@ -9,8 +9,8 @@ flavors:
     python_model: python_model.pkl
     python_version: 3.11.0
 mlflow_version: 2.11.3
-model_size_bytes: 3009745
-model_uuid: 0638c3977d6f4d18b6873ced3c7cd9db
+model_size_bytes: 9545289
+model_uuid: cc8ffe577e0e4592bfd205af3732bb86
 saved_input_example_info:
   artifact_path: input_example.json
   pandas_orient: split
@@ -3437,14 +3437,20 @@ signature:
     true}, {"type": "double", "name": "pca6", "required": true}, {"type": "double",
     "name": "pca7", "required": true}, {"type": "double", "name": "pca8", "required":
     true}, {"type": "double", "name": "pca9", "required": true}, {"type": "double",
-    "name": "pca10", "required": true}, {"type": "double", "name": "pca11", "required":
-    true}, {"type": "double", "name": "pca12", "required": true}, {"type": "double",
-    "name": "pca13", "required": true}, {"type": "double", "name": "pca14", "required":
-    true}, {"type": "double", "name": "pca15", "required": true}, {"type": "double",
-    "name": "pca16", "required": true}, {"type": "double", "name": "pca17", "required":
-    true}, {"type": "double", "name": "pca18", "required": true}, {"type": "double",
-    "name": "pca19", "required": true}, {"type": "double", "name": "pca20", "required":
-    true}, {"type": "double", "name": "pca21", "required": true}, {"type": "double",
-    "name": "pca22", "required": true}]'
+    "name": "pca10", "required": true}, {"type": "double", "name": "numerical__impute_mean__isHome",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_player_Total_shotsOnGoal",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__average_player_Total_shotsOnGoal_last_3_games",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__average_player_Total_shotsOnGoal_last_7_games",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_Total_goalsFor",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_Total_shotsOnGoalFor",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_PP_SOGForPerPenalty",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_goalsAgainst",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_penaltiesFor",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__matchup_previous_player_Total_shotsOnGoal",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__matchup_average_player_Total_shotsOnGoal_last_3_games",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__matchup_average_player_Total_shotsOnGoal_last_7_games",
+    "required": true}]'
   params: null
-utc_time_created: '2024-11-06 20:34:26.848613'
+utc_time_created: '2024-11-10 23:14:25.325612'

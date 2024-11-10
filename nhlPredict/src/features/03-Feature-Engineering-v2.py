@@ -26,6 +26,7 @@ dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
 dbutils.widgets.text("feature_count", "25", "Number of features")
 dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
 dbutils.widgets.text("time_col", "gameDate", "time_col")
+dbutils.widgets.text("pca_param", "0.95", "pca_param")
 
 # COMMAND ----------
 
@@ -42,9 +43,11 @@ print(f"target_col: {target_col}")
 n_estimators_param = int(dbutils.widgets.get("n_estimators_param"))
 catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
+pca_param = float(dbutils.widgets.get("pca_param"))
 
 # Print the parameter values
 print(f"n_estimators_param: {n_estimators_param}")
+print(f"n_estimators_param: {pca_param}")
 print(f"catalog_param: {catalog_param}")
 print(f"feature_count_param: {feature_count_param}")
 
@@ -427,33 +430,104 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import SelectFromModel
 from sklearn.decomposition import PCA
 from sklearn import set_config
+from sklearn.base import BaseEstimator, TransformerMixin 
 
+class MustHaveDropper(BaseEstimator, TransformerMixin):
+    def __init__(self, must_have_features, must_have_features_base):
+        self.must_have_features = must_have_features
+        self.must_have_features_base = must_have_features_base
+        self.selected_features_ = None
+        self.must_have_data = None
+
+    def fit(self, X, y=None):
+        print("Running Fit function for MustHaveDropper")
+        self.selected_features_ = [col for col in self.must_have_features if col in X.columns]
+
+        if not self.selected_features_:
+            print("No Valid PreProcessed Must-Have Features Found, Grabbing base Must-Have Features")
+            self.selected_features_ = [col for col in self.must_have_features_base if col in X.columns]
+
+        return self
+
+    def transform(self, X):
+        if self.selected_features_ is None:
+            raise ValueError("MustHaveDropper has not been fitted yet.")
+        
+        available_features = [feat for feat in self.selected_features_ if feat in X.columns]
+        missing_features = set(self.selected_features_) - set(available_features)
+        
+        if missing_features:
+            print(f"Warning: The following must-have features are missing from the DataFrame: {missing_features}")
+            print("Available columns:", X.columns.tolist())
+        
+        if not available_features:
+            print("No valid must-have features remaining. Returning the original DataFrame.")
+            return X
+        
+        self.must_have_data = X[available_features]
+        print(f"Dropping must-have features from original DataFrame: {len(available_features)}")
+        return X.drop(columns=available_features)
+
+    def get_must_have_data(self):
+        return self.must_have_data
+
+class MustHaveRejoiner(BaseEstimator, TransformerMixin):
+    def __init__(self, must_have_dropper):
+        self.must_have_dropper = must_have_dropper
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        must_have_data = self.must_have_dropper.get_must_have_data()
+        if must_have_data is not None and not must_have_data.empty:
+            print("Concatenating must-have features with original DataFrame")
+            # Ensure index alignment before concatenation
+            must_have_data.index = X.index
+            rejoined_df = pd.concat([X, must_have_data], axis=1)
+
+            print(f"Successful Rejoin of Features: {rejoined_df.columns.tolist()}")
+
+            return rejoined_df
+        else:
+            print("Warning: No must-have features were stored during transform. Returning the original DataFrame.")
+            return X
 
 class PreprocessModel(PythonModel):
     def __init__(self, pipeline, id_columns):
         self.pipeline = pipeline
         self.id_columns = id_columns
+        self.feature_names = None
 
     def fit(self, X, y):
         self.pipeline.fit(X.drop(columns=self.id_columns), y)
+        # Store the feature names after fitting
+        self.feature_names = self.pipeline.get_feature_names_out()
 
     def predict(self, context, model_input):
+        print("Input columns:", model_input.columns)
         id_data = model_input[self.id_columns]
-        transformed_data = self.pipeline.transform(
-            model_input.drop(columns=self.id_columns)
-        )
+        
+        try:
+            transformed_data = self.pipeline.transform(
+                model_input.drop(columns=self.id_columns)
+            )
+            
+            # Ensure consistent feature names
+            if self.feature_names is not None:
+                if isinstance(transformed_data, pd.DataFrame):
+                    transformed_data.columns = self.feature_names
+                else:
+                    transformed_data = pd.DataFrame(transformed_data, columns=self.feature_names)
+            
+            print("Transformed columns:", transformed_data.columns)
+        except Exception as e:
+            print("Error during transformation:", str(e))
+            raise
 
-        # Check if transformed_data is a DataFrame
-        if not isinstance(transformed_data, pd.DataFrame):
-            # Convert transformed_data to DataFrame if it's not already
-            raise ValueError("transformed_data must be a DataFrame.", transformed_data)
-
-        # Ensure index alignment before concatenation
         transformed_data.index = id_data.index
-
-        # Concatenate id_data with transformed_data
         final_data = pd.concat([id_data, transformed_data], axis=1)
-
+        print("Final columns:", final_data.columns)
         return final_data
 
 
@@ -486,25 +560,46 @@ def create_feature_store_tables(
 
     set_config(transform_output="pandas")
 
-    # mlflow.end_run()
+    
     id_columns = ["gameId", "playerId"]
+    must_have_features = [
+        "isHome",
+        "previous_player_Total_shotsOnGoal",
+        "average_player_Total_shotsOnGoal_last_3_games",
+        "average_player_Total_shotsOnGoal_last_7_games",
+        "previous_perc_rank_rolling_game_Total_goalsFor",
+        "previous_perc_rank_rolling_game_Total_shotsOnGoalFor",
+        "previous_perc_rank_rolling_game_PP_SOGForPerPenalty",
+        "opponent_previous_perc_rank_rolling_game_Total_goalsAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_penaltiesFor",
+        "opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty",
+        "matchup_previous_player_Total_shotsOnGoal",
+        "matchup_average_player_Total_shotsOnGoal_last_3_games",
+        "matchup_average_player_Total_shotsOnGoal_last_7_games"
+        ]
+    
+    must_have_features_renamed = []
+
+    for column in must_have_features:
+        new_col = "numerical__impute_mean__" + column
+        must_have_features_renamed.append(new_col)
+
+    dropper = MustHaveDropper(must_have_features_renamed, must_have_features)
 
     # Create a single preprocessing pipeline with a configurable feature selector
-    preprocess_pipeline = Pipeline(
-        [
-            ("column_selector", col_selector),
-            ("preprocessor", preprocessor),
-            (
-                "feature_selector",
-                SelectFromModel(
-                    featSelectionModel,
-                    max_features=feature_counts,
-                    threshold=-np.inf,  # This ensures we select based on max_features, not threshold
-                ),
-            ),
-            ("pca", PCA(n_components=0.95, random_state=42)),
-        ]
-    )
+    preprocess_pipeline = Pipeline([
+        ("column_selector", col_selector),
+        ("preprocessor", preprocessor),
+        ('must_have_dropper', dropper),
+        ("feature_selector", SelectFromModel(
+            featSelectionModel,
+            max_features=feature_counts,
+            threshold=-np.inf,
+        )),
+        ("pca", PCA(n_components=0.95, random_state=42)),
+        ('must_have_rejoiner', MustHaveRejoiner(dropper))
+    ])
 
     # Fit the pipeline on the full dataset, excluding id columns
     preprocess_pipeline.fit(X_train.drop(columns=id_columns), y_train)
@@ -662,7 +757,7 @@ def create_feature_store_tables(
     mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
 
     print(f"Creating Feature Store table for {feature_counts} features...")
-
+    
     # Transform datasets using the configured model
     X_train_processed = pyfunc_preprocess_model.predict(None, X_train)
 
@@ -724,7 +819,7 @@ print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features"
 
 # COMMAND ----------
 
-# mlflow.end_run()
+mlflow.end_run()
 
 # COMMAND ----------
 
