@@ -567,16 +567,31 @@ def create_feature_store_tables(
         "previous_player_Total_shotsOnGoal",
         "average_player_Total_shotsOnGoal_last_3_games",
         "average_player_Total_shotsOnGoal_last_7_games",
+        "average_player_SOG%_PP_last_7_games",
+        "average_player_SOG%_EV_last_7_games",
+
+        "previous_perc_rank_rolling_player_Total_shotAttempts",
+        "previous_perc_rank_rolling_player_Total_shotsOnGoal",
+        "previous_perc_rank_rolling_player_Total_goals",
+        "previous_perc_rank_rolling_player_PP_SOGAttemptsForPerPenalty",
+        "previous_perc_rank_rolling_player_PP_SOGPerPenalty",
+        "previous_perc_rank_rolling_player_PP_goalsPerPenalty",
+
         "previous_perc_rank_rolling_game_Total_goalsFor",
         "previous_perc_rank_rolling_game_Total_shotsOnGoalFor",
+        "previous_perc_rank_rolling_game_Total_shotAttemptsFor",
+        "previous_perc_rank_rolling_game_Total_penaltiesAgainst",
         "previous_perc_rank_rolling_game_PP_SOGForPerPenalty",
+
         "opponent_previous_perc_rank_rolling_game_Total_goalsAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_shotAttemptsAgainst",
         "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
         "opponent_previous_perc_rank_rolling_game_Total_penaltiesFor",
         "opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty",
-        "matchup_previous_player_Total_shotsOnGoal",
-        "matchup_average_player_Total_shotsOnGoal_last_3_games",
-        "matchup_average_player_Total_shotsOnGoal_last_7_games"
+
+        # "matchup_previous_player_Total_shotsOnGoal",
+        # "matchup_average_player_Total_shotsOnGoal_last_3_games",
+        # "matchup_average_player_Total_shotsOnGoal_last_7_games"
         ]
     
     must_have_features_renamed = []

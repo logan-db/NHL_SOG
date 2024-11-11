@@ -9,8 +9,8 @@ flavors:
     python_model: python_model.pkl
     python_version: 3.11.0
 mlflow_version: 2.11.3
-model_size_bytes: 9545289
-model_uuid: cc8ffe577e0e4592bfd205af3732bb86
+model_size_bytes: 13273023
+model_uuid: 920172719f1c478ab7ea105cd1b7a993
 saved_input_example_info:
   artifact_path: input_example.json
   pandas_orient: split
@@ -3437,20 +3437,30 @@ signature:
     true}, {"type": "double", "name": "pca6", "required": true}, {"type": "double",
     "name": "pca7", "required": true}, {"type": "double", "name": "pca8", "required":
     true}, {"type": "double", "name": "pca9", "required": true}, {"type": "double",
-    "name": "pca10", "required": true}, {"type": "double", "name": "numerical__impute_mean__isHome",
+    "name": "pca10", "required": true}, {"type": "double", "name": "pca11", "required":
+    true}, {"type": "double", "name": "pca12", "required": true}, {"type": "double",
+    "name": "pca13", "required": true}, {"type": "double", "name": "numerical__impute_mean__isHome",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_player_Total_shotsOnGoal",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__average_player_Total_shotsOnGoal_last_3_games",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__average_player_Total_shotsOnGoal_last_7_games",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__average_player_SOG%_PP_last_7_games",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__average_player_SOG%_EV_last_7_games",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_player_Total_shotAttempts",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_player_Total_shotsOnGoal",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_player_Total_goals",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_player_PP_SOGAttemptsForPerPenalty",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_player_PP_SOGPerPenalty",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_player_PP_goalsPerPenalty",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_Total_goalsFor",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_Total_shotsOnGoalFor",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_Total_shotAttemptsFor",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_Total_penaltiesAgainst",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__previous_perc_rank_rolling_game_PP_SOGForPerPenalty",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_goalsAgainst",
+    "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_shotAttemptsAgainst",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_Total_penaltiesFor",
     "required": true}, {"type": "double", "name": "numerical__impute_mean__opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty",
-    "required": true}, {"type": "double", "name": "numerical__impute_mean__matchup_previous_player_Total_shotsOnGoal",
-    "required": true}, {"type": "double", "name": "numerical__impute_mean__matchup_average_player_Total_shotsOnGoal_last_3_games",
-    "required": true}, {"type": "double", "name": "numerical__impute_mean__matchup_average_player_Total_shotsOnGoal_last_7_games",
     "required": true}]'
   params: null
-utc_time_created: '2024-11-10 23:14:25.325612'
+utc_time_created: '2024-11-11 00:11:10.754031'
