@@ -712,14 +712,16 @@ def make_model_ready():
 
     return gold_model_data
 
+
 # COMMAND ----------
 
 from pyspark.sql.functions import expr
 
+
 @dlt.table(
     name="test_streaming_table",
     comment="This is a dummy streaming table for testing purposes",
-    table_properties={"quality": "gold"}
+    table_properties={"quality": "gold", "delta.enableChangeDataFeed": "true"},
 )
 def create_dummy_streaming_table():
     return (
