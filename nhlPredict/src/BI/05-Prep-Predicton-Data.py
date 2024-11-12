@@ -144,6 +144,7 @@ game_clean_cols = [
 
 lastGameWindowSpec = Window.partitionBy("playerTeam", "playerId").orderBy(desc("gameDate"))
 lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
+lastPlayerMatchupWindowSpec = Window.partitionBy("season", "playerId", "playerTeam", "opposingTeam").orderBy(col("gameDate").desc())
 
 clean_prediction_edit = (
     clean_prediction.withColumn(
@@ -170,6 +171,12 @@ clean_prediction_edit = (
         "is_last_played_game_team",
         when(row_number().over(lastGameTeamWindowSpec) == 1, lit(1))
         .otherwise(lit(0))
+    )
+    .withColumn("latestMatchupCounter", 
+                row_number().over(lastPlayerMatchupWindowSpec))
+    .withColumn("latestMatchupFlag", 
+                when(col("latestMatchupCounter") >=2, lit(True))
+                .otherwise(lit(False))
     )
     .orderBy(
         desc("gameDate"),
@@ -253,6 +260,10 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 display(
     spark.table("lr_nhl_demo.dev.clean_prediction_v2")
     .select("gameDate", "playerTeam", "opposingTeam", "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
@@ -328,6 +339,11 @@ display(
 # MAGIC -- WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
 # MAGIC WHERE gameDate IS NOT NULL
 # MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Testing
 
 # COMMAND ----------
 
