@@ -82,6 +82,12 @@ clean_prediction = (
             sum("SOG_3+").over(matchupWindowSpec) / col("playerMatchupPlayedRolling"),
         ).otherwise(lit(None)),
     )
+    # .withColumn(
+    #     "isWin",
+    #     when(
+    #         col("previous_sum_game_Total_goalsFor") > col("previous_sum_game_Total_goalsAgainst"), "Yes"
+    #     ).otherwise("No"),
+    # ).filter(col("gameId").isNotNull())
     .orderBy(desc("gameDate"))
 )
 
@@ -257,10 +263,6 @@ display(
 clean_prediction_edit.write.format("delta").mode("overwrite").option(
     "mergeSchema", "true"
 ).saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
