@@ -1,6 +1,6 @@
 -- Databricks notebook source
 CREATE CATALOG IF NOT EXISTS lr_nhl_demo
--- COMMENT 'NHL Prediction catalog created by Databricks Asset Bundle'
+COMMENT 'NHL Prediction catalog created by Databricks Asset Bundle'
 
 -- COMMAND ----------
 
@@ -25,4 +25,5 @@ CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.player_game_stats;
 CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.player_game_stats_playoffs;
 
 -- COMMAND ----------
+
 
