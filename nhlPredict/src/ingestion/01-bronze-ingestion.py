@@ -153,6 +153,7 @@ def ingest_games_data():
             .distinct()
         )
 
+        # Download Regular Season player game by game stats
         for row in skaters_2023_id.collect():
             playerId = str(row["playerId"])
             games_file_path = download_unzip_and_save_as_table(
