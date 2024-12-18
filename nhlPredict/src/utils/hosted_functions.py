@@ -409,3 +409,7 @@ n_games = 3
 # MAGIC   -- Filter to only include the top n_games as specified by the function's parameter
 # MAGIC   WHERE rn <= get_latest_stats_sql.n_games
 # MAGIC )
+
+# COMMAND ----------
+
+
