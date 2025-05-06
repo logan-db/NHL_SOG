@@ -18,6 +18,7 @@ sys.path.append(spark.conf.get("bundle.sourcePath", "."))
 
 from datetime import date
 from pyspark.sql.functions import *
+from pyspark.sql.types import StringType
 from pyspark.sql.window import Window
 from utils.ingestionHelper import (
     select_rename_columns,

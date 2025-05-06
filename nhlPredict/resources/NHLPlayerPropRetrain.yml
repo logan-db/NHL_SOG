@@ -16,10 +16,26 @@ resources:
         - task_key: createVols
           notebook_task:
             notebook_path: ../src/setup/01-Ingestion-createVols.sql
+
+        - task_key: upload_player_stats
+          depends_on:
+            - task_key: createVols
+          for_each_task:
+            inputs: '[{"write_path": "/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv", "load_path": "8477493.csv", "create_table": "false", "table_name": "NA"}, {"write_path": "/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/8477493.csv", "load_path": "8477493.csv", "create_table": "false", "table_name": "NA"}, {"write_path": "/Volumes/lr_nhl_demo/dev/data/2024_25_official_nhl_schedule_by_day.csv", "load_path": "2024_25_official_nhl_schedule_by_day.csv", "create_table": "true", "table_name": "2024_25_official_nhl_schedule_by_day"}, {"write_path": "/Volumes/lr_nhl_demo/dev/data/team_code_mappings.csv", "load_path": "team_code_mappings.csv", "create_table": "true", "table_name": "team_code_mappings"}]'
+            concurrency: 4
+            task:
+              task_key: upload_player_stats_iteration
+              notebook_task:
+                notebook_path: ../src/setup/upload_to_vol.py
+                base_parameters:
+                  write_location: '{{input.write_path}}'
+                  load_location: '{{input.load_path}}'
+                  create_table_flag: '{{input.create_table}}'
+                  table_name: '{{input.table_name}}'
         
         - task_key: ingest_transform_job
           depends_on:
-              - task_key: createVols
+              - task_key: upload_player_stats
           pipeline_task:
             pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
             full_refresh: false
@@ -154,6 +170,8 @@ resources:
           default: 4320825364109465
         - name: training_experiment_param
           default: 4320825364109641
+        - name: base_vol_load_path
+          default: /Volumes/lr_nhl_demo/dev/logan_rupert/data/.internal/
       environments:
         - environment_key: Default
           spec:

@@ -20,6 +20,8 @@ CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.games_historical;
 
 CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.schedule;
 
+CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.logan_rupert;
+
 CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.player_game_stats;
 
 CREATE VOLUME IF NOT EXISTS lr_nhl_demo.dev.player_game_stats_playoffs;
