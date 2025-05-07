@@ -51,8 +51,11 @@ today_date = date.today()
 # DBTITLE 1,bronze_skaters_2023_v2
 
 
+@dlt.expect_or_drop("playerId is not null", "playerId IS NOT NULL")
 @dlt.table(
-    name="bronze_skaters_2023_v2", comment="Raw Ingested NHL data on skaters in 2023"
+    name="bronze_skaters_2023_v2",
+    comment="Raw Ingested NHL data on skaters in 2023",
+    table_properties={"quality": "bronze"},
 )
 def ingest_skaters_data():
     skaters_file_path = download_unzip_and_save_as_table(
@@ -76,7 +79,9 @@ def ingest_skaters_data():
             "playerId",
         ]:
             skaters_df = skaters_df.withColumnRenamed(column, f"player_{column}")
-
+    print(
+        f"bronze_skaters_2023_v2 created! Distinct Row Count: {skaters_df.select("playerId").distinct().count()}"
+    )
     return skaters_df
 
 
@@ -85,6 +90,7 @@ def ingest_skaters_data():
 # DBTITLE 1,bronze_games_historical_v2
 
 
+@dlt.expect_or_drop("gameId is not null", "gameId IS NOT NULL")
 @dlt.table(
     name="bronze_games_historical_v2",
     comment="Raw Ingested NHL data on games from 2008 - Present",
@@ -107,6 +113,7 @@ def ingest_games_data():
 # DBTITLE 1,bronze_schedule_2023_v2
 
 
+@dlt.expect_or_drop("DATE is not null", "DATE IS NOT NULL")
 @dlt.table(
     name="bronze_schedule_2023_v2",
     table_properties={"quality": "bronze"},
@@ -121,10 +128,10 @@ def ingest_schedule_data():
 # DBTITLE 1,bronze_player_game_stats_v2
 
 
-# @dlt.expect_or_drop("team is not null", "team IS NOT NULL")
-# @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
-# @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
-# @dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
+@dlt.expect_or_drop("playerTeam is not null", "playerTeam IS NOT NULL")
+@dlt.expect_or_drop("season is not null", "season IS NOT NULL")
+@dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
+@dlt.expect_or_drop("playerID is not null", "playerID IS NOT NULL")
 @dlt.table(
     name="bronze_player_game_stats_v2",
     comment="Game by Game Stats for each player in the skaters table",
@@ -153,10 +160,16 @@ def ingest_games_data():
             .distinct()
         )
 
+        print(f"Distinct count of skaters_2023_id: {skaters_2023_id.count()}")
+        print(f"Distinct count of playoff_teams: {len(playoff_teams)}")
+        print(
+            f"Distinct count of playoff_skaters_2023_id: {playoff_skaters_2023_id.count()}"
+        )
+
         # Download Regular Season player game by game stats
         for row in skaters_2023_id.collect():
             playerId = str(row["playerId"])
-            games_file_path = download_unzip_and_save_as_table(
+            download_unzip_and_save_as_table(
                 player_games_url + playerId + ".csv",
                 tmp_base_path,
                 playerId,
@@ -168,7 +181,7 @@ def ingest_games_data():
         if len(playoff_teams) > 0:
             for row in playoff_skaters_2023_id.collect():
                 playoff_playerId = str(row["playerId"])
-                playoff_games_file_path = download_unzip_and_save_as_table(
+                download_unzip_and_save_as_table(
                     player_playoff_games_url + playoff_playerId + ".csv",
                     tmp_base_path,
                     playoff_playerId,
