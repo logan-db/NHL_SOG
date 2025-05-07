@@ -353,11 +353,13 @@ def merge_games_data():
 
     # Add logic to check if Playoffs, if so then add playoff games to schedule
     # Get Max gameDate from final dataframe
-    max_reg_season_date = (
-        regular_season_schedule.filter(col("gameId").isNotNull())
-        .select(max("gameDate"))
-        .first()[0]
-    )
+    # max_reg_season_date = (
+    #     regular_season_schedule.filter(col("gameId").isNotNull())
+    #     .select(max("gameDate"))
+    #     .first()[0]
+    # )
+    max_reg_season_date = "04-17-2024"
+
     print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
 
     playoff_games = (

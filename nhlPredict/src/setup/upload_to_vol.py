@@ -18,5 +18,9 @@ if create_table_flag == "true":
     table_name = dbutils.widgets.get("table_name")
 
     # Create DataFrame and write to UC table
-    df = spark.read.option("header", True).csv(base_vol_load_path + load_location)
-    df.write.saveAsTable(f"{catalog}.{table_name}")
+    exists = spark.catalog.tableExists(f"{catalog}.{table_name}")
+    print(f"Table already exists: {catalog}.{table_name}")
+
+    if not exists:
+        df = spark.read.option("header", True).csv(base_vol_load_path + load_location)
+        df.write.saveAsTable(f"{catalog}.{table_name}")

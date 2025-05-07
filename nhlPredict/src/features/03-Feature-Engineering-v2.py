@@ -66,6 +66,7 @@ pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng")
 
 cols_to_remove = [
     "DAY",
+    "DATE",
     "HOME",
     "AWAY",
     "gameId",
@@ -430,7 +431,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import SelectFromModel
 from sklearn.decomposition import PCA
 from sklearn import set_config
-from sklearn.base import BaseEstimator, TransformerMixin 
+from sklearn.base import BaseEstimator, TransformerMixin
+
 
 class MustHaveDropper(BaseEstimator, TransformerMixin):
     def __init__(self, must_have_features, must_have_features_base):
@@ -441,35 +443,50 @@ class MustHaveDropper(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         print("Running Fit function for MustHaveDropper")
-        self.selected_features_ = [col for col in self.must_have_features if col in X.columns]
+        self.selected_features_ = [
+            col for col in self.must_have_features if col in X.columns
+        ]
 
         if not self.selected_features_:
-            print("No Valid PreProcessed Must-Have Features Found, Grabbing base Must-Have Features")
-            self.selected_features_ = [col for col in self.must_have_features_base if col in X.columns]
+            print(
+                "No Valid PreProcessed Must-Have Features Found, Grabbing base Must-Have Features"
+            )
+            self.selected_features_ = [
+                col for col in self.must_have_features_base if col in X.columns
+            ]
 
         return self
 
     def transform(self, X):
         if self.selected_features_ is None:
             raise ValueError("MustHaveDropper has not been fitted yet.")
-        
-        available_features = [feat for feat in self.selected_features_ if feat in X.columns]
+
+        available_features = [
+            feat for feat in self.selected_features_ if feat in X.columns
+        ]
         missing_features = set(self.selected_features_) - set(available_features)
-        
+
         if missing_features:
-            print(f"Warning: The following must-have features are missing from the DataFrame: {missing_features}")
+            print(
+                f"Warning: The following must-have features are missing from the DataFrame: {missing_features}"
+            )
             print("Available columns:", X.columns.tolist())
-        
+
         if not available_features:
-            print("No valid must-have features remaining. Returning the original DataFrame.")
+            print(
+                "No valid must-have features remaining. Returning the original DataFrame."
+            )
             return X
-        
+
         self.must_have_data = X[available_features]
-        print(f"Dropping must-have features from original DataFrame: {len(available_features)}")
+        print(
+            f"Dropping must-have features from original DataFrame: {len(available_features)}"
+        )
         return X.drop(columns=available_features)
 
     def get_must_have_data(self):
         return self.must_have_data
+
 
 class MustHaveRejoiner(BaseEstimator, TransformerMixin):
     def __init__(self, must_have_dropper):
@@ -490,8 +507,11 @@ class MustHaveRejoiner(BaseEstimator, TransformerMixin):
 
             return rejoined_df
         else:
-            print("Warning: No must-have features were stored during transform. Returning the original DataFrame.")
+            print(
+                "Warning: No must-have features were stored during transform. Returning the original DataFrame."
+            )
             return X
+
 
 class PreprocessModel(PythonModel):
     def __init__(self, pipeline, id_columns):
@@ -507,19 +527,21 @@ class PreprocessModel(PythonModel):
     def predict(self, context, model_input):
         print("Input columns:", model_input.columns)
         id_data = model_input[self.id_columns]
-        
+
         try:
             transformed_data = self.pipeline.transform(
                 model_input.drop(columns=self.id_columns)
             )
-            
+
             # Ensure consistent feature names
             if self.feature_names is not None:
                 if isinstance(transformed_data, pd.DataFrame):
                     transformed_data.columns = self.feature_names
                 else:
-                    transformed_data = pd.DataFrame(transformed_data, columns=self.feature_names)
-            
+                    transformed_data = pd.DataFrame(
+                        transformed_data, columns=self.feature_names
+                    )
+
             print("Transformed columns:", transformed_data.columns)
         except Exception as e:
             print("Error during transformation:", str(e))
@@ -560,7 +582,6 @@ def create_feature_store_tables(
 
     set_config(transform_output="pandas")
 
-    
     id_columns = ["gameId", "playerId"]
     must_have_features = [
         "isHome",
@@ -569,31 +590,27 @@ def create_feature_store_tables(
         "average_player_Total_shotsOnGoal_last_7_games",
         "average_player_SOG%_PP_last_7_games",
         "average_player_SOG%_EV_last_7_games",
-
         "previous_perc_rank_rolling_player_Total_shotAttempts",
         "previous_perc_rank_rolling_player_Total_shotsOnGoal",
         "previous_perc_rank_rolling_player_Total_goals",
         "previous_perc_rank_rolling_player_PP_SOGAttemptsForPerPenalty",
         "previous_perc_rank_rolling_player_PP_SOGPerPenalty",
         "previous_perc_rank_rolling_player_PP_goalsPerPenalty",
-
         "previous_perc_rank_rolling_game_Total_goalsFor",
         "previous_perc_rank_rolling_game_Total_shotsOnGoalFor",
         "previous_perc_rank_rolling_game_Total_shotAttemptsFor",
         "previous_perc_rank_rolling_game_Total_penaltiesAgainst",
         "previous_perc_rank_rolling_game_PP_SOGForPerPenalty",
-
         "opponent_previous_perc_rank_rolling_game_Total_goalsAgainst",
         "opponent_previous_perc_rank_rolling_game_Total_shotAttemptsAgainst",
         "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
         "opponent_previous_perc_rank_rolling_game_Total_penaltiesFor",
         "opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty",
-
         # "matchup_previous_player_Total_shotsOnGoal",
         # "matchup_average_player_Total_shotsOnGoal_last_3_games",
         # "matchup_average_player_Total_shotsOnGoal_last_7_games"
-        ]
-    
+    ]
+
     must_have_features_renamed = []
 
     for column in must_have_features:
@@ -603,18 +620,23 @@ def create_feature_store_tables(
     dropper = MustHaveDropper(must_have_features_renamed, must_have_features)
 
     # Create a single preprocessing pipeline with a configurable feature selector
-    preprocess_pipeline = Pipeline([
-        ("column_selector", col_selector),
-        ("preprocessor", preprocessor),
-        ('must_have_dropper', dropper),
-        ("feature_selector", SelectFromModel(
-            featSelectionModel,
-            max_features=feature_counts,
-            threshold=-np.inf,
-        )),
-        ("pca", PCA(n_components=0.95, random_state=42)),
-        ('must_have_rejoiner', MustHaveRejoiner(dropper))
-    ])
+    preprocess_pipeline = Pipeline(
+        [
+            ("column_selector", col_selector),
+            ("preprocessor", preprocessor),
+            ("must_have_dropper", dropper),
+            (
+                "feature_selector",
+                SelectFromModel(
+                    featSelectionModel,
+                    max_features=feature_counts,
+                    threshold=-np.inf,
+                ),
+            ),
+            ("pca", PCA(n_components=0.95, random_state=42)),
+            ("must_have_rejoiner", MustHaveRejoiner(dropper)),
+        ]
+    )
 
     # Fit the pipeline on the full dataset, excluding id columns
     preprocess_pipeline.fit(X_train.drop(columns=id_columns), y_train)
@@ -692,9 +714,11 @@ def create_feature_store_tables(
     # Download and log PCA Plot
     plt.savefig(f"{artifact_uri_base_path}/pcaPlot.png")
     plt.show()
-    
+
     client.log_artifact(
-        run_id=run_id, local_path=f"{artifact_uri_base_path}/pcaPlot.png", artifact_path=file_name
+        run_id=run_id,
+        local_path=f"{artifact_uri_base_path}/pcaPlot.png",
+        artifact_path=file_name,
     )
     plt.close()
 
@@ -772,7 +796,7 @@ def create_feature_store_tables(
     mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
 
     print(f"Creating Feature Store table for {feature_counts} features...")
-    
+
     # Transform datasets using the configured model
     X_train_processed = pyfunc_preprocess_model.predict(None, X_train)
 
@@ -805,11 +829,13 @@ def create_feature_store_tables(
 
     print(f"Feature Store table {table_name} created SUCCESSFULLY...")
 
+
 # COMMAND ----------
 
 # Convert pre_feat_eng to Pandas DataFrame
 pre_feat_eng_pd = pre_feat_eng.toPandas()
 
+# temp fix
 # Separate target column from features
 X = pre_feat_eng_pd.drop([target_col], axis=1)
 y = pre_feat_eng_pd[target_col]
@@ -822,7 +848,8 @@ featSelectionModel = XGBRegressor(
     max_depth=5,
     subsample=0.8,
     colsample_bytree=0.8,
-    random_state=42
+    random_state=42,
+    # enable_categorical=True,
 )
 # featSelectionModel = RandomForestRegressor(n_estimators=n_estimators_param, random_state=42)
 
