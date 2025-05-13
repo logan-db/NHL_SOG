@@ -205,6 +205,7 @@ def ingest_games_data():
             .option("inferSchema", "true")
             .load(regular_season_stats_path)
         ).filter(col("season").isin(season_list))
+        print(f"Regular Season Player Stats Loaded! {regular_season_stats.count()}")
     else:
         print("No CSV files found for Regular Season. Skipping...")
         regular_season_stats = (
@@ -222,6 +223,7 @@ def ingest_games_data():
             .option("inferSchema", "true")
             .load(playoff_season_stats_path)
         ).filter(col("season").isin(season_list))
+        print(f"Playoffs Player Stats Loaded! {playoff_season_stats.count()}")
     else:
         print("No CSV files found for Playoffs. Skipping...")
         playoff_season_stats = (

@@ -144,7 +144,7 @@ resources:
               zone_id: us-west-2a
               spot_bid_price_percent: 100
               ebs_volume_count: 0
-            node_type_id: i3.4xlarge
+            node_type_id: i3.8xlarge
             custom_tags:
               computeType: ML_Job
             enable_elastic_disk: true

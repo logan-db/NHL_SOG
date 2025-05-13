@@ -4,7 +4,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install --upgrade mlflow
+# MAGIC %pip install mlflow==2.11.3
 # MAGIC %pip install databricks-feature-engineering
 
 # COMMAND ----------
@@ -196,6 +196,8 @@ display(upcoming_games_processed_spark)
 
 # DBTITLE 1,Batch Score Predictions of Historical Games and Join Stats Columns
 print(f"model_uri: {model_uri}")
+
+mlflow.pyfunc.get_model_dependencies(model_uri)
 
 predictions = fe.score_batch(model_uri=model_uri, df=current_games_processed)
 

@@ -115,6 +115,7 @@ def clean_schedule_data():
         .withColumn("HOME", city_to_abbreviation_udf("HOME"))
         .withColumn("AWAY", city_to_abbreviation_udf("AWAY"))
         .withColumn("DAY", regexp_replace("DAY", "\\.", ""))
+        .withColumn("DATE", to_date("DATE", "M/d/yy"))
     )
 
     # Filter rows where DATE is greater than or equal to the current date
