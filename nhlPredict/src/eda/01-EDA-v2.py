@@ -15,8 +15,20 @@ today_date = date.today()
 
 # Use %run to execute the notebook containing the desired function
 %run "/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/utils/ingestionHelper"
-
 # Now you can use select_rename_columns as it has been defined in the executed notebook
+
+# COMMAND ----------
+
+# Use %run to execute the notebook containing the desired function
+%run "/Workspace/Users/logan.rupert@databricks.com/NHL_SOG/nhlPredict/src/utils/nhl_team_city_to_abbreviation"
+
+# COMMAND ----------
+
+def city_to_abbreviation(city_name):
+    return nhl_team_city_to_abbreviation.get(city_name, "Unknown")
+
+
+city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
 
 # COMMAND ----------
 
@@ -40,6 +52,7 @@ schedule_2024 = spark.table("dev.2024_25_official_nhl_schedule_by_day")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
 silver_schedule_2023_v2 = spark.table("dev.silver_schedule_2023_v2")
 silver_games_rankings = spark.table("dev.silver_games_rankings")
+silver_players_ranked = spark.table("dev.silver_players_ranked")
 
 silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
 gold_player_stats = spark.table("dev.gold_player_stats_v2")
@@ -52,13 +65,166 @@ clean_prediction_v2 = spark.table("dev.clean_prediction_v2")
 
 # COMMAND ----------
 
-pre_feat_eng = spark.table("lr_nhl_demo.dev.pre_feat_eng")
+display(silver_schedule_2023_v2.orderBy(desc(col("DATE"))))
+display(silver_games_schedule_v2.orderBy(desc(col("gameDate"))))
+
+# COMMAND ----------
+
+gold_model_stats = spark.table("dev.gold_model_stats_delta_v2")
+
+# COMMAND ----------
+
+schedule_remapped = (
+    bronze_schedule_2023_v2
+    .withColumn("HOME", city_to_abbreviation_udf("HOME"))
+    .withColumn("AWAY", city_to_abbreviation_udf("AWAY"))
+    .withColumn("DAY", regexp_replace("DAY", "\\.", ""))
+    .withColumn("DATE", to_date("DATE", "M/d/yy"))
+)
+
+# Filter rows where DATE is greater than or equal to the current date
+home_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
+    "TEAM_ABV", col("HOME")
+)
+away_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
+    "TEAM_ABV", col("AWAY")
+)
+full_schedule = home_schedule.unionAll(away_schedule)
+
+# Define a window specification
+window_spec = Window.partitionBy("TEAM_ABV").orderBy("DATE")
+
+# Add a row number to each row within the partition
+df_with_row_number = full_schedule.withColumn(
+    "row_number", row_number().over(window_spec)
+)
+
+# Filter to get only the first row in each partition
+df_result = df_with_row_number.filter(col("row_number") == 1).drop("row_number")
+
+# COMMAND ----------
+
+display(df_result.orderBy(desc(col("DATE"))))
+
+# COMMAND ----------
+
+display(gold_model_stats.filter(col("gameId").isNull()))
+
+# COMMAND ----------
+
+from pyspark.sql.functions import col, max as spark_max
+
+latest_playoff_stats = (
+    gold_model_stats.filter(col("isPlayoffGame") == 1)
+    .groupBy("playerId")
+    .agg(spark_max("gameDate").alias("latestGameDate"))
+)
+
+# Add 2 days to the latest game date for each player and add a null 'gameId' column
+from pyspark.sql.functions import date_add, lit
+
+latest_playoff_stats = latest_playoff_stats.withColumn("gameDate", date_add(col("latestGameDate"), 2))
+latest_playoff_stats = latest_playoff_stats.withColumn("gameId", lit(None))
+
+
+display(latest_playoff_stats)
 
 # COMMAND ----------
 
 display(
-  gold_merged_stats_v2.filter(col("is_last_played_game_team")==1)
+  gold_model_stats.filter(col("playerId")=="8478440")
+  )
+
+# COMMAND ----------
+
+import glob
+  
+regular_season_stats_path = "/Volumes/lr_nhl_demo/dev/player_game_stats/*.csv"
+playoff_season_stats_path = (
+    "/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/*.csv"
 )
+
+# Check for CSV files
+reg_csv_files = glob.glob(regular_season_stats_path)
+playoff_csv_files = glob.glob(playoff_season_stats_path)
+
+reg_csv_files
+
+# COMMAND ----------
+
+display(bronze_player_game_stats_v2.filter(col("situation")=="all").count())
+
+# COMMAND ----------
+
+display(
+  gold_merged_stats_v2.select("playerId", "GameId", "shooterName")
+)
+
+# COMMAND ----------
+
+playoff_teams_list = (
+    bronze_games_historical_v2
+    .select("team")
+    .filter((col("playoffGame") == 1) & (col("season").isin([2023, 2024])))
+    .distinct()
+    .collect()
+)
+playoff_teams = [row.team for row in playoff_teams_list]
+playoff_skaters_2023_id = (
+    bronze_skaters_2023_v2
+    .select("playerId")
+    .filter(col("team").isin(playoff_teams))
+    .distinct()
+)
+display(playoff_skaters_2023_id)
+
+# COMMAND ----------
+
+display(bronze_skaters_2023_v2.select("playerId")
+            .filter(col("team").isin(playoff_teams))
+            .distinct())
+
+# COMMAND ----------
+
+display(bronze_player_game_stats_v2)
+
+# COMMAND ----------
+
+display(
+  bronze_skaters_2023_v2.select("playerId").distinct()
+)
+
+playoff_teams_list = (bronze_games_historical_v2
+    .select("team")
+    .filter((col("playoffGame") == 1) & (col("season").isin([2023, 2024])))
+    .distinct()
+    .collect()
+)
+
+playoff_teams = [row.team for row in playoff_teams_list]
+playoff_skaters_2023_id = (
+    bronze_skaters_2023_v2
+    .select("playerId")
+    .filter(col("team").isin(playoff_teams))
+    .distinct()
+)
+
+display(playoff_skaters_2023_id)
+
+# COMMAND ----------
+
+display(
+  bronze_skaters_2023_v2.select("*").distinct()
+)
+
+display(
+  bronze_player_game_stats_v2.select("playerId", "gameId", "gameDate").distinct()
+)
+
+display(
+  silver_players_ranked.select("playerId", "gameId", "gameDate").distinct()
+)
+
 
 # COMMAND ----------
 
@@ -1732,12 +1898,26 @@ display(silver_games_historical_v2.orderBy(desc('gameDate')))
 
 # COMMAND ----------
 
+display(updated_schedule_2024.orderBy(desc("DATE")))
+
+# COMMAND ----------
+
 # DBTITLE 1,Add Schedule Rows - Upcoming Games
 from pyspark.sql import Row
 
 # Sample row data to be added - replace with your actual data and column names
+# new_row_data = [
+#     ("Wed.", "5/7/25", "5:00 PM", "7:00 PM", "Florida", "Toronto"),
+#     ("Wed.", "5/7/25", "7:00 PM", "9:00 PM", "Dallas", "Winnipeg"),
+#     ("Thu.", "5/8/25", "5:00 PM", "7:00 PM", "Carolina", "Washington"),
+#     ("Thu.", "5/8/25", "7:30 PM", "9:30 PM", "Edmonton", "Vegas"),
+# ]
+
 new_row_data = [
-    ("Fri", "2024-06-21", "7:00 PM", "9:00 PM", "FLA", "EDM"),
+    ("Mon.", "5/12/25", "5:00 PM", "7:00 PM", "Carolina", "Washington"),
+    ("Mon.", "5/12/25", "7:30 PM", "9:30 PM", "Edmonton", "Vegas"),
+    ("Wed.", "5/14/25", "5:00 PM", "7:00 PM", "Toronto", "Florida"),
+    ("Tue.", "5/13/25", "7:30 PM", "9:30 PM", "Dallas", "Winnipeg"),
 ]
 
 # Create a DataFrame with the new row - ensure the structure matches schedule_2023
@@ -1746,21 +1926,17 @@ new_row_df = spark.createDataFrame(
 )
 
 # Union the new row with the existing schedule_2023 DataFrame
-updated_schedule_2023 = schedule_2023.union(new_row_df)
+updated_schedule_2024 = schedule_2024.filter(col("DATE")!="5/9/25").union(new_row_df)
 
 # Show the updated DataFrame
-display(updated_schedule_2023)
+display(updated_schedule_2024.orderBy(desc("DATE")))
 
 # COMMAND ----------
 
-# (updated_schedule_2023.write
-#     .format("delta")
-#     .mode("overwrite")  # Use "overwrite" if you want to replace the table
-#     .saveAsTable("dev.2023_24_official_nhl_schedule_by_day"))
-
-# COMMAND ----------
-
-display(bronze_schedule_2023_v2)
+(updated_schedule_2024.write
+    .format("delta")
+    .mode("overwrite")  # Use "overwrite" if you want to replace the table
+    .saveAsTable("dev.2024_25_official_nhl_schedule_by_day"))
 
 # COMMAND ----------
 
