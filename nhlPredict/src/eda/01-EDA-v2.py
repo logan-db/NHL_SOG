@@ -1911,8 +1911,11 @@ from pyspark.sql import Row
 # ]
 
 new_row_data = [
-    ("Tue.", "5/20/25", "5:00 PM", "7:00 PM", "Florida", "Carolina"),
-    ("Wed.", "5/21/25", "6:00 PM", "8:00 PM", "Edmonton", "Dallas")
+    # ("Tue.", "5/20/25", "5:00 PM", "7:00 PM", "Florida", "Carolina"),
+    ("Wed.", "6/4/25", "6:00 PM", "8:00 PM", "Florida", "Edmonton"),
+    ("Fri.", "6/6/25", "6:00 PM", "8:00 PM", "Florida", "Edmonton"),
+    ("Sun.", "6/8/25", "6:00 PM", "8:00 PM", "Edmonton", "Florida"),
+    ("Tue.", "6/10/25", "6:00 PM", "8:00 PM", "Edmonton", "Florida"),
 ]
 
 # Create a DataFrame with the new row - ensure the structure matches schedule_2023
