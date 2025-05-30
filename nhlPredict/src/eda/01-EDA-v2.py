@@ -58,6 +58,7 @@ silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
 gold_player_stats = spark.table("dev.gold_player_stats_v2")
 gold_game_stats = spark.table("dev.gold_game_stats_v2")
 gold_model_data = spark.table("dev.gold_model_stats")
+gold_model_stats = spark.table("dev.gold_model_stats_delta_v2")
 gold_merged_stats = spark.table("dev.gold_merged_stats")
 gold_merged_stats_v2 = spark.table("dev.gold_merged_stats_v2")
 gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
@@ -67,10 +68,6 @@ clean_prediction_v2 = spark.table("dev.clean_prediction_v2")
 
 display(silver_schedule_2023_v2.orderBy(desc(col("DATE"))))
 display(silver_games_schedule_v2.orderBy(desc(col("gameDate"))))
-
-# COMMAND ----------
-
-gold_model_stats = spark.table("dev.gold_model_stats_delta_v2")
 
 # COMMAND ----------
 
