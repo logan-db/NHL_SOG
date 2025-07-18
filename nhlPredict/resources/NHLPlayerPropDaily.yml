@@ -6,7 +6,7 @@ resources:
       schedule:
         quartz_cron_expression: 46 0 13 * * ?
         timezone_id: UTC
-        pause_status: UNPAUSED
+        pause_status: PAUSED
 
       email_notifications:
         on_failure:
@@ -91,7 +91,7 @@ resources:
                 base_parameters:
                   feature_count: "{{input}}"
                 source: WORKSPACE
-              job_cluster_key: LR-ML
+              job_cluster_key: LR-ML-old
             
         - task_key: register_model
           depends_on:
@@ -99,7 +99,7 @@ resources:
           notebook_task:
             notebook_path: ../src/ML/registerModel.py
             source: WORKSPACE
-          job_cluster_key: LR-ML
+          job_cluster_key: LR-ML-old
 
         - task_key: predictSOG
           depends_on:
@@ -109,7 +109,7 @@ resources:
           notebook_task:
             notebook_path: ../src/ML/SOGPredict_v2.py
             source: WORKSPACE
-          job_cluster_key: LR-ML
+          job_cluster_key: LR-ML-old
 
         - task_key: BI_Prep
           depends_on:
