@@ -282,4 +282,11 @@ games_clean.write.format("delta").mode("overwrite").saveAsTable(
     "lr_nhl_demo.dev.gold_game_stats_clean"
 )
 
+# Enable Change Data Feed on gold_game_stats_clean for synced database tables
+print("Enabling Change Data Feed on gold_game_stats_clean...")
+spark.sql(
+    "ALTER TABLE lr_nhl_demo.dev.gold_game_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+)
+print("✅ Change Data Feed enabled on gold_game_stats_clean")
+
 # COMMAND ----------

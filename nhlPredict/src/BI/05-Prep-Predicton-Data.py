@@ -93,7 +93,11 @@ clean_prediction = (
 
 # COMMAND ----------
 
-display(clean_prediction.filter(col("shooterName") == "Auston Matthews").select("*", "gameDate", "player_Total_shotsOnGoal", "playerGamesPlayedRolling"))
+display(
+    clean_prediction.filter(col("shooterName") == "Auston Matthews").select(
+        "*", "gameDate", "player_Total_shotsOnGoal", "playerGamesPlayedRolling"
+    )
+)
 
 # COMMAND ----------
 
@@ -148,41 +152,46 @@ game_clean_cols = [
 
 # COMMAND ----------
 
-lastGameWindowSpec = Window.partitionBy("playerTeam", "playerId").orderBy(desc("gameDate"))
+lastGameWindowSpec = Window.partitionBy("playerTeam", "playerId").orderBy(
+    desc("gameDate")
+)
 lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
-lastPlayerMatchupWindowSpec = Window.partitionBy("season", "playerId", "playerTeam", "opposingTeam").orderBy(col("gameDate").desc())
+lastPlayerMatchupWindowSpec = Window.partitionBy(
+    "season", "playerId", "playerTeam", "opposingTeam"
+).orderBy(col("gameDate").desc())
 
 clean_prediction_edit = (
-    clean_prediction.withColumn(
-        "predictedSOG", round(col("predictedSOG"), 2)
-    ).withColumn(
+    clean_prediction.withColumn("predictedSOG", round(col("predictedSOG"), 2))
+    .withColumn(
         "absVarianceAvgLast7SOG",
         abs(
             round(
-            col("predictedSOG") - col("average_player_Total_shotsOnGoal_last_7_games"),
-            2,
-        )),
+                col("predictedSOG")
+                - col("average_player_Total_shotsOnGoal_last_7_games"),
+                2,
+            )
+        ),
     )
     .withColumn(
         "is_within_30_days",
-        when(datediff(current_date(), to_date(col("gameDate"))) <= 30, lit(True))
-        .otherwise(lit(False))
+        when(
+            datediff(current_date(), to_date(col("gameDate"))) <= 30, lit(True)
+        ).otherwise(lit(False)),
     )
     .withColumn(
         "is_last_played_game",
-        when(row_number().over(lastGameWindowSpec) == 1, lit(True))
-        .otherwise(lit(False))
+        when(row_number().over(lastGameWindowSpec) == 1, lit(True)).otherwise(
+            lit(False)
+        ),
     )
     .withColumn(
         "is_last_played_game_team",
-        when(row_number().over(lastGameTeamWindowSpec) == 1, lit(1))
-        .otherwise(lit(0))
+        when(row_number().over(lastGameTeamWindowSpec) == 1, lit(1)).otherwise(lit(0)),
     )
-    .withColumn("latestMatchupCounter", 
-                row_number().over(lastPlayerMatchupWindowSpec))
-    .withColumn("latestMatchupFlag", 
-                when(col("latestMatchupCounter") >=2, lit(True))
-                .otherwise(lit(False))
+    .withColumn("latestMatchupCounter", row_number().over(lastPlayerMatchupWindowSpec))
+    .withColumn(
+        "latestMatchupFlag",
+        when(col("latestMatchupCounter") >= 2, lit(True)).otherwise(lit(False)),
     )
     .orderBy(
         desc("gameDate"),
@@ -200,16 +209,14 @@ clean_prediction_edit.count()
 
 # COMMAND ----------
 
-display(
-    clean_prediction_edit.filter(
-      col("is_last_played_game_team") == 1
-    )
-)
+display(clean_prediction_edit.filter(col("is_last_played_game_team") == 1))
 
 # COMMAND ----------
 
 display(
-    clean_prediction_edit.filter((col("playerTeam") == "TOR") & (col("shooterName") == 'Auston Matthews'))
+    clean_prediction_edit.filter(
+        (col("playerTeam") == "TOR") & (col("shooterName") == "Auston Matthews")
+    )
     .orderBy(desc("gameDate"), "teamGamesPlayedRolling")
     .select(
         "gameDate",
@@ -221,32 +228,40 @@ display(
         "is_last_played_game",
         "is_last_played_game_team",
         "absVarianceAvgLast7SOG",
-
         # Prediction & Actual
         round(col("predictedSOG"), 2).alias("predictedSOG"),
         col("player_total_shotsOnGoal").alias("playerSOG"),
-
         # Player Stats - Last 1/3/7 Games
         col("previous_player_SOG%_PP").alias("playerLastPPSOG%"),
         col("previous_player_SOG%_EV").alias("playerLastEVSOG%"),
         col("previous_player_Total_shotsOnGoal").alias("playerLastSOG"),
         col("average_player_Total_shotsOnGoal_last_3_games").alias("playerAvgSOGLast3"),
         col("average_player_Total_shotsOnGoal_last_7_games").alias("playerAvgSOGLast7"),
-
         # Player Team Ranks - Last 7 Games Rolling Avg
-        col("previous_perc_rank_rolling_game_Total_goalsFor").alias("teamGoalsForRank%"),
-        col("previous_perc_rank_rolling_game_Total_shotsOnGoalFor").alias("teamSOGForRank%"),
-        col("previous_perc_rank_rolling_game_PP_SOGForPerPenalty").alias("teamPPSOGRank%"),
-
+        col("previous_perc_rank_rolling_game_Total_goalsFor").alias(
+            "teamGoalsForRank%"
+        ),
+        col("previous_perc_rank_rolling_game_Total_shotsOnGoalFor").alias(
+            "teamSOGForRank%"
+        ),
+        col("previous_perc_rank_rolling_game_PP_SOGForPerPenalty").alias(
+            "teamPPSOGRank%"
+        ),
         # Opponent Team Ranks - Last 7 Games Rolling Avg
-        col("opponent_previous_perc_rank_rolling_game_Total_goalsAgainst").alias("oppGoalsAgainstRank%"),
-        col("opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst").alias("oppSOGAgainstRank%"),
-        col("opponent_previous_perc_rank_rolling_game_Total_penaltiesFor").alias("oppPenaltiesRank%"),
-        col("opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty").alias("oppPKSOGRank%"),
-
+        col("opponent_previous_perc_rank_rolling_game_Total_goalsAgainst").alias(
+            "oppGoalsAgainstRank%"
+        ),
+        col("opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst").alias(
+            "oppSOGAgainstRank%"
+        ),
+        col("opponent_previous_perc_rank_rolling_game_Total_penaltiesFor").alias(
+            "oppPenaltiesRank%"
+        ),
+        col("opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty").alias(
+            "oppPKSOGRank%"
+        ),
         # # OPPONENT
         # opponent_previous_perc_rank_rolling_game_Total_shotAttemptsAgainst
-
         # # TEAM
         # previous_rolling_avg_Total_goalsFor
         # previous_rolling_sum_PP_SOGAttemptsForPerPenalty
@@ -268,11 +283,15 @@ clean_prediction_edit.write.format("delta").mode("overwrite").option(
 
 display(
     spark.table("lr_nhl_demo.dev.clean_prediction_v2")
-    .select("gameDate", "playerTeam", "opposingTeam", "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst", 
-    "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst", "is_last_played_game_team")
-    .filter(
-      col("is_last_played_game_team") == 1
+    .select(
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+        "opponent_previous_rolling_per_game_Total_shotsOnGoalAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+        "is_last_played_game_team",
     )
+    .filter(col("is_last_played_game_team") == 1)
 )
 
 # COMMAND ----------
@@ -310,7 +329,7 @@ display(
 # MAGIC COMMENT 'Summary of clean predictions for NHL games';
 # MAGIC
 # MAGIC INSERT INTO lr_nhl_demo.dev.clean_prediction_summary
-# MAGIC SELECT 
+# MAGIC SELECT
 # MAGIC     gameId,
 # MAGIC     playerId,
 # MAGIC     gameDate,
@@ -344,9 +363,15 @@ display(
 
 # COMMAND ----------
 
+# DBTITLE 1,Enable Change Data Feed for Synced Tables
+# MAGIC %sql
+# MAGIC -- Enable Change Data Feed on clean_prediction_summary table for synced database tables
+# MAGIC ALTER TABLE lr_nhl_demo.dev.clean_prediction_summary
+# MAGIC SET TBLPROPERTIES (delta.enableChangeDataFeed = true);
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Testing
 
 # COMMAND ----------
-
-
