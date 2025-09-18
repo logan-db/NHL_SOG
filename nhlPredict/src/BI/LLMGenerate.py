@@ -12,13 +12,13 @@ from pyspark.sql.functions import col, expr, desc
 
 # DBTITLE 1,Define Latest Games Dataset
 latest_games = (
-  spark.table("dev.clean_prediction_summary")
+    spark.table("dev.clean_prediction_summary")
     .filter(
-    (col("gameId").isNull())
-    & (col("is_last_played_game") == True)
-    & (col("season") == 2024)
-    # & (col("shooterName") == "Alex Ovechkin")
-          )
+        (col("gameId").isNull())
+        & (col("is_last_played_game") == True)
+        & (col("season") == 2024)
+        # & (col("shooterName") == "Alex Ovechkin")
+    )
     .orderBy(desc("predictedSOG"), "gameDate")
     .limit(100)
 )
@@ -34,20 +34,22 @@ first_row = latest_games.limit(1).collect()[0]
 
 # Iterate through each column in the DataFrame
 for column in latest_games.columns:
-    if '%' in column:
+    if "%" in column:
         # If the column name contains '%', wrap it in backticks
         column_name = f"`{column}`"
     else:
         column_name = column
-    
+
     # Get the value for this column from the first row
     value = first_row[column]
-    
+
     # Add the column name and value to the dictionary
     column_value_dict[column_name] = value
 
 # Print the resulting dictionary
-cleaned_col_vals = str(column_value_dict).replace("{", "").replace("}", "").replace("'", "")
+cleaned_col_vals = (
+    str(column_value_dict).replace("{", "").replace("}", "").replace("'", "")
+)
 print(cleaned_col_vals)
 
 column_comments = {
@@ -56,23 +58,27 @@ column_comments = {
     if "comment" in col.metadata
 }
 
-modified_comments = str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+modified_comments = (
+    str(column_comments).replace("{", "").replace("}", "").replace("'", "`")
+)
 
 input_column_names = []
 
 for column in latest_games.columns:
-    if '%' in column:
+    if "%" in column:
         input_column_names.append(f"`{column}`")
     else:
         input_column_names.append(column)
 
-input_column_names_clean = str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+input_column_names_clean = (
+    str(input_column_names).replace("[", "").replace("]", "").replace("'", "")
+)
 print(input_column_names_clean)
 
 # COMMAND ----------
 
 # DBTITLE 1,Setup Prompt and Call AI_Query()
-endpoint_name = "databricks-meta-llama-3-1-70b-instruct"
+endpoint_name = "databricks-claude-3-7-sonnet"
 
 prompt = f"""
 You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the players next games shots on goal (predictedSOG). The input is a row of NHL statistics of a players previous games along with the players predicted shots on goal for the next game (predictedSOG). Use the input row and provide analysis on why the model predicted this predictedSOG value. 
@@ -95,13 +101,7 @@ ai_query('{endpoint_name}',
     ) AS Explanation
 """
 
-df_out = (
-  latest_games
-  .selectExpr(
-    "*",
-    ai_query_expr
-  )
-)
+df_out = latest_games.selectExpr("*", ai_query_expr)
 
 # COMMAND ----------
 
@@ -132,7 +132,7 @@ print("Data written to table: lr_nhl_demo.dev.llm_summary")
 testing = True
 
 if testing:
-  dbutils.notebook.exit("Exiting the notebook as requested.")
+    dbutils.notebook.exit("Exiting the notebook as requested.")
 
 # COMMAND ----------
 
@@ -140,57 +140,72 @@ display(df_out)
 
 # COMMAND ----------
 
-display(spark.table("dev.clean_prediction_v2")
-        .filter(col("gameId").isNull())
-        .select("gameId", "playerId", "gameDate", "shooterName", "predictedSOG")
-        .orderBy("gameDate", desc("predictedSOG"))
-        )
+display(
+    spark.table("dev.clean_prediction_v2")
+    .filter(col("gameId").isNull())
+    .select("gameId", "playerId", "gameDate", "shooterName", "predictedSOG")
+    .orderBy("gameDate", desc("predictedSOG"))
+)
 
 # COMMAND ----------
 
 test_out = df_out.orderBy("gameDate", desc("predictedSOG")).limit(1)
 display(test_out)
 
-test_base = (spark.table("dev.clean_prediction_v2")
-        .filter(col("gameId").isNull())
-        .select("gameId", "playerId", "gameDate", "shooterName", "predictedSOG")
-        .orderBy("gameDate", desc("predictedSOG"))
-        .limit(1)
+test_base = (
+    spark.table("dev.clean_prediction_v2")
+    .filter(col("gameId").isNull())
+    .select("gameId", "playerId", "gameDate", "shooterName", "predictedSOG")
+    .orderBy("gameDate", desc("predictedSOG"))
+    .limit(1)
 )
 display(test_base)
 
 display(
-  test_base.join(test_out.select("gameId", "playerId", "gameDate", "Explanation"), how='left', on=["playerId", "gameDate"])
+    test_base.join(
+        test_out.select("gameId", "playerId", "gameDate", "Explanation"),
+        how="left",
+        on=["playerId", "gameDate"],
+    )
 )
 
 # COMMAND ----------
 
-column_comments = {col.name: col.metadata.get('comment', None) for col in latest_games.schema.fields if 'comment' in col.metadata}
+column_comments = {
+    col.name: col.metadata.get("comment", None)
+    for col in latest_games.schema.fields
+    if "comment" in col.metadata
+}
 column_comments
 
 # COMMAND ----------
 
-def process_data_and_generate_prompt(table_name="lr_nhl_demo.dev.clean_prediction_summary", 
-                                     # player_name="Auston Matthews", 
-                                     num_games=100,
-                                     ):
+
+def process_data_and_generate_prompt(
+    table_name="lr_nhl_demo.dev.clean_prediction_summary",
+    # player_name="Auston Matthews",
+    num_games=100,
+):
     # Read the table
     df = spark.table(table_name)
-    
+
     # Get column comments
-    column_comments = {col.name: col.metadata.get('comment', None) for col in df.schema.fields if 'comment' in col.metadata}
-    
+    column_comments = {
+        col.name: col.metadata.get("comment", None)
+        for col in df.schema.fields
+        if "comment" in col.metadata
+    }
+
     # Select relevant columns and get the latest games
     latest_games = (
-      df
+        df
         # .filter(col("shooterName") == player_name)
-        .orderBy(desc("gameDate"), desc('predictedSOG'))
-        .limit(num_games)
-        )
-    
+        .orderBy(desc("gameDate"), desc("predictedSOG")).limit(num_games)
+    )
+
     # Convert to a pandas DataFrame for easier handling
-    games_data = latest_games.toPandas().to_dict('records')
-    
+    games_data = latest_games.toPandas().to_dict("records")
+
     # Create the prompt
     prompt = f"""
     Table data:
@@ -207,8 +222,9 @@ def process_data_and_generate_prompt(table_name="lr_nhl_demo.dev.clean_predictio
 
     Question: Based on the data and column descriptions provided, give a detailed analysis of the top 5 players with predicted Shots on Goal values that you can explain using the data. How accurate do you think the predictions will be, and what trends do you observe? Include insights based on the meanings of the columns as described.
     """
-    
+
     return prompt
+
 
 # COMMAND ----------
 
@@ -221,17 +237,17 @@ output_prompt
 df = spark.table("lr_nhl_demo.dev.clean_prediction_summary")
 
 # Get column comments
-column_comments = {col.name: col.metadata.get('comment', None) for col in df.schema.fields if 'comment' in col.metadata}
+column_comments = {
+    col.name: col.metadata.get("comment", None)
+    for col in df.schema.fields
+    if "comment" in col.metadata
+}
 
 # Select relevant columns and get the latest games
-latest_games = (
-  df
-    .orderBy(desc("gameDate"), desc('predictedSOG'))
-    .limit(num_games)
-    )
+latest_games = df.orderBy(desc("gameDate"), desc("predictedSOG")).limit(num_games)
 
 # Convert to a pandas DataFrame for easier handling
-games_data = latest_games.toPandas().to_dict('records')
+games_data = latest_games.toPandas().to_dict("records")
 
 # COMMAND ----------
 
@@ -240,7 +256,7 @@ latest_games.printSchema()
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC SELECT 
+# MAGIC SELECT
 # MAGIC   FROM lr_nhl_demo.dev.clean_prediction_summary
 # MAGIC   WHERE gameDate = current_date()
 
@@ -269,7 +285,7 @@ latest_games.printSchema()
 # MAGIC  `oppPKSOGRank%` DOUBLE)
 # MAGIC COMMENT 'Function 1 of 2, This function retrieves recent statistics on players in upcoming NHL games. The data retrieved should be used to analyze player predictions of predictedSOG'
 # MAGIC RETURN (
-# MAGIC   SELECT 
+# MAGIC   SELECT
 # MAGIC     *
 # MAGIC   FROM lr_nhl_demo.dev.clean_prediction_summary
 # MAGIC   -- WHERE gameDate = current_date()
@@ -335,7 +351,7 @@ latest_games.printSchema()
 # COMMAND ----------
 
 # Convert to a list of dictionaries for easier handling
-games_data = latest_games.toPandas().to_dict('records')
+games_data = latest_games.toPandas().to_dict("records")
 
 # Create a prompt for the LLM
 prompt = f"""
@@ -352,9 +368,7 @@ Question: Based on the data, provide a summary of Auston Matthews' recent perfor
 
 # Use Databricks' AI functions to generate a response
 response = ai.generate(
-    model="databricks-meta-llama-3-70b-instruct",
-    prompt=prompt,
-    max_tokens=300
+    model="databricks-claude-3-7-sonnet", prompt=prompt, max_tokens=300
 )
 
 print(response.text)
