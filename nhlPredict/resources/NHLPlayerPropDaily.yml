@@ -131,6 +131,29 @@ resources:
           notebook_task:
             notebook_path: ../src/genie/Prep Genie Data.py
             source: WORKSPACE
+
+        - task_key: trigger_synced_tables
+          depends_on:
+            - task_key: BI_Prep
+            - task_key: genie_prep
+          run_if: AT_LEAST_ONE_SUCCESS
+          notebook_task:
+            notebook_path: ../src/triggers/trigger_sync_integration.py
+            source: WORKSPACE
+          new_cluster:
+            spark_version: "13.3.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 0
+            data_security_mode: "SINGLE_USER"
+            runtime_engine: "PHOTON"
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: local[*]
+            custom_tags:
+              ResourceClass: SingleNode
+            init_scripts:
+              - workspace:
+                  destination: "file:./install_sdk.sh"
             
       job_clusters:
         - job_cluster_key: LR-ML
