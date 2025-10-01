@@ -16,6 +16,10 @@ resources:
         - task_key: createVols
           notebook_task:
             notebook_path: ../src/setup/01-Ingestion-createVols.sql
+
+        - task_key: createSampleMV
+          notebook_task:
+            notebook_path: ../src/setup/exampleMV.sql
         
         - task_key: ingest_transform_job
           depends_on:
