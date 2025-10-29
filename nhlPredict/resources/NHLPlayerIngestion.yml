@@ -9,11 +9,11 @@ resources:
       photon: true
       libraries:
         - notebook:
-            path: ../src/ingestion/01-bronze-ingestion.py
+            path: ../src/dlt_etl/ingestion/01-bronze-ingestion.py
         - notebook:
-            path: ../src/ingestion/02-silver-transform.py
+            path: ../src/dlt_etl/transformation/02-silver-transform.py
         - notebook:
-            path: ../src/ingestion/03-gold-agg.py
+            path: ../src/dlt_etl/aggregation/03-gold-agg.py
       serverless: true
       catalog: lr_nhl_demo
       configuration:
@@ -24,5 +24,6 @@ resources:
         games_download_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv
         player_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/regular/skaters/
         one_time_load: "true"
-        season_list: "[2023, 2024]"
+        season_list: "[2023, 2024, 2025]"
         player_playoff_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/playoffs/skaters/
+      root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl/

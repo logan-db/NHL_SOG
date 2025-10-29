@@ -29,7 +29,10 @@ assert (
     model_remove_1st_and_upcoming_games.count()
     == model_remove_1st_and_upcoming_games.select("gameId", "playerId")
     .distinct()
-    .count()
+    .count(),
+    print(
+        f"model_remove_1st_and_upcoming_games COUNT: {model_remove_1st_and_upcoming_games.count()} != {model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()}"
+    ),
 )
 
 # COMMAND ----------

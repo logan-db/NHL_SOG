@@ -1,33 +1,33 @@
-resources:
-  # Create the database catalog if it doesn't exist
-  database_catalogs:
-    lr-lakebase-catalog:
-      database_instance_name: lr-lakebase-demo
-      database_name: 'databricks_postgres'
-      name: lr-lakebase-catalog
-      create_database_if_not_exists: true
+# resources:
+#   # Create the database catalog if it doesn't exist
+#   database_catalogs:
+#     lr-lakebase-catalog:
+#       database_instance_name: fe-shared-demo
+#       database_name: 'nhl_db'
+#       name: lr-lakebase-catalog
+#       create_database_if_not_exists: true
 
-  # Create synced tables using the catalog
-  # NOTE: These resources should be removed after ${var.removal_date} (RemoveAfter: ${var.removal_date})
-  synced_database_tables:
-    player_data_sync:
-      name: ${resources.database_catalogs.lr-lakebase-catalog.name}.public.nhl_player_data
-      database_instance_name: ${resources.database_catalogs.lr-lakebase-catalog.database_instance_name}
-      logical_database_name: ${resources.database_catalogs.lr-lakebase-catalog.database_name}
-      spec:
-        source_table_full_name: 'lr_nhl_demo.dev.clean_prediction_summary'  # Source table in Unity Catalog
-        scheduling_policy: TRIGGERED  # Options: SNAPSHOT, TRIGGERED, CONTINUOUS
-        primary_key_columns:
-          - gameId
-          - playerId
+#   # Create synced tables using the catalog
+#   # NOTE: These resources should be removed after ${var.removal_date} (RemoveAfter: ${var.removal_date})
+#   synced_database_tables:
+#     player_data_sync:
+#       name: ${resources.database_catalogs.lr-lakebase-catalog.name}.public.nhl_player_data
+#       database_instance_name: ${resources.database_catalogs.lr-lakebase-catalog.database_instance_name}
+#       logical_database_name: ${resources.database_catalogs.lr-lakebase-catalog.database_name}
+#       spec:
+#         source_table_full_name: 'lr_nhl_demo.dev.clean_prediction_summary'  # Source table in Unity Catalog
+#         scheduling_policy: TRIGGERED  # Options: SNAPSHOT, TRIGGERED, CONTINUOUS
+#         primary_key_columns:
+#           - gameId
+#           - playerId
 
-    team_data_sync:
-      name: ${resources.database_catalogs.lr-lakebase-catalog.name}.public.nhl_team_data
-      database_instance_name: ${resources.database_catalogs.lr-lakebase-catalog.database_instance_name}
-      logical_database_name: ${resources.database_catalogs.lr-lakebase-catalog.database_name}
-      spec:
-        source_table_full_name: 'lr_nhl_demo.dev.gold_game_stats_clean'  # Source table in Unity Catalog
-        scheduling_policy: TRIGGERED  # Options: SNAPSHOT, TRIGGERED, CONTINUOUS
-        primary_key_columns:
-          - gameDate
-          - playerTeam
+#     team_data_sync:
+#       name: ${resources.database_catalogs.lr-lakebase-catalog.name}.public.nhl_team_data
+#       database_instance_name: ${resources.database_catalogs.lr-lakebase-catalog.database_instance_name}
+#       logical_database_name: ${resources.database_catalogs.lr-lakebase-catalog.database_name}
+#       spec:
+#         source_table_full_name: 'lr_nhl_demo.dev.gold_game_stats_clean'  # Source table in Unity Catalog
+#         scheduling_policy: TRIGGERED  # Options: SNAPSHOT, TRIGGERED, CONTINUOUS
+#         primary_key_columns:
+#           - gameDate
+#           - playerTeam

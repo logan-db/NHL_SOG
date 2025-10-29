@@ -33,7 +33,7 @@ player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
 # season_list = spark.conf.get("season_list")
-season_list = [2023, 2024]
+season_list = [2023, 2024, 2025]
 
 # Get current date
 today_date = date.today()

@@ -48,7 +48,7 @@ bronze_player_game_stats_v2 = spark.table("dev.bronze_player_game_stats_v2")
 bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
 
 schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
-schedule_2024 = spark.table("dev.2024_25_official_nhl_schedule_by_day")
+schedule_2024 = spark.table("dev.2025_26_official_nhl_schedule_by_day")
 silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
 silver_schedule_2023_v2 = spark.table("dev.silver_schedule_2023_v2")
 silver_games_rankings = spark.table("dev.silver_games_rankings")
@@ -1934,7 +1934,7 @@ display(updated_schedule_2024.orderBy(desc("DATE")))
 (updated_schedule_2024.write
     .format("delta")
     .mode("overwrite")  # Use "overwrite" if you want to replace the table
-    .saveAsTable("dev.2024_25_official_nhl_schedule_by_day"))
+    .saveAsTable("dev.2025_26_official_nhl_schedule_by_day"))
 
 # COMMAND ----------
 

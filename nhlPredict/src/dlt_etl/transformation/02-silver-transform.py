@@ -40,7 +40,7 @@ player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
 # season_list = spark.conf.get("season_list")
-season_list = [2023, 2024]
+season_list = [2023, 2024, 2025]
 
 # Get current date
 today_date = date.today()
@@ -112,10 +112,11 @@ def clean_schedule_data():
     # Apply the UDF to the "HOME" column
     schedule_remapped = (
         dlt.read("bronze_schedule_2023_v2")
-        .withColumn("HOME", city_to_abbreviation_udf("HOME"))
-        .withColumn("AWAY", city_to_abbreviation_udf("AWAY"))
-        .withColumn("DAY", regexp_replace("DAY", "\\.", ""))
-        .withColumn("DATE", to_date("DATE", "M/d/yy"))
+        # .withColumn("HOME", city_to_abbreviation_udf("HOME")) NOT NEEDED FOR 25/26 season schedule
+        # .withColumn("AWAY", city_to_abbreviation_udf("AWAY"))
+        .withColumn("DAY", regexp_replace("DAY", "\\.", "")).withColumn(
+            "DATE", to_date("DATE", "M/d/yy")
+        )
     )
 
     # Filter rows where DATE is greater than or equal to the current date

@@ -204,5 +204,5 @@ resources:
       environments:
         - environment_key: Default
           spec:
-            client: "1"
+            environment_version: "1"
 

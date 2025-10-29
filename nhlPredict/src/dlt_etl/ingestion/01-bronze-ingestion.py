@@ -36,7 +36,7 @@ player_games_url = spark.conf.get("player_games_url")
 player_playoff_games_url = spark.conf.get("player_playoff_games_url")
 one_time_load = spark.conf.get("one_time_load").lower()
 # season_list = spark.conf.get("season_list")
-season_list = [2023, 2024]
+season_list = [2023, 2024, 2025]
 
 # Get current date
 today_date = date.today()
@@ -120,7 +120,7 @@ def ingest_games_data():
 )
 def ingest_schedule_data():
     # TO DO : make live https://media.nhl.com/site/vasset/public/attachments/2023/06/17233/2023-24%20Official%20NHL%20Schedule%20(by%20Day).xlsx
-    return spark.table("lr_nhl_demo.dev.2024_25_official_nhl_schedule_by_day")
+    return spark.table("lr_nhl_demo.dev.2025_26_official_nhl_schedule_by_day")
 
 
 # COMMAND ----------
