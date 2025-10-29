@@ -26,4 +26,4 @@ resources:
         one_time_load: "true"
         season_list: "[2023, 2024, 2025]"
         player_playoff_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/playoffs/skaters/
-      root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl/
+      root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl
