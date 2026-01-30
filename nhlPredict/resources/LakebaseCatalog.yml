@@ -2,8 +2,8 @@
 #   # Create the database catalog if it doesn't exist
 #   database_catalogs:
 #     lr-lakebase-catalog:
-#       database_instance_name: fe-shared-demo
-#       database_name: 'nhl_db'
+#       database_instance_name: LR-instance-dev
+#       database_name: 'nhl'
 #       name: lr-lakebase-catalog
 #       create_database_if_not_exists: true
 
@@ -11,7 +11,7 @@
 #   # NOTE: These resources should be removed after ${var.removal_date} (RemoveAfter: ${var.removal_date})
 #   synced_database_tables:
 #     player_data_sync:
-#       name: ${resources.database_catalogs.lr-lakebase-catalog.name}.public.nhl_player_data
+#       name: ${resources.database_catalogs.lr-lakebase-catalog.name}.nhl.player_data
 #       database_instance_name: ${resources.database_catalogs.lr-lakebase-catalog.database_instance_name}
 #       logical_database_name: ${resources.database_catalogs.lr-lakebase-catalog.database_name}
 #       spec:
@@ -22,7 +22,7 @@
 #           - playerId
 
 #     team_data_sync:
-#       name: ${resources.database_catalogs.lr-lakebase-catalog.name}.public.nhl_team_data
+#       name: ${resources.database_catalogs.lr-lakebase-catalog.name}.nhl.team_data
 #       database_instance_name: ${resources.database_catalogs.lr-lakebase-catalog.database_instance_name}
 #       logical_database_name: ${resources.database_catalogs.lr-lakebase-catalog.database_name}
 #       spec:

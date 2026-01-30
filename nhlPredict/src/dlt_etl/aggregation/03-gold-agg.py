@@ -102,7 +102,7 @@ def aggregate_games_data():
                 dlt.read("bronze_skaters_2023_v2")
                 .select("playerId", "season", "team", "name")
                 .filter(col("situation") == "all")
-                .withColumn("season", lit(2024))
+                .withColumn("season", lit(2025))
                 .distinct()
             )
         )
@@ -561,7 +561,7 @@ def merge_player_game_stats():
             "is_last_played_game_team",
             when(
                 (row_number().over(lastGameTeamWindowSpec) == 1)
-                & (col("season") == 2024),
+                & (col("season") == 2025),
                 lit(1),
             ).otherwise(lit(0)),
         )

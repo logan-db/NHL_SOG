@@ -325,7 +325,13 @@ def merge_games_data():
         .withColumn("team", col("TEAM_ABV"))
         .withColumn(
             "season",
-            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)),
+            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(
+                when(
+                    (col("gameDate") < "2025-10-01")
+                    & (col("gameDate") >= "2024-10-01"),
+                    lit(2024),
+                ).otherwise(lit(2025))
+            ),
         )  # change this when adding previous seasons
         .withColumn(
             "gameDate",
@@ -360,7 +366,7 @@ def merge_games_data():
     #     .select(max("gameDate"))
     #     .first()[0]
     # )
-    max_reg_season_date = "04-17-2024"
+    max_reg_season_date = "04-17-2025"
 
     print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
 
@@ -385,7 +391,13 @@ def merge_games_data():
         )
         .withColumn(
             "season",
-            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(lit(2024)),
+            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(
+                when(
+                    (col("gameDate") < "2025-10-01")
+                    & (col("gameDate") >= "2024-10-01"),
+                    lit(2024),
+                ).otherwise(lit(2025)),
+            ),
         )  # change this when adding previous seasons
         .withColumn(
             "playerTeam",

@@ -16,7 +16,7 @@ latest_games = (
     .filter(
         (col("gameId").isNull())
         & (col("is_last_played_game") == True)
-        & (col("season") == 2024)
+        & (col("season") == 2025)
         # & (col("shooterName") == "Alex Ovechkin")
     )
     .orderBy(desc("predictedSOG"), "gameDate")

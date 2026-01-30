@@ -31,7 +31,7 @@ from pyspark.sql.functions import col, expr
 input_dataframe = spark.table("lr_nhl_demo.dev.clean_prediction_summary").filter(
     (col("gameId").isNull())
     & (col("is_last_played_game_team") == 1)
-    & (col("season") == 2024)
+    & (col("season") == 2025)
     # & (col("shooterName") == "Alex Ovechkin")
 )
 
@@ -122,7 +122,7 @@ input_dataframe = (
     .filter(
         (col("gameId").isNull())
         & (col("is_last_played_game_team") == 1)
-        & (col("season") == 2024)
+        & (col("season") == 5)
         # & (col("shooterName") == "Alex Ovechkin")
     )
     .orderBy(desc("predictedSOG"), "gameDate")
@@ -232,7 +232,7 @@ from pyspark.sql.functions import col, expr
 input_dataframe = spark.table("lr_nhl_demo.dev.clean_prediction_summary").filter(
     (col("gameId").isNull())
     & (col("is_last_played_game_team") == 1)
-    & (col("season") == 2024)
+    & (col("season") == 2025)
     & (col("shooterName") == "Alex Ovechkin")
 )
 

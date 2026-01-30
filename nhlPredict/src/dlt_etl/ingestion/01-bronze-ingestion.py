@@ -148,7 +148,9 @@ def ingest_games_data():
         playoff_teams_list = (
             dlt.read("bronze_games_historical_v2")
             .select("team")
-            .filter((col("playoffGame") == 1) & (col("season").isin([2023, 2024])))
+            .filter(
+                (col("playoffGame") == 1) & (col("season").isin([2023, 2024, 2025]))
+            )
             .distinct()
             .collect()
         )
