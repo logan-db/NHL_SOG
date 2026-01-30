@@ -53,14 +53,16 @@ def download_unzip_and_save_as_table(
         # Download the file
         if game_by_game:
             temp_path = tmp_base_path + "player_game_stats/" + table_name + file_format
-        # Download the file
-        if game_by_game_playoffs:
+        elif game_by_game_playoffs:
             temp_path = (
                 tmp_base_path + "player_game_stats_playoffs/" + table_name + file_format
             )
 
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+
         try:
-            with requests.get(url, stream=True) as r:
+            with requests.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
                 # Open the file in write mode with UTF-8 encoding
                 with open(temp_path, "w", encoding="utf-8") as f:
@@ -73,7 +75,9 @@ def download_unzip_and_save_as_table(
             )
 
         except Exception as e:
-            print(f"An error occurred: {str(e)}")
+            print(f"An error occurred downloading {url}: {str(e)}")
+            print(f"Error type: {type(e).__name__}")
+            raise  # Re-raise the exception so calling code knows about the failure
 
     return temp_path
 

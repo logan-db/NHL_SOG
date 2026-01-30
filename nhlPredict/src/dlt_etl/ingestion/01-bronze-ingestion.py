@@ -127,7 +127,6 @@ def ingest_schedule_data():
 
 # DBTITLE 1,bronze_player_game_stats_v2
 
-
 @dlt.expect_or_drop("playerTeam is not null", "playerTeam IS NOT NULL")
 @dlt.expect_or_drop("season is not null", "season IS NOT NULL")
 @dlt.expect_or_drop("situation is not null", "situation IS NOT NULL")
@@ -138,11 +137,17 @@ def ingest_schedule_data():
     table_properties={"quality": "bronze"},
 )
 def ingest_games_data():
+    print(f"=== Starting bronze_player_game_stats_v2 ingestion ===")
+    print(f"one_time_load value: {one_time_load}")
+    print(f"one_time_load == 'true': {one_time_load == 'true'}")
+    
     if one_time_load == "true":
+        print("\n--- ONE TIME LOAD: Starting player data download ---")
         skaters_2023_id = (
             dlt.read("bronze_skaters_2023_v2").select("playerId").distinct()
         )
-        print("Ingesting player game by game stats")
+        skater_count = skaters_2023_id.count()
+        print(f"Ingesting player game by game stats for {skater_count} players")
 
         # Get Playoff teams and players
         playoff_teams_list = (
@@ -162,43 +167,72 @@ def ingest_games_data():
             .distinct()
         )
 
-        print(f"Distinct count of skaters_2023_id: {skaters_2023_id.count()}")
+        print(f"Distinct count of skaters_2023_id: {skater_count}")
         print(f"Distinct count of playoff_teams: {len(playoff_teams)}")
-        print(
-            f"Distinct count of playoff_skaters_2023_id: {playoff_skaters_2023_id.count()}"
-        )
+        print(f"Distinct count of playoff_skaters_2023_id: {playoff_skaters_2023_id.count()}")
 
         # Download Regular Season player game by game stats
+        print(f"\n--- Downloading Regular Season stats for {skater_count} players ---")
+        download_count = 0
         for row in skaters_2023_id.collect():
             playerId = str(row["playerId"])
-            download_unzip_and_save_as_table(
-                player_games_url + playerId + ".csv",
-                tmp_base_path,
-                playerId,
-                file_format=".csv",
-                game_by_game=True,
-            )
+            download_url = player_games_url + playerId + ".csv"
+            print(f"Downloading player {download_count + 1}/{skater_count}: {playerId} from {download_url}")
+            try:
+                download_unzip_and_save_as_table(
+                    download_url,
+                    tmp_base_path,
+                    playerId,
+                    file_format=".csv",
+                    game_by_game=True,
+                )
+                download_count += 1
+                print(f"  ✓ Successfully downloaded player {playerId}")
+            except Exception as e:
+                print(f"  ✗ Error downloading player {playerId}: {str(e)}")
+
+        print(f"\nCompleted regular season downloads: {download_count}/{skater_count}")
 
         # Check if player is in Playoffs, if so bring playoff stats
         if len(playoff_teams) > 0:
+            print(f"\n--- Downloading Playoff stats for playoff players ---")
+            playoff_download_count = 0
+            playoff_player_count = playoff_skaters_2023_id.count()
             for row in playoff_skaters_2023_id.collect():
                 playoff_playerId = str(row["playerId"])
-                download_unzip_and_save_as_table(
-                    player_playoff_games_url + playoff_playerId + ".csv",
-                    tmp_base_path,
-                    playoff_playerId,
-                    file_format=".csv",
-                    game_by_game_playoffs=True,
-                )
+                playoff_download_url = player_playoff_games_url + playoff_playerId + ".csv"
+                print(f"Downloading playoff player {playoff_download_count + 1}/{playoff_player_count}: {playoff_playerId} from {playoff_download_url}")
+                try:
+                    download_unzip_and_save_as_table(
+                        playoff_download_url,
+                        tmp_base_path,
+                        playoff_playerId,
+                        file_format=".csv",
+                        game_by_game_playoffs=True,
+                    )
+                    playoff_download_count += 1
+                    print(f"  ✓ Successfully downloaded playoff player {playoff_playerId}")
+                except Exception as e:
+                    print(f"  ✗ Error downloading playoff player {playoff_playerId}: {str(e)}")
+            
+            print(f"\nCompleted playoff downloads: {playoff_download_count}/{playoff_player_count}")
+    else:
+        print("\n--- SKIPPING ONE TIME LOAD (one_time_load != 'true') ---")
 
+    print("\n--- Loading data from Volume paths ---")
     regular_season_stats_path = "/Volumes/lr_nhl_demo/dev/player_game_stats/*.csv"
     playoff_season_stats_path = (
         "/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/*.csv"
     )
 
     # Check for CSV files
+    print(f"Checking for files at: {regular_season_stats_path}")
     reg_csv_files = glob.glob(regular_season_stats_path)
+    print(f"Found {len(reg_csv_files)} regular season CSV files")
+    
+    print(f"Checking for files at: {playoff_season_stats_path}")
     playoff_csv_files = glob.glob(playoff_season_stats_path)
+    print(f"Found {len(playoff_csv_files)} playoff CSV files")
 
     if reg_csv_files:
         regular_season_stats = (
@@ -207,9 +241,10 @@ def ingest_games_data():
             .option("inferSchema", "true")
             .load(regular_season_stats_path)
         ).filter(col("season").isin(season_list))
-        print(f"Regular Season Player Stats Loaded! {regular_season_stats.count()}")
+        reg_count = regular_season_stats.count()
+        print(f"Regular Season Player Stats Loaded! Row count: {reg_count}")
     else:
-        print("No CSV files found for Regular Season. Skipping...")
+        print("No CSV files found for Regular Season. Using fallback file...")
         regular_season_stats = (
             spark.read.format("csv")
             .options(header="true")
@@ -217,6 +252,7 @@ def ingest_games_data():
                 "/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv"
             )  # fix this to not be static file
         )
+        print(f"Fallback regular season stats loaded: {regular_season_stats.count()} rows")
 
     if playoff_csv_files:
         playoff_season_stats = (
@@ -225,17 +261,21 @@ def ingest_games_data():
             .option("inferSchema", "true")
             .load(playoff_season_stats_path)
         ).filter(col("season").isin(season_list))
-        print(f"Playoffs Player Stats Loaded! {playoff_season_stats.count()}")
+        playoff_count = playoff_season_stats.count()
+        print(f"Playoffs Player Stats Loaded! Row count: {playoff_count}")
     else:
-        print("No CSV files found for Playoffs. Skipping...")
+        print("No CSV files found for Playoffs. Using fallback file...")
         playoff_season_stats = (
             spark.read.format("csv")
             .options(header="true")
             .load("/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/8477493.csv")
         )
+        print(f"Fallback playoff stats loaded: {playoff_season_stats.count()} rows")
 
-    return regular_season_stats.union(playoff_season_stats)
-
+    final_df = regular_season_stats.union(playoff_season_stats)
+    final_count = final_df.count()
+    print(f"\n=== Final combined dataset: {final_count} rows ===")
+    return final_df
 
 # COMMAND ----------
 
