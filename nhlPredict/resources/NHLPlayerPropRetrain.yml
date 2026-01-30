@@ -15,11 +15,27 @@ resources:
       tasks:
         - task_key: createVols
           notebook_task:
-            notebook_path: ../src/ingestion/01-Ingestion-createVols.sql
+            notebook_path: ../src/setup/01-Ingestion-createVols.sql
+
+        - task_key: upload_player_stats
+          depends_on:
+            - task_key: createVols
+          for_each_task:
+            inputs: '[{"write_path": "/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv", "load_path": "8477493.csv", "create_table": "false", "table_name": "NA"}, {"write_path": "/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/8477493.csv", "load_path": "8477493.csv", "create_table": "false", "table_name": "NA"}, {"write_path": "/Volumes/lr_nhl_demo/dev/data/Edited_25-26 NHL Schedule - NHL schedule.csv", "load_path": "Edited_25-26 NHL Schedule - NHL schedule.csv", "create_table": "true", "table_name": "2025_26_official_nhl_schedule_by_day"}, {"write_path": "/Volumes/lr_nhl_demo/dev/data/team_code_mappings.csv", "load_path": "team_code_mappings.csv", "create_table": "true", "table_name": "team_code_mappings"}]'
+            concurrency: 4
+            task:
+              task_key: upload_player_stats_iteration
+              notebook_task:
+                notebook_path: ../src/setup/upload_to_vol.py
+                base_parameters:
+                  write_location: '{{input.write_path}}'
+                  load_location: '{{input.load_path}}'
+                  create_table_flag: '{{input.create_table}}'
+                  table_name: '{{input.table_name}}'
         
         - task_key: ingest_transform_job
           depends_on:
-              - task_key: createVols
+              - task_key: upload_player_stats
           pipeline_task:
             pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
             full_refresh: false
@@ -42,7 +58,7 @@ resources:
           depends_on:
             - task_key: createPreFeatEngTable
           for_each_task:
-            inputs: "[25, 50, 100, 200]"
+            inputs: "[50, 100, 200, 400]"
             concurrency: 4
             task:
               task_key: create_feature_table_iteration
@@ -66,7 +82,7 @@ resources:
             - task_key: re_train_model
               outcome: "true"
           for_each_task:
-            inputs: "[25, 50, 100, 200]"
+            inputs: "[50, 100, 200, 400]"
             concurrency: 4
             task:
               task_key: train_model_iteration
@@ -103,6 +119,13 @@ resources:
             notebook_path: ../src/BI/05-Prep-Predicton-Data.py
             source: WORKSPACE
 
+        - task_key: generate_explanations
+          depends_on:
+            - task_key: BI_Prep
+          notebook_task:
+            notebook_path: ../src/BI/LLMGenerate.py
+            source: WORKSPACE
+
         - task_key: genie_prep
           depends_on:
             - task_key: predictSOG
@@ -121,7 +144,7 @@ resources:
               zone_id: us-west-2a
               spot_bid_price_percent: 100
               ebs_volume_count: 0
-            node_type_id: i3.4xlarge
+            node_type_id: i3.8xlarge
             custom_tags:
               computeType: ML_Job
             enable_elastic_disk: true
@@ -140,15 +163,17 @@ resources:
         - name: train_model_param
           default: true
         - name: n_estimators_param
-          default: 100 # Prod use 100
+          default: 200 # Prod use 100
         - name: trial_eval_param
-          default: 200 # Prod use 200
+          default: 300 # Prod use 200
         - name: trial_experiment_param
           default: 4320825364109465
         - name: training_experiment_param
           default: 4320825364109641
+        - name: base_vol_load_path
+          default: /Volumes/lr_nhl_demo/dev/logan_rupert/data/.internal/
       environments:
         - environment_key: Default
           spec:
-            client: "1"
+            environment_version: "1"
 

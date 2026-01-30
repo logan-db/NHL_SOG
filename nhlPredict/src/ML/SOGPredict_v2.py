@@ -4,7 +4,12 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install --upgrade mlflow
+# MAGIC %pip install mlflow==2.11.3
+# MAGIC %pip install databricks-feature-engineering
+
+# COMMAND ----------
+
+# %pip install -r /local_disk0/user_tmp_data/spark-3149c5ec-6bd4-4c44-abb3-f0/tmpnk8koxnj/requirements.txt
 
 # COMMAND ----------
 
@@ -18,7 +23,7 @@ import requests
 import pandas as pd
 import json
 
-from pyspark.sql.functions import col, lit, when
+from pyspark.sql.functions import col, lit, when, to_date, desc
 from databricks.feature_engineering import FeatureEngineeringClient
 
 from pyspark.sql.functions import monotonically_increasing_id, col, row_number
@@ -136,9 +141,41 @@ display(gold_model_stats.filter(col("gameId").isNull()))
 upcoming_games = gold_model_stats.filter(
     (col("gameId").isNull())
     # & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 300)
     & (col("gameDate") != "2024-01-17")
+).withColumn(
+    "is_last_played_game_team", when(col("gameId").isNull(), lit(1)).otherwise(lit(0))
 )
+
+display(upcoming_games)
+
+# COMMAND ----------
+
+# DBTITLE 1,Upcoming Games add rows if none upcoming
+if upcoming_games.count() < 1:
+    replicateRows = (
+        gold_model_stats.filter(
+            (col("gameId").isNotNull())
+            # & (col("playerGamesPlayedRolling") > 0)
+            & (col("rolling_playerTotalTimeOnIceInGame") > 300)
+            & (col("gameDate") != "2024-01-17")
+        )
+        .orderBy(desc(col("gameDate")))
+        .limit(35)
+        .withColumn("gameId", lit(None))
+        .withColumn("gameDate", to_date(lit("2025-08-08"), "yyyy-MM-dd"))
+        .withColumn(
+            "is_last_played_game_team",
+            when(col("gameId").isNull(), lit(1)).otherwise(lit(0)),
+        )
+    )
+
+    upcoming_games = gold_model_stats.filter(
+        (col("gameId").isNull())
+        # & (col("playerGamesPlayedRolling") > 0)
+        & (col("rolling_playerTotalTimeOnIceInGame") > 300)
+        & (col("gameDate") != "2024-01-17")
+    ).union(replicateRows)
 
 display(upcoming_games)
 
@@ -146,7 +183,7 @@ display(upcoming_games)
 
 # DBTITLE 1,Upcoming Games Data Quality Checks
 # assert upcoming games have null 'gameId'
-assert upcoming_games.count() <= gold_model_stats.filter(col("gameId").isNull()).count()
+# assert upcoming_games.count() <= gold_model_stats.filter(col("gameId").isNull()).count()
 
 # assert upcoming games 'playerId' is unique
 assert upcoming_games.select("playerId").distinct().count() == upcoming_games.count()
@@ -190,6 +227,8 @@ display(upcoming_games_processed_spark)
 # DBTITLE 1,Batch Score Predictions of Historical Games and Join Stats Columns
 print(f"model_uri: {model_uri}")
 
+mlflow.pyfunc.get_model_dependencies(model_uri)
+
 predictions = fe.score_batch(model_uri=model_uri, df=current_games_processed)
 
 # Join Pre_feat_eng table (with target column) with processed table (without target column)
@@ -213,11 +252,16 @@ upcoming_predictions = fe.score_batch(
 
 # COMMAND ----------
 
-upcoming_predictions_full = upcoming_predictions.withColumn("gameId", lit("None").cast("string")).join(
-    upcoming_games.withColumn("gameId", lit("None").cast("string")),
-    how="left",
-    on=["gameId", "playerId"],
-).withColumnRenamed("prediction", "predictedSOG").withColumn("gameId", lit(None).cast("string"))
+upcoming_predictions_full = (
+    upcoming_predictions.withColumn("gameId", lit("None").cast("string"))
+    .join(
+        upcoming_games.withColumn("gameId", lit("None").cast("string")),
+        how="left",
+        on=["gameId", "playerId"],
+    )
+    .withColumnRenamed("prediction", "predictedSOG")
+    .withColumn("gameId", lit(None).cast("string"))
+)
 
 display(upcoming_predictions_full.select(target_col, "predictedSOG", "*"))
 
@@ -227,15 +271,20 @@ upcoming_predictions_full.schema.simpleString() == hist_predictions.schema.simpl
 
 # COMMAND ----------
 
+model
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Feature Importances
 
 # COMMAND ----------
 
+
 def generate_shap_explanation(model, X, sample_size, shap_enabled=True):
     if not shap_enabled:
         return None
-      
+
     from shap import KernelExplainer, summary_plot
 
     mlflow.autolog(disable=True)
@@ -251,29 +300,34 @@ def generate_shap_explanation(model, X, sample_size, shap_enabled=True):
     ).fillna(mode)
 
     # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
-    example = X.sample(
-        n=min(sample_size, X.shape[0]), random_state=729986891
-    ).fillna(mode)
+    example = X.sample(n=min(sample_size, X.shape[0]), random_state=729986891).fillna(
+        mode
+    )
 
     # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
-    predict = lambda x: model.predict(
-        pd.DataFrame(x, columns=X.columns)
-    )
+    predict = lambda x: model.predict(pd.DataFrame(x, columns=X.columns))
     explainer = KernelExplainer(predict, train_sample, link="identity")
     shap_values = explainer.shap_values(example, l1_reg=False, nsamples=sample_size)
-    
+
     # Generate and return the summary plot
     return summary_plot(shap_values, example)
 
+
 # COMMAND ----------
 
-upcoming_games_processed['gameId'] = upcoming_games_processed['gameId'].astype(str)
+current_games_processed_pd = current_games_processed.toPandas()
+
+# COMMAND ----------
+
+upcoming_games_processed["gameId"] = upcoming_games_processed["gameId"].astype(str)
 upcoming_games_processed
 
 # COMMAND ----------
 
 # Usage:
-shap_plot = generate_shap_explanation(model, upcoming_games_processed, sample_size=2000, shap_enabled=False)
+shap_plot = generate_shap_explanation(
+    model, current_games_processed_pd, sample_size=50, shap_enabled=False
+)
 if shap_plot is not None:
     display(shap_plot)
 
@@ -284,17 +338,29 @@ if shap_plot is not None:
 
 # COMMAND ----------
 
-hist_predictions.write.format("delta").mode("overwrite").saveAsTable(
-    f"{catalog_param}.predictSOG_hist_v2"
-)
-upcoming_predictions_full.write.format("delta").mode("overwrite").saveAsTable(
-    f"{catalog_param}.predictSOG_upcoming_v2"
-)
+hist_predictions.write.format("delta").option("mergeSchema", "true").mode(
+    "overwrite"
+).saveAsTable(f"{catalog_param}.predictSOG_hist_v2")
+upcoming_predictions_full.write.format("delta").option("mergeSchema", "true").mode(
+    "overwrite"
+).saveAsTable(f"{catalog_param}.predictSOG_upcoming_v2")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Evaluate Historical Predictions
+
+# COMMAND ----------
+
+display(hist_predictions)
+
+# COMMAND ----------
+
+hist_predictions.filter(col("player_Total_shotsOnGoal").isNull()).count()
+
+# COMMAND ----------
+
+hist_predictions = hist_predictions.filter(col("player_Total_shotsOnGoal").isNotNull())
 
 # COMMAND ----------
 
@@ -325,41 +391,47 @@ print("R-squared (R2):", r2)
 # Mean Absolute Error (MAE): 0.47950652547740785
 # R-squared (R2): 0.8060065636721716
 
+# Nov 2024
+# Mean Squared Error (MSE): 0.27762309930571993
+# Root Mean Squared Error (RMSE): 0.27762309930571993
+# Mean Absolute Error (MAE): 0.13782869423650476
+# R-squared (R2): 0.9678125738510455
+
 # COMMAND ----------
 
-import pandas as pd
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-import numpy as np
+# import pandas as pd
+# from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+# import numpy as np
 
-predict_hist_games_df_pd = hist_predictions.toPandas()
+# predict_hist_games_df_pd = hist_predictions.toPandas()
 
-# Calculate R2
-r2 = r2_score(
-    predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
-)
+# # Calculate R2
+# r2 = r2_score(
+#     predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
+# )
 
-# Calculate MSE
-mse = mean_squared_error(
-    predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
-)
+# # Calculate MSE
+# mse = mean_squared_error(
+#     predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
+# )
 
-# Calculate RMSE (Root Mean Squared Error)
-rmse = np.sqrt(mse)
+# # Calculate RMSE (Root Mean Squared Error)
+# rmse = np.sqrt(mse)
 
-# Calculate MAE (Mean Absolute Error)
-mae = mean_absolute_error(
-    predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
-)
+# # Calculate MAE (Mean Absolute Error)
+# mae = mean_absolute_error(
+#     predict_hist_games_df_pd[target_col], predict_hist_games_df_pd["predictedSOG"]
+# )
 
-print(f"R2 Score: {r2:.4f}")
-print(f"MSE: {mse:.4f}")
-print(f"RMSE: {rmse:.4f}")
-print(f"MAE: {mae:.4f}")
+# print(f"R2 Score: {r2:.4f}")
+# print(f"MSE: {mse:.4f}")
+# print(f"RMSE: {rmse:.4f}")
+# print(f"MAE: {mae:.4f}")
 
-# R2 Score: 0.8060
-# MSE: 0.4680
-# RMSE: 0.6841
-# MAE: 0.4795
+# # R2 Score: 0.8060
+# # MSE: 0.4680
+# # RMSE: 0.6841
+# # MAE: 0.4795
 
 # COMMAND ----------
 

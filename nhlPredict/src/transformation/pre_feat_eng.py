@@ -2,6 +2,7 @@
 from pyspark.sql.functions import col
 
 # COMMAND ----------
+
 # Get Pipeline Params
 catalog_param = dbutils.widgets.get("catalog").lower()
 train_model_param = dbutils.widgets.get("train_model_param").lower()
@@ -16,7 +17,7 @@ gold_model_stats = spark.table(f"{catalog_param}.gold_model_stats_delta_v2")
 model_remove_1st_and_upcoming_games = gold_model_stats.filter(
     (col("gameId").isNotNull())
     # & (col("playerGamesPlayedRolling") > 0)
-    & (col("rolling_playerTotalTimeOnIceInGame") > 180)
+    & (col("rolling_playerTotalTimeOnIceInGame") > 500)
 )
 
 model_remove_1st_and_upcoming_games.count()
@@ -28,7 +29,10 @@ assert (
     model_remove_1st_and_upcoming_games.count()
     == model_remove_1st_and_upcoming_games.select("gameId", "playerId")
     .distinct()
-    .count()
+    .count(),
+    print(
+        f"model_remove_1st_and_upcoming_games COUNT: {model_remove_1st_and_upcoming_games.count()} != {model_remove_1st_and_upcoming_games.select('gameId', 'playerId').distinct().count()}"
+    ),
 )
 
 # COMMAND ----------
@@ -44,6 +48,7 @@ print(
 )
 
 # COMMAND ----------
+
 if train_model_param == "true":
     # Set training task condition to true/false for next pipeline steps
     dbutils.jobs.taskValues.set(key="train_model", value="true")

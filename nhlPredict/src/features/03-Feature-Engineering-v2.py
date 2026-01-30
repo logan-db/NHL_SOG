@@ -26,6 +26,7 @@ dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
 dbutils.widgets.text("feature_count", "25", "Number of features")
 dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
 dbutils.widgets.text("time_col", "gameDate", "time_col")
+dbutils.widgets.text("pca_param", "0.95", "pca_param")
 
 # COMMAND ----------
 
@@ -42,9 +43,11 @@ print(f"target_col: {target_col}")
 n_estimators_param = int(dbutils.widgets.get("n_estimators_param"))
 catalog_param = dbutils.widgets.get("catalog").lower()
 feature_count_param = int(dbutils.widgets.get("feature_count"))
+pca_param = float(dbutils.widgets.get("pca_param"))
 
 # Print the parameter values
 print(f"n_estimators_param: {n_estimators_param}")
+print(f"n_estimators_param: {pca_param}")
 print(f"catalog_param: {catalog_param}")
 print(f"feature_count_param: {feature_count_param}")
 
@@ -63,6 +66,7 @@ pre_feat_eng = spark.table(f"{catalog_param}.pre_feat_eng")
 
 cols_to_remove = [
     "DAY",
+    "DATE",
     "HOME",
     "AWAY",
     "gameId",
@@ -101,12 +105,6 @@ col_selector = ColumnSelector(supported_cols)
 
 target_col in numerical_cols
 # time_col in categorical_cols
-
-# COMMAND ----------
-
-# from databricks.automl_runtime.sklearn.column_selector import ColumnSelector
-# supported_cols = ["matchup_average_game_hitsFor_last_3_games", "average_game_blockedShotAttemptsAgainst_last_3_games", "previous_player_PenaltyKillShotsInGame", "gameId", "previous_game_takeawaysFor", "matchup_previous_player_ShotsOnRushesInGame", "matchup_average_game_giveawaysFor_last_7_games", "previous_game_blockedShotAttemptsAgainst", "matchup_average_player_PowerPlayShotAttemptsInGame_last_7_games", "average_game_goalPercentageAgainst_last_3_games", "previous_player_ShotsOnRushesInGame", "matchup_previous_game_takeawaysAgainst", "matchup_average_game_shotsOnGoalFor_last_3_games", "teamMatchupPlayedRolling", "average_game_giveawaysFor_last_7_games", "matchup_previous_game_shotsOnGoalAgainst", "average_game_fenwickPercentage_last_3_games", "previous_game_goalPercentageFor", "previous_player_EvenStrengthShotsInGame", "previous_game_hitsAgainst", "matchup_average_player_PowerPlayShotsInGame_last_7_games", "matchup_average_player_ShotsOnRushesInGame_last_3_games", "previous_game_highDangerShotsFor", "matchup_average_game_reboundsFor_last_3_games", "matchup_average_player_EvenStrengthShotAttemptsInGame_last_3_games", "matchup_previous_game_penaltiesAgainst", "matchup_average_game_reboundGoalsAgainst_last_7_games", "average_game_mediumDangerShotsFor_last_7_games", "previous_game_shotAttemptsFor", "average_game_takeawaysFor_last_3_games", "average_game_playContinuedOutsideZoneAgainst_last_7_games", "matchup_average_game_faceOffsWonFor_last_3_games", "average_game_lowDangerShotsFor_last_7_games", "matchup_average_game_takeawaysFor_last_3_games", "average_game_goalsAgainst_last_3_games", "previous_game_shotAttemptsAgainst", "average_game_savedShotsOnGoalAgainst_last_7_games", "average_game_reboundsAgainst_last_3_games", "average_player_totalTimeOnIceSinceFaceoffInGame_last_3_games", "average_game_reboundsAgainst_last_7_games", "average_game_savedUnblockedShotAttemptsAgainst_last_7_games", "average_player_ShotsOnReboundsInGame_last_7_games", "matchup_average_player_PenaltyKillShotsInGame_last_7_games", "matchup_average_player_GoalsInGame_last_7_games", "previous_game_playContinuedOutsideZoneAgainst", "previous_game_blockedShotAttemptsFor", "average_game_penaltiesAgainst_last_7_games", "average_game_playContinuedInZoneAgainst_last_3_games", "matchup_average_player_EvenStrengthShotsInGame_last_7_games", "matchup_average_game_shotAttemptsAgainst_last_3_games", "matchup_average_game_blockedShotAttemptsAgainst_last_7_games", "matchup_average_game_corsiPercentage_last_3_games", "average_player_ShotAttemptsInGame_last_3_games", "matchup_average_game_shotAttemptsAgainst_last_7_games", "previous_player_avgShotDistanceInGame", "average_game_playContinuedOutsideZoneFor_last_3_games", "matchup_average_game_shotsOnGoalAgainst_last_7_games", "playerTeam", "matchup_previous_player_PenaltyKillShotsInGame", "average_player_PenaltyKillShotAttemptsInGame_last_7_games", "matchup_previous_game_playContinuedOutsideZoneFor", "shooterName", "matchup_average_game_playContinuedInZoneFor_last_3_games", "matchup_previous_game_shotsOnGoalFor", "matchup_previous_game_playContinuedOutsideZoneAgainst", "average_player_totalTimeOnIceInGame_last_3_games", "matchup_average_game_reboundsFor_last_7_games", "matchup_average_player_PowerPlayShotAttemptsInGame_last_3_games", "matchup_previous_game_playContinuedInZoneAgainst", "average_game_lowDangerShotsAgainst_last_3_games", "matchup_average_game_lowDangerShotsFor_last_7_games", "previous_player_PenaltyKillShotAttemptsInGame", "previous_player_ShotsOnGoalInGame", "previous_player_totalTimeOnIceSinceFaceoffInGame", "matchup_average_player_ShotsOnEmptyNetInGame_last_3_games", "matchup_average_game_mediumDangerShotsFor_last_7_games", "matchup_average_player_totalTimeOnIceInGame_last_7_games", "matchup_average_game_missedShotsAgainst_last_3_games", "matchup_average_game_shotAttemptsFor_last_3_games", "matchup_previous_game_playContinuedInZoneFor", "average_player_EvenStrengthShotsInGame_last_7_games", "matchup_previous_player_PowerPlayShotAttemptsInGame", "matchup_previous_game_giveawaysAgainst", "average_game_takeawaysAgainst_last_7_games", "matchup_average_game_lowDangerShotsAgainst_last_3_games", "matchup_previous_player_PenaltyKillShotAttemptsInGame", "average_game_savedShotsOnGoalFor_last_3_games", "average_player_EvenStrengthShotsInGame_last_3_games", "matchup_previous_game_reboundsFor", "previous_game_reboundsFor", "previous_player_PowerPlayShotAttemptsInGame", "average_game_shotsOnGoalFor_last_7_games", "average_player_ShotsOnRushesInGame_last_3_games", "average_game_highDangerShotsFor_last_7_games", "matchup_average_game_goalsAgainst_last_7_games", "matchup_previous_player_GoalsInGame", "matchup_average_game_reboundGoalsAgainst_last_3_games", "average_game_goalPercentageFor_last_7_games", "previous_game_corsiPercentage", "matchup_average_player_totalTimeOnIceSinceFaceoffInGame_last_3_games", "average_player_ShotsOnGoalInGame_last_7_games", "playerGamesPlayedRolling", "average_game_faceOffsWonAgainst_last_7_games", "average_player_avgSpeedFromLastEvent_last_3_games", "average_player_GoalsInGame_last_7_games", "matchup_previous_game_lowDangerShotsFor", "average_game_giveawaysAgainst_last_3_games", "previous_game_lowDangerShotsFor", "matchup_average_game_highDangerShotsAgainst_last_3_games", "matchup_previous_game_corsiPercentage", "average_game_penaltiesFor_last_7_games", "average_game_hitsFor_last_3_games", "average_game_corsiPercentage_last_7_games", "matchup_previous_game_faceOffsWonFor", "average_game_reboundGoalsAgainst_last_3_games", "previous_game_giveawaysFor", "previous_player_ShotAttemptsInGame", "matchup_average_game_hitsAgainst_last_3_games", "matchup_average_game_playContinuedInZoneAgainst_last_7_games", "matchup_previous_game_reboundsAgainst", "average_game_highDangerShotsFor_last_3_games", "matchup_previous_game_hitsFor", "average_game_reboundsFor_last_3_games", "average_game_shotsOnGoalAgainst_last_3_games", "matchup_previous_game_savedUnblockedShotAttemptsAgainst", "average_game_goalPercentageAgainst_last_7_games", "average_game_takeawaysAgainst_last_3_games", "average_game_missedShotsFor_last_3_games", "matchup_previous_game_goalsAgainst", "playerMatchupPlayedRolling", "matchup_previous_game_blockedShotAttemptsFor", "matchup_average_game_penaltiesAgainst_last_3_games", "average_player_ShotAttemptsInGame_last_7_games", "average_game_lowDangerShotsFor_last_3_games", "average_player_PenaltyKillShotAttemptsInGame_last_3_games", "average_player_PenaltyKillShotsInGame_last_7_games", "average_game_blockedShotAttemptsFor_last_7_games", "average_game_shotAttemptsFor_last_3_games", "matchup_average_game_playContinuedOutsideZoneFor_last_3_games", "matchup_average_game_playContinuedOutsideZoneFor_last_7_games", "matchup_average_game_reboundGoalsFor_last_7_games", "previous_game_goalsAgainst", "matchup_average_game_mediumDangerShotsAgainst_last_7_games", "matchup_average_game_highDangerShotsFor_last_3_games", "matchup_average_game_reboundsAgainst_last_3_games", "previous_game_missedShotsAgainst", "matchup_average_game_savedShotsOnGoalFor_last_3_games", "matchup_previous_game_giveawaysFor", "average_player_ShotsOnEmptyNetInGame_last_3_games", "matchup_previous_player_ShotsOnEmptyNetInGame", "matchup_average_game_penaltiesFor_last_7_games", "matchup_previous_game_blockedShotAttemptsAgainst", "previous_game_savedUnblockedShotAttemptsFor", "previous_game_hitsFor", "matchup_average_game_fenwickPercentage_last_3_games", "average_game_reboundGoalsFor_last_7_games", "average_game_blockedShotAttemptsAgainst_last_7_games", "average_game_mediumDangerShotsAgainst_last_7_games", "matchup_previous_game_takeawaysFor", "average_game_shotAttemptsAgainst_last_7_games", "matchup_average_player_ShotsOnGoalInGame_last_3_games", "teamGamesPlayedRolling", "average_game_missedShotsFor_last_7_games", "average_game_lowDangerShotsAgainst_last_7_games", "rolling_playerTotalTimeOnIceInGame", "matchup_average_player_PenaltyKillShotAttemptsInGame_last_7_games", "matchup_average_game_takeawaysFor_last_7_games", "average_game_faceOffsWonAgainst_last_3_games", "matchup_previous_game_reboundGoalsFor", "matchup_previous_game_missedShotsAgainst", "matchup_previous_game_faceOffsWonAgainst", "average_game_goalsFor_last_3_games", "previous_player_PowerPlayShotsInGame", "previous_game_penaltiesFor", "dummyDay", "matchup_previous_player_totalTimeOnIceSinceFaceoffInGame", "matchup_average_game_corsiPercentage_last_7_games", "matchup_average_game_savedUnblockedShotAttemptsFor_last_7_games", "playerId", "matchup_previous_game_fenwickPercentage", "average_player_ShotsOnGoalInGame_last_3_games", "average_game_hitsAgainst_last_7_games", "previous_player_totalTimeOnIceInGame", "average_game_corsiPercentage_last_3_games", "average_game_goalsAgainst_last_7_games", "average_player_avgShotDistanceInGame_last_3_games", "average_game_penaltiesAgainst_last_3_games", "matchup_previous_game_hitsAgainst", "average_player_EvenStrengthShotAttemptsInGame_last_7_games", "average_player_PowerPlayShotsInGame_last_3_games", "average_game_missedShotsAgainst_last_3_games", "matchup_previous_game_reboundGoalsAgainst", "average_player_ShotsOnRushesInGame_last_7_games", "previous_opposingTeam", "previous_game_reboundGoalsAgainst", "previous_game_playContinuedInZoneAgainst", "average_game_faceOffsWonFor_last_3_games", "matchup_average_game_blockedShotAttemptsAgainst_last_3_games", "matchup_average_player_ShotAttemptsInGame_last_7_games", "matchup_average_game_goalsAgainst_last_3_games", "previous_game_playContinuedOutsideZoneFor", "previous_game_faceOffsWonAgainst", "average_player_avgSpeedFromLastEvent_last_7_games", "matchup_average_player_avgSpeedFromLastEvent_last_3_games", "previous_game_goalPercentageAgainst", "previous_game_shotsOnGoalFor", "matchup_average_game_savedShotsOnGoalFor_last_7_games", "average_player_PowerPlayShotAttemptsInGame_last_3_games", "average_game_mediumDangerShotsFor_last_3_games", "matchup_previous_game_savedShotsOnGoalAgainst", "previous_game_reboundGoalsFor", "matchup_average_game_hitsAgainst_last_7_games", "matchup_previous_game_missedShotsFor", "previous_game_reboundsAgainst", "previous_game_mediumDangerShotsAgainst", "previous_game_missedShotsFor", "previous_game_shotsOnGoalAgainst", "matchup_previous_player_PowerPlayShotsInGame", "average_player_ShotsOnEmptyNetInGame_last_7_games", "average_player_ShotsOnReboundsInGame_last_3_games", "matchup_previous_player_ShotsOnGoalInGame", "previous_player_GoalsInGame", "matchup_average_game_takeawaysAgainst_last_3_games", "matchup_average_game_missedShotsFor_last_3_games", "matchup_average_game_savedUnblockedShotAttemptsFor_last_3_games", "matchup_previous_game_shotAttemptsFor", "previous_game_mediumDangerShotsFor", "previous_player_ShotsOnReboundsInGame", "previous_game_playContinuedInZoneFor", "previous_player_EvenStrengthShotAttemptsInGame", "matchup_average_game_missedShotsAgainst_last_7_games", "average_player_PowerPlayShotsInGame_last_7_games", "matchup_average_game_shotsOnGoalFor_last_7_games", "average_game_giveawaysFor_last_3_games", "matchup_average_game_penaltiesFor_last_3_games", "average_game_playContinuedInZoneFor_last_3_games", "average_game_shotAttemptsAgainst_last_3_games", "average_game_savedShotsOnGoalFor_last_7_games", "matchup_average_game_playContinuedInZoneFor_last_7_games", "previous_player_avgSpeedFromLastEvent", "matchup_average_game_lowDangerShotsFor_last_3_games", "isHome", "average_player_totalTimeOnIceInGame_last_7_games", "matchup_average_game_takeawaysAgainst_last_7_games", "matchup_previous_game_penaltiesFor", "average_player_GoalsInGame_last_3_games", "average_player_avgShotDistanceInGame_last_7_games", "matchup_average_game_giveawaysAgainst_last_3_games", "matchup_average_player_ShotsOnRushesInGame_last_7_games", "average_game_hitsFor_last_7_games", "matchup_average_player_avgShotDistanceInGame_last_7_games", "average_game_reboundGoalsFor_last_3_games", "average_game_savedUnblockedShotAttemptsAgainst_last_3_games", "matchup_average_game_playContinuedOutsideZoneAgainst_last_7_games", "matchup_previous_game_goalPercentageAgainst", "matchup_previous_player_avgSpeedFromLastEvent", "matchup_average_player_ShotsOnReboundsInGame_last_7_games", "matchup_previous_game_goalPercentageFor", "matchup_average_game_blockedShotAttemptsFor_last_7_games", "matchup_average_game_shotsOnGoalAgainst_last_3_games", "matchup_average_game_playContinuedOutsideZoneAgainst_last_3_games", "previous_game_fenwickPercentage", "matchup_previous_game_lowDangerShotsAgainst", "average_game_shotsOnGoalFor_last_3_games", "previous_player_ShotsOnEmptyNetInGame", "average_game_highDangerShotsAgainst_last_3_games", "matchup_average_game_goalPercentageFor_last_7_games", "previous_game_faceOffsWonFor", "matchup_average_player_PowerPlayShotsInGame_last_3_games", "matchup_average_player_PenaltyKillShotsInGame_last_3_games", "matchup_average_game_reboundGoalsFor_last_3_games", "average_game_reboundGoalsAgainst_last_7_games", "matchup_average_game_lowDangerShotsAgainst_last_7_games", "matchup_average_game_highDangerShotsFor_last_7_games", "average_game_playContinuedOutsideZoneAgainst_last_3_games", "previous_game_savedShotsOnGoalFor", "average_game_savedShotsOnGoalAgainst_last_3_games", "previous_game_savedUnblockedShotAttemptsAgainst", "matchup_average_game_goalPercentageAgainst_last_7_games", "matchup_average_player_avgSpeedFromLastEvent_last_7_games", "matchup_previous_player_EvenStrengthShotAttemptsInGame", "matchup_average_game_savedShotsOnGoalAgainst_last_7_games", "matchup_average_player_EvenStrengthShotsInGame_last_3_games", "average_game_playContinuedInZoneAgainst_last_7_games", "matchup_average_game_faceOffsWonAgainst_last_7_games", "average_game_faceOffsWonFor_last_7_games", "gameDate", "matchup_average_game_faceOffsWonAgainst_last_3_games", "matchup_average_player_totalTimeOnIceInGame_last_3_games", "previous_game_takeawaysAgainst", "matchup_average_game_hitsFor_last_7_games", "matchup_average_game_giveawaysFor_last_3_games", "matchup_previous_player_avgShotDistanceInGame", "matchup_previous_player_ShotsOnReboundsInGame", "matchup_average_game_highDangerShotsAgainst_last_7_games", "matchup_average_game_goalPercentageAgainst_last_3_games", "average_player_totalTimeOnIceSinceFaceoffInGame_last_7_games", "previous_game_savedShotsOnGoalAgainst", "matchup_average_game_missedShotsFor_last_7_games", "matchup_previous_game_shotAttemptsAgainst", "average_game_takeawaysFor_last_7_games", "matchup_previous_game_savedUnblockedShotAttemptsFor", "average_game_goalPercentageFor_last_3_games", "average_game_giveawaysAgainst_last_7_games", "matchup_average_game_giveawaysAgainst_last_7_games", "matchup_previous_game_highDangerShotsAgainst", "average_game_goalsFor_last_7_games", "matchup_average_game_reboundsAgainst_last_7_games", "matchup_average_game_savedUnblockedShotAttemptsAgainst_last_3_games", "matchup_previous_player_totalTimeOnIceInGame", "average_game_fenwickPercentage_last_7_games", "average_game_reboundsFor_last_7_games", "matchup_average_player_ShotsOnGoalInGame_last_7_games", "matchup_average_player_totalTimeOnIceSinceFaceoffInGame_last_7_games", "matchup_average_game_playContinuedInZoneAgainst_last_3_games", "matchup_previous_player_EvenStrengthShotsInGame", "matchup_average_game_mediumDangerShotsFor_last_3_games", "matchup_average_game_fenwickPercentage_last_7_games", "matchup_average_game_mediumDangerShotsAgainst_last_3_games", "average_game_playContinuedInZoneFor_last_7_games", "matchup_previous_game_mediumDangerShotsFor", "previous_game_goalsFor", "matchup_average_game_savedShotsOnGoalAgainst_last_3_games", "average_game_savedUnblockedShotAttemptsFor_last_7_games", "matchup_average_game_penaltiesAgainst_last_7_games", "average_game_savedUnblockedShotAttemptsFor_last_3_games", "matchup_average_player_ShotsOnEmptyNetInGame_last_7_games", "average_game_missedShotsAgainst_last_7_games", "average_game_highDangerShotsAgainst_last_7_games", "matchup_average_player_EvenStrengthShotAttemptsInGame_last_7_games", "matchup_previous_game_mediumDangerShotsAgainst", "matchup_previous_game_goalsFor", "previous_game_highDangerShotsAgainst", "matchup_previous_game_highDangerShotsFor", "average_player_PowerPlayShotAttemptsInGame_last_7_games", "average_player_EvenStrengthShotAttemptsInGame_last_3_games", "average_game_penaltiesFor_last_3_games", "matchup_previous_player_ShotAttemptsInGame", "matchup_average_player_ShotAttemptsInGame_last_3_games", "matchup_previous_game_savedShotsOnGoalFor", "matchup_average_player_PenaltyKillShotAttemptsInGame_last_3_games", "average_game_shotsOnGoalAgainst_last_7_games", "average_game_playContinuedOutsideZoneFor_last_7_games", "matchup_average_player_avgShotDistanceInGame_last_3_games", "matchup_average_game_goalsFor_last_7_games", "average_game_hitsAgainst_last_3_games", "matchup_average_game_shotAttemptsFor_last_7_games", "previous_game_giveawaysAgainst", "matchup_average_game_blockedShotAttemptsFor_last_3_games", "average_game_mediumDangerShotsAgainst_last_3_games", "matchup_average_game_savedUnblockedShotAttemptsAgainst_last_7_games", "matchup_average_game_goalPercentageFor_last_3_games", "opposingTeam", "matchup_average_player_GoalsInGame_last_3_games", "matchup_average_game_goalsFor_last_3_games", "matchup_average_game_faceOffsWonFor_last_7_games", "previous_game_lowDangerShotsAgainst", "previous_game_penaltiesAgainst", "average_game_shotAttemptsFor_last_7_games", "average_player_PenaltyKillShotsInGame_last_3_games", "average_game_blockedShotAttemptsFor_last_3_games", "matchup_average_player_ShotsOnReboundsInGame_last_3_games"]
-# col_selector = ColumnSelector(supported_cols)
 
 # COMMAND ----------
 
@@ -405,6 +403,11 @@ rf_pipeline = Pipeline(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Define Pre-Processing Pipeline
 # MAGIC - Dynamic Feature Selection based on 'feature_counts' list
 # MAGIC - Creates associated Feature Tables, with only preprocessed and selected features
@@ -419,44 +422,139 @@ import tempfile
 import yaml
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+from xgboost import XGBRegressor
 from mlflow.models import infer_signature
 from mlflow.pyfunc import PythonModel
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import SelectFromModel
+from sklearn.decomposition import PCA
 from sklearn import set_config
+from sklearn.base import BaseEstimator, TransformerMixin
+
+
+class MustHaveDropper(BaseEstimator, TransformerMixin):
+    def __init__(self, must_have_features, must_have_features_base):
+        self.must_have_features = must_have_features
+        self.must_have_features_base = must_have_features_base
+        self.selected_features_ = None
+        self.must_have_data = None
+
+    def fit(self, X, y=None):
+        print("Running Fit function for MustHaveDropper")
+        self.selected_features_ = [
+            col for col in self.must_have_features if col in X.columns
+        ]
+
+        if not self.selected_features_:
+            print(
+                "No Valid PreProcessed Must-Have Features Found, Grabbing base Must-Have Features"
+            )
+            self.selected_features_ = [
+                col for col in self.must_have_features_base if col in X.columns
+            ]
+
+        return self
+
+    def transform(self, X):
+        if self.selected_features_ is None:
+            raise ValueError("MustHaveDropper has not been fitted yet.")
+
+        available_features = [
+            feat for feat in self.selected_features_ if feat in X.columns
+        ]
+        missing_features = set(self.selected_features_) - set(available_features)
+
+        if missing_features:
+            print(
+                f"Warning: The following must-have features are missing from the DataFrame: {missing_features}"
+            )
+            print("Available columns:", X.columns.tolist())
+
+        if not available_features:
+            print(
+                "No valid must-have features remaining. Returning the original DataFrame."
+            )
+            return X
+
+        self.must_have_data = X[available_features]
+        print(
+            f"Dropping must-have features from original DataFrame: {len(available_features)}"
+        )
+        return X.drop(columns=available_features)
+
+    def get_must_have_data(self):
+        return self.must_have_data
+
+
+class MustHaveRejoiner(BaseEstimator, TransformerMixin):
+    def __init__(self, must_have_dropper):
+        self.must_have_dropper = must_have_dropper
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        must_have_data = self.must_have_dropper.get_must_have_data()
+        if must_have_data is not None and not must_have_data.empty:
+            print("Concatenating must-have features with original DataFrame")
+            # Ensure index alignment before concatenation
+            must_have_data.index = X.index
+            rejoined_df = pd.concat([X, must_have_data], axis=1)
+
+            print(f"Successful Rejoin of Features: {rejoined_df.columns.tolist()}")
+
+            return rejoined_df
+        else:
+            print(
+                "Warning: No must-have features were stored during transform. Returning the original DataFrame."
+            )
+            return X
 
 
 class PreprocessModel(PythonModel):
     def __init__(self, pipeline, id_columns):
         self.pipeline = pipeline
         self.id_columns = id_columns
+        self.feature_names = None
 
     def fit(self, X, y):
         self.pipeline.fit(X.drop(columns=self.id_columns), y)
+        # Store the feature names after fitting
+        self.feature_names = self.pipeline.get_feature_names_out()
 
     def predict(self, context, model_input):
+        print("Input columns:", model_input.columns)
         id_data = model_input[self.id_columns]
-        transformed_data = self.pipeline.transform(
-            model_input.drop(columns=self.id_columns)
-        )
 
-        # Check if transformed_data is a DataFrame
-        if not isinstance(transformed_data, pd.DataFrame):
-            # Convert transformed_data to DataFrame if it's not already
-            raise ValueError("transformed_data must be a DataFrame.", transformed_data)
+        try:
+            transformed_data = self.pipeline.transform(
+                model_input.drop(columns=self.id_columns)
+            )
 
-        # Ensure index alignment before concatenation
+            # Ensure consistent feature names
+            if self.feature_names is not None:
+                if isinstance(transformed_data, pd.DataFrame):
+                    transformed_data.columns = self.feature_names
+                else:
+                    transformed_data = pd.DataFrame(
+                        transformed_data, columns=self.feature_names
+                    )
+
+            print("Transformed columns:", transformed_data.columns)
+        except Exception as e:
+            print("Error during transformation:", str(e))
+            raise
+
         transformed_data.index = id_data.index
-
-        # Concatenate id_data with transformed_data
         final_data = pd.concat([id_data, transformed_data], axis=1)
-
+        print("Final columns:", final_data.columns)
         return final_data
 
 
 def create_feature_store_tables(
-    X_train, y_train, col_selector, preprocessor, n_estimators, feature_counts
+    X_train, y_train, col_selector, preprocessor, feature_counts, featSelectionModel
 ):
     """
     Create a single preprocess model and use it to create multiple Feature Store tables for different feature counts.
@@ -484,27 +582,85 @@ def create_feature_store_tables(
 
     set_config(transform_output="pandas")
 
-    # mlflow.end_run()
     id_columns = ["gameId", "playerId"]
+    must_have_features = [
+        "isHome",
+        "previous_player_Total_shotsOnGoal",
+        "average_player_Total_shotsOnGoal_last_3_games",
+        "average_player_Total_shotsOnGoal_last_7_games",
+        "average_player_SOG%_PP_last_7_games",
+        "average_player_SOG%_EV_last_7_games",
+        "previous_perc_rank_rolling_player_Total_shotAttempts",
+        "previous_perc_rank_rolling_player_Total_shotsOnGoal",
+        "previous_perc_rank_rolling_player_Total_goals",
+        "previous_perc_rank_rolling_player_PP_SOGAttemptsForPerPenalty",
+        "previous_perc_rank_rolling_player_PP_SOGPerPenalty",
+        "previous_perc_rank_rolling_player_PP_goalsPerPenalty",
+        "previous_perc_rank_rolling_game_Total_goalsFor",
+        "previous_perc_rank_rolling_game_Total_shotsOnGoalFor",
+        "previous_perc_rank_rolling_game_Total_shotAttemptsFor",
+        "previous_perc_rank_rolling_game_Total_penaltiesAgainst",
+        "previous_perc_rank_rolling_game_PP_SOGForPerPenalty",
+        "opponent_previous_perc_rank_rolling_game_Total_goalsAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_shotAttemptsAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst",
+        "opponent_previous_perc_rank_rolling_game_Total_penaltiesFor",
+        "opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty",
+        # "matchup_previous_player_Total_shotsOnGoal",
+        # "matchup_average_player_Total_shotsOnGoal_last_3_games",
+        # "matchup_average_player_Total_shotsOnGoal_last_7_games"
+    ]
+
+    must_have_features_renamed = []
+
+    for column in must_have_features:
+        new_col = "numerical__impute_mean__" + column
+        must_have_features_renamed.append(new_col)
+
+    dropper = MustHaveDropper(must_have_features_renamed, must_have_features)
 
     # Create a single preprocessing pipeline with a configurable feature selector
     preprocess_pipeline = Pipeline(
         [
             ("column_selector", col_selector),
             ("preprocessor", preprocessor),
+            ("must_have_dropper", dropper),
             (
                 "feature_selector",
                 SelectFromModel(
-                    RandomForestRegressor(n_estimators=n_estimators, random_state=42),
+                    featSelectionModel,
                     max_features=feature_counts,
                     threshold=-np.inf,
                 ),
             ),
+            ("pca", PCA(n_components=0.95, random_state=42)),
+            ("must_have_rejoiner", MustHaveRejoiner(dropper)),
         ]
     )
 
     # Fit the pipeline on the full dataset, excluding id columns
     preprocess_pipeline.fit(X_train.drop(columns=id_columns), y_train)
+
+    # Get the PCA step from the pipeline
+    pca = preprocess_pipeline.named_steps["pca"]
+
+    # Calculate cumulative explained variance ratio
+    cumulative_variance_ratio = np.cumsum(pca.explained_variance_ratio_)
+
+    # Plot the elbow curve
+    plt.figure(figsize=(10, 6))
+    plt.plot(
+        range(1, len(cumulative_variance_ratio) + 1), cumulative_variance_ratio, "bo-"
+    )
+    plt.xlabel("Number of Components")
+    plt.ylabel("Cumulative Explained Variance Ratio")
+    plt.title("Elbow Curve for PCA")
+    plt.axhline(y=0.95, color="r", linestyle="--", label="95% Explained Variance")
+    plt.legend()
+    plt.grid(True)
+
+    # Print the number of components used
+    print(f"Number of PCA components used: {pca.n_components_}")
 
     # Get the current working directory
     cwd = os.getcwd()
@@ -531,7 +687,7 @@ def create_feature_store_tables(
     pyfunc_preprocess_model = PreprocessModel(preprocess_pipeline, id_columns)
 
     # Save the model using MLflow
-    with mlflow.start_run() as run:
+    with mlflow.start_run(experiment_id="2716391597912916") as run:
         mlflow.pyfunc.save_model(
             path=path,
             python_model=pyfunc_preprocess_model,
@@ -554,6 +710,17 @@ def create_feature_store_tables(
     tmp_dir = tempfile.mkdtemp()
 
     client = mlflow.tracking.MlflowClient()
+
+    # Download and log PCA Plot
+    plt.savefig(f"{artifact_uri_base_path}/pcaPlot.png")
+    plt.show()
+
+    client.log_artifact(
+        run_id=run_id,
+        local_path=f"{artifact_uri_base_path}/pcaPlot.png",
+        artifact_path=file_name,
+    )
+    plt.close()
 
     print("DOWNLOAD START - CONDA")
     # Fix conda.yaml
@@ -604,19 +771,26 @@ def create_feature_store_tables(
 
     # Set as Champion
     print("Setting model as Champion...")
-    # client = mlflow.tracking.MlflowClient()
+
     model_version_infos = client.search_model_versions(f"name = '{uc_model_name}'")
     new_model_version = max(
-        [model_version_info.version for model_version_info in model_version_infos]
+        [int(model_version_info.version) for model_version_info in model_version_infos]
     )
     client.set_registered_model_alias(uc_model_name, "champion", new_model_version)
 
+    print(f"Model set as Champion for {uc_model_name} version {new_model_version}...")
+
     pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
+
+    assert (
+        int(pp_champion_version.version) == new_model_version
+    ), "Preprocess Model version mismatch"
 
     preprocess_model_name = pp_champion_version.name
     preprocess_model_version = pp_champion_version.version
 
     preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_version}"
+    print(f"preprocess_model_uri: {preprocess_model_uri}")
     preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 
     mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
@@ -661,17 +835,33 @@ def create_feature_store_tables(
 # Convert pre_feat_eng to Pandas DataFrame
 pre_feat_eng_pd = pre_feat_eng.toPandas()
 
+# temp fix
 # Separate target column from features
 X = pre_feat_eng_pd.drop([target_col], axis=1)
 y = pre_feat_eng_pd[target_col]
 
 # COMMAND ----------
 
+featSelectionModel = XGBRegressor(
+    n_estimators=n_estimators_param,
+    learning_rate=0.1,
+    max_depth=5,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    # enable_categorical=True,
+)
+# featSelectionModel = RandomForestRegressor(n_estimators=n_estimators_param, random_state=42)
+
 print(f"Feature Engineering Pipeline RUNNING on {feature_count_param} features")
 create_feature_store_tables(
-    X, y, col_selector, preprocessor, n_estimators_param, feature_count_param
+    X, y, col_selector, preprocessor, feature_count_param, featSelectionModel
 )
 print(f"Feature Engineering Pipeline COMPLETE on {feature_count_param} features")
+
+# COMMAND ----------
+
+mlflow.end_run()
 
 # COMMAND ----------
 
@@ -694,11 +884,26 @@ id_columns = ["gameId", "playerId"]
 
 client = mlflow.tracking.MlflowClient()
 
-feature_counts = 100
+feature_counts = 25
 
 uc_model_name = f"{catalog_param}.preprocess_model_{feature_counts}"
 
+# Set as Champion
+print("Setting model as Champion...")
+
+model_version_infos = client.search_model_versions(f"name = '{uc_model_name}'")
+new_model_version = max(
+    [int(model_version_info.version) for model_version_info in model_version_infos]
+)
+client.set_registered_model_alias(uc_model_name, "champion", new_model_version)
+
+print(f"Model set as Champion for {uc_model_name} version {new_model_version}...")
+
 pp_champion_version = client.get_model_version_by_alias(uc_model_name, "champion")
+
+assert (
+    int(pp_champion_version.version) == new_model_version
+), "Preprocess Model version mismatch"
 
 preprocess_model_name = pp_champion_version.name
 preprocess_model_version = pp_champion_version.version
@@ -707,6 +912,15 @@ preprocess_model_uri = f"models:/{preprocess_model_name}/{preprocess_model_versi
 preprocess_model = mlflow.pyfunc.load_model(model_uri=preprocess_model_uri)
 
 mlflow.pyfunc.get_model_dependencies(preprocess_model_uri)
+
+# COMMAND ----------
+
+model_version_infos = client.search_model_versions(f"name = '{uc_model_name}'")
+new_model_version = max(
+    [int(model_version_info.version) for model_version_info in model_version_infos]
+)
+
+new_model_version
 
 # COMMAND ----------
 
@@ -781,15 +995,18 @@ final_data
 
 # COMMAND ----------
 
-display(pre_feat_eng.filter(col('playerId')==8470604))
-display(pre_feat_eng.filter(col('playerId')==8484255))
+display(pre_feat_eng.filter(col("playerId") == 8470604))
+display(pre_feat_eng.filter(col("playerId") == 8484255))
 
-assert pre_feat_eng.filter(col('playerId')==8479318).select("shooterName").collect()[0][0] == "Auston Matthews"
+assert (
+    pre_feat_eng.filter(col("playerId") == 8479318)
+    .select("shooterName")
+    .collect()[0][0]
+    == "Auston Matthews"
+)
 
 # COMMAND ----------
 
-display(pre_feat_eng.filter((col('playerId')==8479318) & (col('gameId')==2023020026))) # should be Auston Matthews, TOR vs MIN
-
-# COMMAND ----------
-
-
+display(
+    pre_feat_eng.filter((col("playerId") == 8479318) & (col("gameId") == 2023020026))
+)  # should be Auston Matthews, TOR vs MIN
