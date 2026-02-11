@@ -137,7 +137,7 @@ def select_rename_game_columns(
     select_cols: list,
     col_abrev: str,
     situation: str,
-    season: list = [2023, 2024, 2025],
+    season: list = [20232024, 20242025, 20252026],
 ) -> DataFrame:
     """
     Selects and renames columns of a DataFrame (excluding 'name' and 'position' columns) based on input criteria.
@@ -147,7 +147,7 @@ def select_rename_game_columns(
         select_cols (list): A list of column names to select.
         col_abrev (str): An abbreviation to add as a prefix to the column names.
         situation (str): The situation criteria for filtering the DataFrame.
-        season (list, optional): The season for filtering the DataFrame (default: [2023, , 2025]).
+        season (list, optional): The season for filtering the DataFrame in NHL 8-digit format (default: [20232024, 20242025, 20252026]).
 
     Returns:
         DataFrame: The modified DataFrame with selected and renamed columns.

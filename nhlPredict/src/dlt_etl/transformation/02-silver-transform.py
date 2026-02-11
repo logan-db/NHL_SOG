@@ -30,20 +30,9 @@ from utils.nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 # COMMAND ----------
 
 # DBTITLE 1,Code Set Up
-shots_url = spark.conf.get("base_shots_download_url") + "shots_2023.zip"
-teams_url = spark.conf.get("base_download_url") + "teams.csv"
-skaters_url = spark.conf.get("base_download_url") + "skaters.csv"
-lines_url = spark.conf.get("base_download_url") + "lines.csv"
-games_url = spark.conf.get("games_download_url")
-tmp_base_path = spark.conf.get("tmp_base_path")
-player_games_url = spark.conf.get("player_games_url")
-player_playoff_games_url = spark.conf.get("player_playoff_games_url")
-one_time_load = spark.conf.get("one_time_load").lower()
-# season_list = spark.conf.get("season_list")
-season_list = [2023, 2024, 2025]
-
-# Get current date
-today_date = date.today()
+# IMPORTANT: NHL API returns season in 8-digit format (e.g., 20232024 for 2023-24 season)
+# Not 4-digit year (2023, 2024, etc.)
+season_list = [20232024, 20242025, 20252026]
 
 # COMMAND ----------
 
@@ -110,36 +99,23 @@ city_to_abbreviation_udf = udf(city_to_abbreviation, StringType())
 )
 def clean_schedule_data():
     # Apply the UDF to the "HOME" column
+    # Bronze schedule DATE is already DateType (yyyy-MM-dd). Do NOT use "M/d/yy" or DATE becomes null
+    # and schedule join matches nothing -> 2x row explosion + 0 future games.
     schedule_remapped = (
         dlt.read("bronze_schedule_2023_v2")
-        # .withColumn("HOME", city_to_abbreviation_udf("HOME")) NOT NEEDED FOR 25/26 season schedule
-        # .withColumn("AWAY", city_to_abbreviation_udf("AWAY"))
-        .withColumn("DAY", regexp_replace("DAY", "\\.", "")).withColumn(
-            "DATE", to_date("DATE", "M/d/yy")
-        )
+        .withColumn("DAY", regexp_replace("DAY", "\\.", ""))
+        .withColumn("DATE", to_date(col("DATE")))
     )
 
-    # Filter rows where DATE is greater than or equal to the current date
-    home_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
-        "TEAM_ABV", col("HOME")
-    )
-    away_schedule = schedule_remapped.filter(col("DATE") >= current_date()).withColumn(
-        "TEAM_ABV", col("AWAY")
-    )
+    # Include ALL games (past + future) for proper historical data processing
+    # The outer join logic in silver_games_schedule_v2 will handle which are played vs upcoming
+    home_schedule = schedule_remapped.withColumn("TEAM_ABV", col("HOME"))
+    away_schedule = schedule_remapped.withColumn("TEAM_ABV", col("AWAY"))
     full_schedule = home_schedule.unionAll(away_schedule)
 
-    # Define a window specification
-    window_spec = Window.partitionBy("TEAM_ABV").orderBy("DATE")
-
-    # Add a row number to each row within the partition
-    df_with_row_number = full_schedule.withColumn(
-        "row_number", row_number().over(window_spec)
-    )
-
-    # Filter to get only the first row in each partition
-    df_result = df_with_row_number.filter(col("row_number") == 1).drop("row_number")
-
-    return df_result
+    # Return ALL schedule records (not just first game per team)
+    # This enables full historical data processing in downstream tables
+    return full_schedule
 
 
 # COMMAND ----------
@@ -298,8 +274,19 @@ def clean_games_data():
     table_properties={"quality": "silver"},
 )
 def merge_games_data():
-    silver_games_schedule = dlt.read("silver_schedule_2023_v2").join(
+    # PRIMARY_CONFIGURATION: 1:1 join per (game, team). Schedule has 2 rows/game (home/away),
+    # games has 2 rows/game (home/away). Join on (HOME,AWAY,DATE) + TEAM_ABV==team so no 4x.
+    # Normalize gameDate to date: bronze has IntegerType (YYYYMMDD), schedule has DATE (date).
+    sched = dlt.read("silver_schedule_2023_v2")
+    games = (
         dlt.read("silver_games_historical_v2")
+        .withColumn(
+            "gameDate",
+            when(
+                col("gameDate").isNotNull(),
+                to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+            ).otherwise(col("gameDate")),
+        )
         .withColumn(
             "homeTeamCode",
             when(col("home_or_away") == "HOME", col("team")).otherwise(
@@ -311,28 +298,30 @@ def merge_games_data():
             when(col("home_or_away") == "AWAY", col("team")).otherwise(
                 col("opposingTeam")
             ),
-        ),
-        how="outer",
-        on=[
-            col("homeTeamCode") == col("HOME"),
-            col("awayTeamCode") == col("AWAY"),
-            col("gameDate") == col("DATE"),
-        ],
+        )
     )
+    join_cond = (
+        (sched["HOME"] == games["homeTeamCode"])
+        & (sched["AWAY"] == games["awayTeamCode"])
+        & (sched["DATE"] == games["gameDate"])
+        & (sched["TEAM_ABV"] == games["team"])
+    )
+    silver_games_schedule = sched.join(games, join_cond, how="outer")
 
     upcoming_final_clean = (
         silver_games_schedule.filter(col("gameId").isNull())
         .withColumn("team", col("TEAM_ABV"))
         .withColumn(
             "season",
-            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(
+            # IMPORTANT: Use 8-digit NHL season format (20232024, 20242025, 20252026)
+            when(col("gameDate") < "2024-10-01", lit(20232024)).otherwise(
                 when(
                     (col("gameDate") < "2025-10-01")
                     & (col("gameDate") >= "2024-10-01"),
-                    lit(2024),
-                ).otherwise(lit(2025))
+                    lit(20242025),
+                ).otherwise(lit(20252026))
             ),
-        )  # change this when adding previous seasons
+        )
         .withColumn(
             "gameDate",
             when(col("gameDate").isNull(), col("DATE")).otherwise(col("gameDate")),
@@ -360,13 +349,20 @@ def merge_games_data():
     )
 
     # Add logic to check if Playoffs, if so then add playoff games to schedule
-    # Get Max gameDate from final dataframe
-    # max_reg_season_date = (
-    #     regular_season_schedule.filter(col("gameId").isNotNull())
-    #     .select(max("gameDate"))
-    #     .first()[0]
-    # )
-    max_reg_season_date = "04-17-2025"
+    # Get Max gameDate from final dataframe (dynamically calculated)
+    max_reg_season_date_result = (
+        regular_season_schedule.filter(col("gameId").isNotNull())
+        .select(max("gameDate"))
+        .first()
+    )
+
+    if max_reg_season_date_result and max_reg_season_date_result[0]:
+        max_reg_season_date = max_reg_season_date_result[0]
+    else:
+        # Fallback to a reasonable default if no games found
+        from datetime import date
+
+        max_reg_season_date = date(2025, 4, 17)  # End of 2024-25 regular season
 
     print("Max gameDate from regular_season_schedule: {}".format(max_reg_season_date))
 
@@ -391,14 +387,15 @@ def merge_games_data():
         )
         .withColumn(
             "season",
-            when(col("gameDate") < "2024-10-01", lit(2023)).otherwise(
+            # IMPORTANT: Use 8-digit NHL season format (20232024, 20242025, 20252026)
+            when(col("gameDate") < "2024-10-01", lit(20232024)).otherwise(
                 when(
                     (col("gameDate") < "2025-10-01")
                     & (col("gameDate") >= "2024-10-01"),
-                    lit(2024),
-                ).otherwise(lit(2025)),
+                    lit(20242025),
+                ).otherwise(lit(20252026)),
             ),
-        )  # change this when adding previous seasons
+        )
         .withColumn(
             "playerTeam",
             when(col("playerTeam").isNull(), col("team")).otherwise(col("playerTeam")),
@@ -427,10 +424,23 @@ def merge_games_data():
     else:
         full_season_schedule = regular_season_schedule
 
-    # Add day of week and fill LOCAL/EASTERN cols if null with Deafult values
+    # Add day of week and fill LOCAL/EASTERN cols if null with Default values
     full_season_schedule_with_day = get_day_of_week(full_season_schedule, "DATE")
 
-    return full_season_schedule_with_day
+    # Deduplicate based on primary keys to prevent downstream join explosions
+    full_season_schedule_deduped = full_season_schedule_with_day.dropDuplicates(
+        ["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"]
+    )
+
+    # Log deduplication results
+    original_count = full_season_schedule_with_day.count()
+    deduped_count = full_season_schedule_deduped.count()
+    print(f"📊 silver_games_schedule_v2 deduplication:")
+    print(f"   Original: {original_count} rows")
+    print(f"   Deduped: {deduped_count} rows")
+    print(f"   Removed: {original_count - deduped_count} duplicates")
+
+    return full_season_schedule_deduped
 
 
 # COMMAND ----------
@@ -888,17 +898,36 @@ def clean_rank_players():
         )
     ).alias("joined_player_stats")
 
+    # Check for duplicates in silver_games_schedule_v2 before joining
+    schedule_with_penalty = dlt.read("silver_games_schedule_v2").select(
+        "gameId",
+        "season",
+        "home_or_away",
+        "gameDate",
+        "playerTeam",
+        "opposingTeam",
+        "game_Total_penaltiesAgainst",
+    )
+
+    # Diagnostic: Check for duplicates
+    schedule_total = schedule_with_penalty.count()
+    schedule_distinct = schedule_with_penalty.dropDuplicates(
+        ["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"]
+    ).count()
+
+    print(f"📊 silver_games_schedule_v2 diagnostics:")
+    print(f"   Total rows: {schedule_total}")
+    print(f"   Distinct rows: {schedule_distinct}")
+    print(f"   Duplicates: {schedule_total - schedule_distinct}")
+
+    # Deduplicate schedule before join to prevent explosion
+    schedule_deduped = schedule_with_penalty.dropDuplicates(
+        ["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"]
+    )
+
     joined_player_stats_silver = (
         joined_player_stats.join(
-            dlt.read("silver_games_schedule_v2").select(
-                "gameId",
-                "season",
-                "home_or_away",
-                "gameDate",
-                "playerTeam",
-                "opposingTeam",
-                "game_Total_penaltiesAgainst",
-            ),
+            schedule_deduped,
             how="left",
             on=[
                 "playerTeam",
@@ -911,10 +940,21 @@ def clean_rank_players():
         )
     ).alias("joined_player_stats_silver")
 
-    assert player_game_stats_total.count() == joined_player_stats_silver.count(), print(
-        f"player_game_stats_total: {player_game_stats_total.count()} does NOT equal joined_player_stats_silver: {joined_player_stats_silver.count()}"
-    )
-    print("Assert for joined_player_stats_silver passed")
+    # Validate join didn't create duplicates
+    player_total_count = player_game_stats_total.count()
+    joined_count = joined_player_stats_silver.count()
+
+    if player_total_count != joined_count:
+        print(f"❌ Row count mismatch after join:")
+        print(f"   player_game_stats_total: {player_total_count}")
+        print(f"   joined_player_stats_silver: {joined_count}")
+        print(f"   Difference: {joined_count - player_total_count}")
+
+    assert (
+        player_total_count == joined_count
+    ), f"player_game_stats_total: {player_total_count} does NOT equal joined_player_stats_silver: {joined_count}"
+
+    print("✅ Assert for joined_player_stats_silver passed")
 
     # RANKING LOGIC FOR PLAYERS
     # Create window specifications

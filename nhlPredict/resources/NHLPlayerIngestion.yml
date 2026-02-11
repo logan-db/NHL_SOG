@@ -9,7 +9,7 @@ resources:
       photon: true
       libraries:
         - notebook:
-            path: ../src/dlt_etl/ingestion/01-bronze-ingestion.py
+            path: ../src/dlt_etl/ingestion/01-bronze-ingestion-nhl-api.py
         - notebook:
             path: ../src/dlt_etl/transformation/02-silver-transform.py
         - notebook:
@@ -18,12 +18,19 @@ resources:
       catalog: lr_nhl_demo
       configuration:
         bundle.sourcePath: ${workspace.file_path}/src
-        tmp_base_path: /Volumes/lr_nhl_demo/dev/
-        base_shots_download_url: https://peter-tanner.com/moneypuck/downloads/
-        base_download_url: https://moneypuck.com/moneypuck/playerData/seasonSummary/2024/regular/
-        games_download_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv
-        player_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/regular/skaters/
-        one_time_load: "true"
-        season_list: "[2023, 2024, 2025]"
-        player_playoff_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/playoffs/skaters/
+        # Used by gold fallback when dlt.read() returns 0 (spark.table(catalog.schema.table))
+        schema: dev
+        catalog: lr_nhl_demo
+        one_time_load: "false"            # Incremental mode
+        skip_staging_ingestion: "true"    # SKIP MODE - use _staging_manual tables (like last night)
+        lookback_days: "1"                # Safety buffer for late-arriving data
+        # How many days of future schedule to fetch (default 8). Needed so gold has upcoming NHL games.
+        schedule_future_days: "17"
+      notifications:
+        - email_recipients:
+            - logan.rupert@databricks.com
+          alerts:
+            - on-update-success
+            - on-update-failure
+            - on-flow-failure
       root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl
