@@ -497,7 +497,7 @@ def aggregate_team_stats_by_situation(
     situations = ["all", "5on4", "4on5", "5on5"]
     stats = {situation: defaultdict(int) for situation in situations}
 
-    plays = pbp_data.get("plays", [])
+    plays = _get_normalized_plays(pbp_data)
 
     for event in plays:
         # Get situation for this event
@@ -769,6 +769,151 @@ def aggregate_team_stats_by_situation(
 
 
 # =============================================================================
+# PLAY-BY-PLAY RESPONSE NORMALIZATION
+# =============================================================================
+
+# Map alternate API event "type" values to our canonical typeDescKey
+_TYPE_TO_DESCK_KEY = {
+    "Shot": "shot-on-goal",
+    "shot": "shot-on-goal",
+    "shot-on-goal": "shot-on-goal",
+    "Goal": "goal",
+    "goal": "goal",
+    "Missed Shot": "missed-shot",
+    "missed-shot": "missed-shot",
+    "Blocked Shot": "blocked-shot",
+    "blocked-shot": "blocked-shot",
+    "Hit": "hit",
+    "hit": "hit",
+    "Takeaway": "takeaway",
+    "takeaway": "takeaway",
+    "Giveaway": "giveaway",
+    "giveaway": "giveaway",
+}
+
+
+def _extract_plays_array(pbp_data: Dict) -> List[Dict]:
+    """
+    Extract the list of play events from various possible API response shapes.
+    - nhl-api-py / game_center: often top-level "plays" (list)
+    - Some feeds: data.game.plays.play (list) with type/pid/xcoord (different keys)
+    Returns a list of event dicts (possibly in alternate format).
+    """
+    if not pbp_data:
+        return []
+    # Top-level "plays" (list)
+    plays = pbp_data.get("plays")
+    if isinstance(plays, list):
+        return plays
+    # Nested: data -> game -> plays -> play
+    data = pbp_data.get("data", {})
+    game = data.get("game", {}) if isinstance(data, dict) else {}
+    plays_obj = game.get("plays", {}) if isinstance(game, dict) else {}
+    play_list = plays_obj.get("play") if isinstance(plays_obj, dict) else plays_obj
+    if isinstance(play_list, list):
+        return play_list
+    return []
+
+
+def _normalize_event(event: Dict) -> Dict:
+    """
+    Normalize one play event to the format expected by aggregate_player_stats_*:
+    - typeDescKey (e.g. "shot-on-goal", "goal")
+    - details: { shootingPlayerId, scoringPlayerId, assist1PlayerId, assist2PlayerId,
+                 hittingPlayerId, eventOwnerTeamId, xCoord, yCoord, zoneCode }
+    - periodDescriptor: { number }
+    - timeInPeriod
+    - situationCode
+    Handles both canonical format and alternate (type, pid, pid1, xcoord, ycoord, teamid).
+    """
+    if not event:
+        return event
+    details = event.get("details", {})
+    if not isinstance(details, dict):
+        details = {}
+
+    # Event type: typeDescKey (canonical) or type (alternate)
+    type_desc = event.get("typeDescKey")
+    if not type_desc and event.get("type"):
+        raw_type = event.get("type")
+        type_desc = _TYPE_TO_DESCK_KEY.get(raw_type, raw_type)
+    if isinstance(type_desc, str):
+        type_desc = type_desc.strip().lower().replace(" ", "-")
+        if type_desc == "shot":
+            type_desc = "shot-on-goal"
+        elif type_desc in ("missed-shot", "missedshot"):
+            type_desc = "missed-shot"
+        elif type_desc in ("blocked-shot", "blockedshot"):
+            type_desc = "blocked-shot"
+
+    # Shooter / scorer: details.shootingPlayerId, details.scoringPlayerId or top-level pid/pid1
+    shooting_id = details.get("shootingPlayerId")
+    if shooting_id is None and event.get("pid") is not None:
+        shooting_id = event.get("pid")
+    if shooting_id is None and event.get("pid1") is not None:
+        shooting_id = event.get("pid1")
+    scoring_id = details.get("scoringPlayerId")
+    if scoring_id is None and type_desc == "goal" and event.get("pid1") is not None:
+        scoring_id = event.get("pid1")
+    assist1_id = details.get("assist1PlayerId") or details.get("assist1Id") or event.get("pid2")
+    assist2_id = details.get("assist2PlayerId") or details.get("assist2Id") or event.get("pid3")
+    hitting_id = details.get("hittingPlayerId")
+    if hitting_id is None and (event.get("type") == "Hit" or event.get("typeDescKey") == "hit"):
+        hitting_id = event.get("pid1") or event.get("pid")
+    event_owner_team = details.get("eventOwnerTeamId") or event.get("teamid")
+    x_coord = details.get("xCoord") if details.get("xCoord") is not None else event.get("xcoord")
+    y_coord = details.get("yCoord") if details.get("yCoord") is not None else event.get("ycoord")
+
+    # Build normalized details
+    norm_details = {
+        "shootingPlayerId": shooting_id,
+        "scoringPlayerId": scoring_id,
+        "assist1PlayerId": assist1_id,
+        "assist2PlayerId": assist2_id,
+        "hittingPlayerId": hitting_id,
+        "eventOwnerTeamId": event_owner_team,
+        "xCoord": x_coord,
+        "yCoord": y_coord,
+        "zoneCode": details.get("zoneCode") or event.get("zonecode"),
+        "playerId": details.get("playerId") or event.get("pid1") or event.get("pid"),
+    }
+    # Period / time: support both periodDescriptor.number + timeInPeriod and period + time
+    period_num = event.get("periodDescriptor", {}).get("number") if isinstance(event.get("periodDescriptor"), dict) else None
+    if period_num is None:
+        period_num = event.get("period")
+    time_in_period = event.get("timeInPeriod") or event.get("time", "00:00")
+    situation_code = event.get("situationCode")
+    if not situation_code and event.get("strength") is not None:
+        # Map NHL strength code to situationCode-like string (e.g. 701 -> 5v5 -> 1551)
+        s = event.get("strength")
+        if s in (701, "701") or s == 5:  # even strength
+            situation_code = "1551"
+        elif s in (702, 703, "702", "703"):  # PP
+            situation_code = "1541"  # 5v4
+        else:
+            situation_code = "1551"
+    if not situation_code:
+        situation_code = "1551"
+    if isinstance(situation_code, int):
+        situation_code = str(situation_code)
+
+    return {
+        "typeDescKey": type_desc or event.get("typeDescKey"),
+        "details": norm_details,
+        "periodDescriptor": {"number": period_num or 0},
+        "timeInPeriod": time_in_period,
+        "situationCode": situation_code,
+        **{k: v for k, v in event.items() if k not in ("details", "periodDescriptor", "typeDescKey", "type")},
+    }
+
+
+def _get_normalized_plays(pbp_data: Dict) -> List[Dict]:
+    """Extract plays from pbp_data and normalize each event for consistent parsing."""
+    raw = _extract_plays_array(pbp_data)
+    return [_normalize_event(e) for e in raw]
+
+
+# =============================================================================
 # PLAYER STATS AGGREGATION BY SITUATION
 # =============================================================================
 
@@ -817,7 +962,7 @@ def aggregate_player_stats_by_situation(
     situations = ["all", "5on4", "4on5", "5on5"]
     stats = {situation: defaultdict(int) for situation in situations}
 
-    plays = pbp_data.get("plays", [])
+    plays = _get_normalized_plays(pbp_data)
     player_shifts = [s for s in shift_data if str(s.get("playerId")) == str(player_id)]
 
     # Calculate ice time and shifts per situation
@@ -1077,11 +1222,22 @@ def aggregate_player_stats_by_situation(
 
     # Ensure all required fields have default values (even if 0)
     # This is critical because defaultdict(int) only creates keys when accessed
-    # and when we spread with **dict(), only existing keys are included
+    # and when we spread with **dict(), only existing keys are included.
+    # Missing keys become null in Spark; explicit 0 ensures stats flow to silver/gold.
     required_int_fields = [
+        "I_F_shotsOnGoal",
+        "I_F_missedShots",
+        "I_F_blockedShotAttempts",
+        "I_F_shotAttempts",
+        "I_F_unblockedShotAttempts",
+        "I_F_goals",
         "I_F_primaryAssists",
         "I_F_secondaryAssists",
         "I_F_points",
+        "I_F_rebounds",
+        "I_F_reboundGoals",
+        "I_F_savedShotsOnGoal",
+        "I_F_savedUnblockedShotAttempts",
         "I_F_hits",
         "I_F_takeaways",
         "I_F_giveaways",
@@ -1091,6 +1247,74 @@ def aggregate_player_stats_by_situation(
         "I_F_lowDangerGoals",
         "I_F_mediumDangerGoals",
         "I_F_highDangerGoals",
+        "shotsOnGoalFor",
+        "missedShotsFor",
+        "blockedShotAttemptsFor",
+        "shotAttemptsFor",
+        "unblockedShotAttemptsFor",
+        "goalsFor",
+        "reboundsFor",
+        "reboundGoalsFor",
+        "savedShotsOnGoalFor",
+        "savedUnblockedShotAttemptsFor",
+        "lowDangerShotsFor",
+        "mediumDangerShotsFor",
+        "highDangerShotsFor",
+        "lowDangerGoalsFor",
+        "mediumDangerGoalsFor",
+        "highDangerGoalsFor",
+        "shotsOnGoalAgainst",
+        "missedShotsAgainst",
+        "blockedShotAttemptsAgainst",
+        "shotAttemptsAgainst",
+        "unblockedShotAttemptsAgainst",
+        "goalsAgainst",
+        "reboundsAgainst",
+        "reboundGoalsAgainst",
+        "savedShotsOnGoalAgainst",
+        "savedUnblockedShotAttemptsAgainst",
+        "lowDangerShotsAgainst",
+        "mediumDangerShotsAgainst",
+        "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst",
+        "mediumDangerGoalsAgainst",
+        "highDangerGoalsAgainst",
+        "OnIce_F_shotsOnGoal",
+        "OnIce_F_missedShots",
+        "OnIce_F_blockedShotAttempts",
+        "OnIce_F_shotAttempts",
+        "OnIce_F_unblockedShotAttempts",
+        "OnIce_F_goals",
+        "OnIce_F_lowDangerShots",
+        "OnIce_F_mediumDangerShots",
+        "OnIce_F_highDangerShots",
+        "OnIce_F_lowDangerGoals",
+        "OnIce_F_mediumDangerGoals",
+        "OnIce_F_highDangerGoals",
+        "OnIce_A_shotsOnGoal",
+        "OnIce_A_missedShots",
+        "OnIce_A_blockedShotAttempts",
+        "OnIce_A_shotAttempts",
+        "OnIce_A_unblockedShotAttempts",
+        "OnIce_A_goals",
+        "OnIce_A_lowDangerShots",
+        "OnIce_A_mediumDangerShots",
+        "OnIce_A_highDangerShots",
+        "OnIce_A_lowDangerGoals",
+        "OnIce_A_mediumDangerGoals",
+        "OnIce_A_highDangerGoals",
+        "OffIce_F_shotsOnGoal",
+        "OffIce_F_missedShots",
+        "OffIce_F_blockedShotAttempts",
+        "OffIce_F_shotAttempts",
+        "OffIce_F_unblockedShotAttempts",
+        "OffIce_F_goals",
+        "OffIce_A_shotsOnGoal",
+        "OffIce_A_missedShots",
+        "OffIce_A_blockedShotAttempts",
+        "OffIce_A_shotAttempts",
+        "OffIce_A_unblockedShotAttempts",
+        "OffIce_A_goals",
         "shifts",
         "iceTimeRank",
     ]

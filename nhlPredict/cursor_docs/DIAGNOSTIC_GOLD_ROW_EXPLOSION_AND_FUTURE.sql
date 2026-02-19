@@ -1,19 +1,26 @@
 -- =============================================================================
--- Diagnostic: Gold row explosion (458K vs ~182K) and 0 future records
+-- Diagnostic: Gold row explosion (458K vs ~182K) and future records
 -- Single query — returns one table with all checks. Run in Databricks SQL.
 -- Replace `lr_nhl_demo.dev` with your catalog.schema if different.
 --
 -- Result columns:
 --   check_name         = table/check label
 --   total_records      = row count
---   future_records     = rows with gameDate > max(silver_players_ranked.gameDate); NULL for silver
+--   future_records     = rows with gameDate > cutoff; cutoff = max(silver gameDate) or fallback
 --   min_date, max_date = date range
 --   distinct_key_rows  = distinct join-key count (silver only); if < total_records → duplicates
 --   duplicate_rows     = total_records - distinct (silver only)
+--
+-- When silver_players_ranked has 0 rows, cutoff falls back to max(gold gameDate) so future_records
+-- is still correct. Row counts will be low (schedule-only); run with skip_staging_ingestion=false.
 -- =============================================================================
 
 WITH max_historical AS (
-  SELECT MAX(CAST(gameDate AS DATE)) AS d FROM lr_nhl_demo.dev.silver_players_ranked
+  SELECT COALESCE(
+    (SELECT MAX(CAST(gameDate AS DATE)) FROM lr_nhl_demo.dev.silver_players_ranked),
+    (SELECT MAX(CAST(gameDate AS DATE)) FROM lr_nhl_demo.dev.gold_player_stats_v2),
+    CURRENT_DATE()
+  ) AS d
 ),
 silver_gh AS (
   SELECT

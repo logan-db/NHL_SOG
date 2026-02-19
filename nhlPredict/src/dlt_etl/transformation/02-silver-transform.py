@@ -261,6 +261,18 @@ def clean_games_data():
 
     assert joined_game_stats.count() == game_stats_total.count()
 
+    # Coalesce numeric game stats to 0 so gold/rankings never get null (join or bronze nulls)
+    _numeric_game_cols = [
+        "game_Total_goalsFor", "game_Total_goalsAgainst", "game_Total_shotsOnGoalFor",
+        "game_Total_shotsOnGoalAgainst", "game_Total_shotAttemptsFor", "game_Total_shotAttemptsAgainst",
+        "game_Total_penaltiesFor", "game_Total_penaltiesAgainst",
+        "game_PP_goalsFor", "game_PK_goalsAgainst", "game_PP_shotsOnGoalFor", "game_PK_shotsOnGoalAgainst",
+        "game_PP_shotAttemptsFor", "game_PK_shotAttemptsAgainst",
+    ]
+    for c in _numeric_game_cols:
+        if c in joined_game_stats.columns:
+            joined_game_stats = joined_game_stats.withColumn(c, coalesce(col(c), lit(0)))
+
     return joined_game_stats
 
 
@@ -300,13 +312,49 @@ def merge_games_data():
             ),
         )
     )
+    # Cast both dates to date type so DATE (schedule) vs gameDate (games) match reliably
     join_cond = (
         (sched["HOME"] == games["homeTeamCode"])
         & (sched["AWAY"] == games["awayTeamCode"])
-        & (sched["DATE"] == games["gameDate"])
+        & (to_date(sched["DATE"]) == to_date(games["gameDate"]))
         & (sched["TEAM_ABV"] == games["team"])
     )
     silver_games_schedule = sched.join(games, join_cond, how="outer")
+
+    # Normalize game id to a single column: downstream and schema expect gameId only.
+    # Schedule may provide GAME_ID (bronze) or gameId; games provides gameId. Unify so we never reference GAME_ID.
+    if "GAME_ID" in silver_games_schedule.columns:
+        silver_games_schedule = silver_games_schedule.withColumn(
+            "gameId",
+            coalesce(col("gameId"), col("GAME_ID").cast("long")),
+        ).drop("GAME_ID")
+
+    # Coalesce numeric game stats to 0 for historical rows so rankings/gold never get null
+    _numeric_game_cols = [
+        "game_Total_goalsFor", "game_Total_goalsAgainst", "game_Total_shotsOnGoalFor",
+        "game_Total_shotsOnGoalAgainst", "game_Total_shotAttemptsFor", "game_Total_shotAttemptsAgainst",
+        "game_Total_penaltiesFor", "game_Total_penaltiesAgainst",
+        "game_PP_goalsFor", "game_PK_goalsAgainst", "game_PP_shotsOnGoalFor", "game_PK_shotsOnGoalAgainst",
+        "game_PP_shotAttemptsFor", "game_PK_shotAttemptsAgainst",
+    ]
+    for c in _numeric_game_cols:
+        if c in silver_games_schedule.columns:
+            silver_games_schedule = silver_games_schedule.withColumn(
+                c, when(col("gameId").isNotNull(), coalesce(col(c), lit(0))).otherwise(col(c))
+            )
+
+    # Diagnostic: at this point in the run, how many rows have game stats (join matched).
+    # If this runs before upstream data is available, counts can be 0; final table may still fill later.
+    _join_total = silver_games_schedule.filter(col("gameId").isNotNull()).count()
+    _join_with_sog = (
+        silver_games_schedule.filter(col("gameId").isNotNull())
+        .filter(col("game_Total_shotsOnGoalAgainst").isNotNull())
+        .count()
+    )
+    print(
+        f"📊 silver_games_schedule_v2 join (this run): {_join_total} historical rows, "
+        f"{_join_with_sog} with game_Total_shotsOnGoalAgainst"
+    )
 
     upcoming_final_clean = (
         silver_games_schedule.filter(col("gameId").isNull())
@@ -759,6 +807,12 @@ def merge_games_data():
         )
     )
 
+    # Coalesce sum_* columns so gold never sees null for opponent_previous_sum_game_* (join miss or upstream null)
+    sum_cols = [f"sum_{c}" for c in per_game_columns + base_columns]
+    for c in sum_cols:
+        if c in final_joined_rank.columns:
+            final_joined_rank = final_joined_rank.withColumn(c, coalesce(col(c), lit(0)))
+
     # Add day of week and fill LOCAL/EASTERN cols if null with Deafult values
     final_joined_rank_with_day = get_day_of_week(final_joined_rank, "DATE")
 
@@ -833,21 +887,48 @@ def clean_rank_players():
         "OffIce_A_shotAttempts",
     ]
 
-    # Call the function on the DataFrame
+    # Prefer bronze; if empty (e.g. same run before stream commits), use staging so silver gets data in one run.
+    # Read both so DLT orders staging before silver; then choose source.
+    _bronze = dlt.read("bronze_player_game_stats_v2")
+    _staging = dlt.read("bronze_player_game_stats_v2_staging")
+    _player_src = _bronze if not _bronze.isEmpty() else _staging
+    if _bronze.isEmpty() and not _staging.isEmpty():
+        print("📊 silver_players_ranked: bronze empty this run — using bronze_player_game_stats_v2_staging")
+    # When both DLT reads are empty (e.g. skip_staging + stream not committed yet), use materialized tables
+    # so silver gets data after delete/recreate or when run order leaves bronze "empty" in dlt.read().
+    if _player_src.isEmpty():
+        _catalog = spark.conf.get("catalog", "lr_nhl_demo")
+        _schema = spark.conf.get("schema", "dev")
+        for _name, _tbl in [
+            ("bronze_player_game_stats_v2", f"{_catalog}.{_schema}.bronze_player_game_stats_v2"),
+            ("bronze_player_game_stats_v2_staging_manual", f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual"),
+        ]:
+            try:
+                _fallback = spark.table(_tbl)
+                if _fallback is not None and not _fallback.isEmpty():
+                    _player_src = _fallback
+                    print(f"📊 silver_players_ranked: fallback to spark.table({_name}) — {_fallback.count()} rows")
+                    break
+            except Exception:
+                continue
+        if _player_src.isEmpty():
+            print("⚠️ silver_players_ranked: both bronze and staging empty; set skip_staging_ingestion=false and run again")
+
+    # Call the function on the DataFrame (single source so situation filters work)
     player_game_stats_total = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"),
+        _player_src,
         select_cols,
         "player_Total_",
         "all",
     )
     player_game_stats_pp = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PP_", "5on4"
+        _player_src, select_cols, "player_PP_", "5on4"
     )
     player_game_stats_pk = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_PK_", "4on5"
+        _player_src, select_cols, "player_PK_", "4on5"
     )
     player_game_stats_ev = select_rename_columns(
-        dlt.read("bronze_player_game_stats_v2"), select_cols, "player_EV_", "5on5"
+        _player_src, select_cols, "player_EV_", "5on5"
     )
 
     joined_player_stats = (
@@ -896,7 +977,16 @@ def clean_rank_players():
             ],
             "left",
         )
-    ).alias("joined_player_stats")
+    )
+    # Coalesce numeric player stats to 0 so gold never gets null (bronze/source nulls -> 0)
+    for c in joined_player_stats.columns:
+        if c.startswith(
+            ("player_Total_", "player_PP_", "player_PK_", "player_EV_")
+        ):
+            joined_player_stats = joined_player_stats.withColumn(
+                c, coalesce(col(c), lit(0))
+            )
+    joined_player_stats = joined_player_stats.alias("joined_player_stats")
 
     # Check for duplicates in silver_games_schedule_v2 before joining
     schedule_with_penalty = dlt.read("silver_games_schedule_v2").select(
@@ -940,7 +1030,7 @@ def clean_rank_players():
         )
     ).alias("joined_player_stats_silver")
 
-    # Validate join didn't create duplicates
+    # Validate join didn't create duplicates (allow 0==0 so pipeline doesn't fail when bronze/staging empty)
     player_total_count = player_game_stats_total.count()
     joined_count = joined_player_stats_silver.count()
 
@@ -949,12 +1039,11 @@ def clean_rank_players():
         print(f"   player_game_stats_total: {player_total_count}")
         print(f"   joined_player_stats_silver: {joined_count}")
         print(f"   Difference: {joined_count - player_total_count}")
-
-    assert (
-        player_total_count == joined_count
-    ), f"player_game_stats_total: {player_total_count} does NOT equal joined_player_stats_silver: {joined_count}"
-
-    print("✅ Assert for joined_player_stats_silver passed")
+        assert (
+            player_total_count == joined_count
+        ), f"player_game_stats_total: {player_total_count} does NOT equal joined_player_stats_silver: {joined_count}"
+    else:
+        print(f"✅ joined_player_stats_silver row count: {joined_count}")
 
     # RANKING LOGIC FOR PLAYERS
     # Create window specifications

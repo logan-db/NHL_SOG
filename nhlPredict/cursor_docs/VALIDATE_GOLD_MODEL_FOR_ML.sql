@@ -3,6 +3,20 @@
 -- ============================================================================
 -- Purpose: Validate gold_model_stats_v2 is ready for ML predictions
 -- Expected: Historical games for training + upcoming games for predictions
+--
+-- One upcoming row per player: Gold keeps only each player's *next* NHL game
+-- (partition by playerId, shooterName; keep rank 1 by gameDate). So you should
+-- see exactly one row per player in WHERE gameDate >= CURRENT_DATE().
+--
+-- Nulls in rolling stats (e.g. average_*_last_3_games) for upcoming games are
+-- expected when a player has fewer than 3 (or 7) historical games in the
+-- window, or is new. For ML, filter to rows where key features are non-null
+-- if needed (e.g. WHERE average_player_Total_icetime_last_3_games IS NOT NULL).
+--
+-- Window scope: Rolling stats use regular season + playoff only (preseason
+-- excluded by gameDate >= Oct 1 per season). International is excluded (NHL-only).
+-- Team stats: gold_game_stats_v2 has team-level rolling stats; merged into
+-- gold_merged_stats_v2 / gold_model_stats_v2 (teamGamesPlayedRolling, etc.).
 -- ============================================================================
 
 WITH base_stats AS (
@@ -115,6 +129,25 @@ validation_results AS (
     FROM base_stats
     WHERE playerId IS NOT NULL
     GROUP BY playerId, gameDate, playerTeam
+    HAVING COUNT(*) > 1
+  )
+  
+  -- 5b. ONE UPCOMING ROW PER PLAYER (gold keeps only each player's *next* game)
+  UNION ALL
+  SELECT '5. UPCOMING', 'Upcoming rows (gameDate >= today)', CAST(COUNT(*) as STRING),
+    '✅ INFO',
+    'Total upcoming game rows in gold'
+  FROM base_stats WHERE game_type = 'upcoming'
+  
+  UNION ALL
+  SELECT '5. UPCOMING', 'Players with >1 upcoming row (should be 0)', CAST(COALESCE(SUM(cnt - 1), 0) as STRING),
+    CASE WHEN COALESCE(SUM(cnt - 1), 0) = 0 THEN '✅ PASS' ELSE '❌ FAIL' END,
+    'Gold keeps only next game per (playerId, shooterName)'
+  FROM (
+    SELECT playerId, shooterName, COUNT(*) as cnt
+    FROM base_stats
+    WHERE game_type = 'upcoming' AND playerId IS NOT NULL
+    GROUP BY playerId, shooterName
     HAVING COUNT(*) > 1
   )
   

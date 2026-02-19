@@ -22,7 +22,8 @@ resources:
         schema: dev
         catalog: lr_nhl_demo
         one_time_load: "false"            # Incremental mode
-        skip_staging_ingestion: "true"    # SKIP MODE - use _staging_manual tables (like last night)
+        # Run staging (API) so play-by-play is populated. If you switch true↔false and get DIFFERENT_DELTA_TABLE_READ: delete pipeline (cascades to tables), redeploy, run (see STREAMING_CHECKPOINT_RESET.md).
+        skip_staging_ingestion: "true"
         lookback_days: "1"                # Safety buffer for late-arriving data
         # How many days of future schedule to fetch (default 8). Needed so gold has upcoming NHL games.
         schedule_future_days: "17"

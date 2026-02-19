@@ -135,10 +135,11 @@ def aggregate_games_data():
     # No dedupe: silver is 1 row per (team, game). Dedupe collapsed 7910→2130 due to gameDate format.
     _gh_count = games_historical.count()
     print(f"📊 games_historical rows: {_gh_count}")
+    # Cast both dates to date type so schedule DATE and games gameDate match (avoids null stats)
     join_cond = (
         (base_schedule["HOME"] == games_historical["homeTeamCode"])
         & (base_schedule["AWAY"] == games_historical["awayTeamCode"])
-        & (base_schedule["DATE"] == games_historical["gameDate"])
+        & (to_date(base_schedule["DATE"]) == to_date(games_historical["gameDate"]))
         & (base_schedule["TEAM_ABV"] == games_historical["team"])
     )
     # LEFT join so all base_schedule rows are kept (including future). Outer was yielding only
@@ -224,12 +225,18 @@ def aggregate_games_data():
         players_df = spark.table(f"{_catalog}.{_schema}.silver_players_ranked")
         print("📊 Fallback: read silver_players_ranked from spark.table for join (dlt.read was empty)")
     # Normalize join keys so schedule–players join matches (types can differ between dlt and spark.table).
+    # Use same date normalization as schedule (yyyyMMdd for int, else to_date) so join keys match.
     players_df = (
         players_df.withColumn(
             "gameDate",
-            when(col("gameDate").isNotNull(), to_date(col("gameDate"))).otherwise(
-                col("gameDate")
-            ),
+            when(
+                col("gameDate").isNotNull(),
+                coalesce(
+                    to_date(col("gameDate")),
+                    to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+                    to_date(col("gameDate").cast("string"), "yyyy-MM-dd"),
+                ),
+            ).otherwise(col("gameDate")),
         )
         .withColumn("gameId", col("gameId").cast("string"))
         .withColumn("season", col("season").cast("long"))
@@ -253,8 +260,16 @@ def aggregate_games_data():
         "home_or_away",
     ]
 
-    # Normalize gameDate for split. Use data-driven cutoff so future rows are not lost when job runs in UTC or late.
-    schedule_with_date = schedule_df.withColumn("_game_date", to_date(col("gameDate")))
+    # Normalize gameDate for split and for join: ensure date type so schedule–silver join matches.
+    # Use same normalization as silver (yyyyMMdd for int, or to_date for date/string).
+    schedule_with_date = schedule_df.withColumn(
+        "gameDate",
+        coalesce(
+            to_date(col("gameDate")),
+            to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+            to_date(col("DATE").cast("string"), "yyyyMMdd"),
+        ),
+    ).withColumn("_game_date", col("gameDate"))
     schedule_historical = (
         schedule_with_date.filter(col("_game_date") <= lit(future_cutoff_date))
         .drop("_game_date")
@@ -272,6 +287,12 @@ def aggregate_games_data():
     # Always add future schedule rows (no join); union adds nulls for player columns
     gold_shots_date = historical_joined.unionByName(
         schedule_future, allowMissingColumns=True
+    )
+    # Only rows with null gameId should be upcoming games. Drop historical schedule rows
+    # that have no gameId (orphans: schedule date <= cutoff but no match in games_historical).
+    gold_shots_date = gold_shots_date.filter(
+        (to_date(col("gameDate")) > lit(future_cutoff_date))
+        | (col("gameId").isNotNull())
     )
 
     schedule_future_count = schedule_future.count()
@@ -548,15 +569,54 @@ def aggregate_games_data():
         f"🔍 Historical rows for upcoming players: {historical_for_upcoming.count():,}"
     )
 
+    # Exclude preseason from window input so "last 3/7 games" are regular+playoff only.
+    # International is already excluded (NHL-only schedule + playerTeam filter).
+    # Regular season start per NHL season (Oct 1); keep upcoming (gameId null) always.
+    _reg_season_start = (
+        when(col("season") == 20232024, to_date(lit("2023-10-01")))
+        .when(col("season") == 20242025, to_date(lit("2024-10-01")))
+        .when(col("season") == 20252026, to_date(lit("2025-10-01")))
+        .otherwise(to_date(lit("2020-10-01")))
+    )
+    gold_shots_date_final = gold_shots_date_final.filter(
+        col("gameId").isNull()
+        | (to_date(col("gameDate")) >= _reg_season_start)
+    )
+
+    # Coalesce count-like player stats to 0 so "no shots"/"no rebounds" etc. are 0 not null.
+    # Skip Rank and ratio columns (iceTimeRank, Percentage, Per) so they stay null when missing.
+    _stat_prefixes = ("player_Total_", "player_PP_", "player_EV_", "player_PK_")
+    _zero_cols = [
+        c
+        for c in gold_shots_date_final.columns
+        if any(c.startswith(p) for p in _stat_prefixes)
+        and "Percentage" not in c
+        and "Per" not in c
+        and "Rank" not in c
+    ]
+    for _c in _zero_cols:
+        gold_shots_date_final = gold_shots_date_final.withColumn(
+            _c, coalesce(col(_c), lit(0))
+        )
+
     # Define Windows (player last games, and players last matchups)
     # CRITICAL: Partition by playerId + shooterName ONLY (not playerTeam)
     # This allows window to find historical data even if player changed teams
-    windowSpec = Window.partitionBy("playerId", "shooterName").orderBy(col("gameDate"))
+    # Order must be deterministic so "previous" = true previous game (gameId tie-breaker; asc_nulls_last for upcoming)
+    _player_order = [
+        col("gameDate"),
+        col("gameId").asc_nulls_last(),
+        col("playerTeam"),
+    ]
+    windowSpec = Window.partitionBy("playerId", "shooterName").orderBy(_player_order)
+    # "Previous" = last non-null in prior rows (so we don't get null when immediate prior row is missing the stat)
+    prevRowsSpec = windowSpec.rowsBetween(Window.unboundedPreceding, -1)
     last3WindowSpec = windowSpec.rowsBetween(-2, 0)
     last7WindowSpec = windowSpec.rowsBetween(-6, 0)
     matchupWindowSpec = Window.partitionBy(
         "playerId", "playerTeam", "shooterName", "opposingTeam"
-    ).orderBy(col("gameDate"))
+    ).orderBy(_player_order)
+    matchupPrevRowsSpec = matchupWindowSpec.rowsBetween(Window.unboundedPreceding, -1)
     matchupLast3WindowSpec = matchupWindowSpec.rowsBetween(-2, 0)
     matchupLast7WindowSpec = matchupWindowSpec.rowsBetween(-6, 0)
 
@@ -584,15 +644,15 @@ def aggregate_games_data():
         "playerMatchupPlayedRolling",
     ]
 
-    # Create a window specification
+    # Create a window specification (same deterministic order as stat windows)
     gameCountWindowSpec = (
         Window.partitionBy("playerId", "playerTeam", "season")
-        .orderBy("gameDate")
+        .orderBy(_player_order)
         .rowsBetween(Window.unboundedPreceding, 0)
     )
     matchupCountWindowSpec = (
         Window.partitionBy("playerId", "playerTeam", "opposingTeam", "season")
-        .orderBy("gameDate")
+        .orderBy(_player_order)
         .rowsBetween(Window.unboundedPreceding, 0)
     )
 
@@ -631,15 +691,19 @@ def aggregate_games_data():
     ]
 
     # Create a list of column expressions for lag and averages
+    # Force stat columns to 0 when null (covers upcoming rows and any missed upstream nulls)
     column_exprs = [
-        col(c) for c in gold_shots_date_count.columns
-    ]  # Start with all existing columns
+        coalesce(col(c), lit(0)).alias(c) if c in _zero_cols else col(c)
+        for c in gold_shots_date_count.columns
+    ]
 
     # Window functions for rolling averages
-    # For upcoming games: look ONLY at historical data (previous rows, not current)
+    # previous_* = last non-null in prior rows (fills when immediate prior row has null stat)
     # rowsBetween(-N, -1) means "N previous rows, excluding current row"
     player_avg_exprs = {
-        col_name: round(lag(col(col_name)).over(windowSpec), 2)
+        col_name: round(
+            last(col(col_name), ignorenulls=True).over(prevRowsSpec), 2
+        )
         for col_name in columns_to_iterate
     }
     player_avg3_exprs = {
@@ -657,7 +721,9 @@ def aggregate_games_data():
         for col_name in columns_to_iterate
     }
     playerMatch_avg_exprs = {
-        col_name: round(lag(col(col_name)).over(matchupWindowSpec), 2)
+        col_name: round(
+            last(col(col_name), ignorenulls=True).over(matchupPrevRowsSpec), 2
+        )
         for col_name in columns_to_iterate
     }
     playerMatch_avg3_exprs = {
@@ -687,47 +753,52 @@ def aggregate_games_data():
         matchup_avg3 = playerMatch_avg3_exprs[column_name]
         matchup_avg7 = playerMatch_avg7_exprs[column_name]
 
+        # Coalesce to 0 so "no prior value" / "no shots" etc. show 0 not null
+        _prev = when(
+            col("gameId").isNotNull(),
+            round(last(col(column_name), ignorenulls=True).over(prevRowsSpec), 2),
+        ).otherwise(player_avg)
+        _avg3 = when(
+            col("gameId").isNotNull(),
+            round(mean(col(column_name)).over(last3WindowSpec), 2),
+        ).otherwise(round(player_avg3, 2))
+        _avg7 = when(
+            col("gameId").isNotNull(),
+            round(mean(col(column_name)).over(last7WindowSpec), 2),
+        ).otherwise(player_avg7)
+        _match_prev = when(
+            col("gameId").isNotNull(),
+            round(
+                last(col(column_name), ignorenulls=True).over(matchupPrevRowsSpec),
+                2,
+            ),
+        ).otherwise(matchup_avg)
+        _match_avg3 = when(
+            col("gameId").isNotNull(),
+            round(mean(col(column_name)).over(matchupLast3WindowSpec), 2),
+        ).otherwise(matchup_avg3)
+        _match_avg7 = when(
+            col("gameId").isNotNull(),
+            round(mean(col(column_name)).over(matchupLast7WindowSpec), 2),
+        ).otherwise(matchup_avg7)
         column_exprs += [
-            when(
-                col("gameId").isNotNull(),
-                round(lag(col(column_name)).over(windowSpec), 2),
-            )
-            .otherwise(player_avg)
-            .alias(f"previous_{column_name}"),
-            when(
-                col("gameId").isNotNull(),
-                round(mean(col(column_name)).over(last3WindowSpec), 2),
-            )
-            .otherwise(round(player_avg3, 2))
-            .alias(f"average_{column_name}_last_3_games"),
-            when(
-                col("gameId").isNotNull(),
-                round(mean(col(column_name)).over(last7WindowSpec), 2),
-            )
-            .otherwise(player_avg7)
-            .alias(f"average_{column_name}_last_7_games"),
-            when(
-                col("gameId").isNotNull(),
-                round(lag(col(column_name)).over(matchupWindowSpec), 2),
-            )
-            .otherwise(matchup_avg)
-            .alias(f"matchup_previous_{column_name}"),
-            when(
-                col("gameId").isNotNull(),
-                round(mean(col(column_name)).over(matchupLast3WindowSpec), 2),
-            )
-            .otherwise(matchup_avg3)
-            .alias(f"matchup_average_{column_name}_last_3_games"),
-            when(
-                col("gameId").isNotNull(),
-                round(mean(col(column_name)).over(matchupLast7WindowSpec), 2),
-            )
-            .otherwise(matchup_avg7)
-            .alias(f"matchup_average_{column_name}_last_7_games"),
+            coalesce(_prev, lit(0)).alias(f"previous_{column_name}"),
+            coalesce(_avg3, lit(0)).alias(f"average_{column_name}_last_3_games"),
+            coalesce(_avg7, lit(0)).alias(f"average_{column_name}_last_7_games"),
+            coalesce(_match_prev, lit(0)).alias(f"matchup_previous_{column_name}"),
+            coalesce(_match_avg3, lit(0)).alias(
+                f"matchup_average_{column_name}_last_3_games"
+            ),
+            coalesce(_match_avg7, lit(0)).alias(
+                f"matchup_average_{column_name}_last_7_games"
+            ),
         ]
 
     # Apply all column expressions at once using select
-    gold_player_stats = gold_shots_date_count.select(*column_exprs)
+    gold_player_stats = gold_shots_date_count.select(*column_exprs).withColumn(
+        "previous_opposingTeam",
+        last(col("opposingTeam"), ignorenulls=True).over(prevRowsSpec),
+    )
 
     # Validate data quality - ALL rows should have playerId (except UTA edge case)
     # Both historical games (gameId NOT NULL) and upcoming games (gameId IS NULL)
@@ -779,6 +850,12 @@ def aggregate_games_data():
         )
         print(f"   ✅ Kept all upcoming games + historical games with playerIds")
 
+    # Only rows with null gameId should be upcoming (and should have playerId from roster).
+    # Drop any row with (gameId null AND playerId null) — orphan upcoming or bad data.
+    gold_player_stats = gold_player_stats.filter(
+        (col("gameId").isNotNull()) | (col("playerId").isNotNull())
+    )
+
     # Filter out international/special-event teams (ITA, SVK, MCD, HGS, MAT, etc.)
     before_filter = gold_player_stats.count()
     gold_player_stats = gold_player_stats.filter(col("playerTeam").isin(NHL_TEAMS))
@@ -805,14 +882,17 @@ def window_gold_game_data():
     # for each distinct opposingTeam, get the last game {metric}. Metrics are: game_Total_shotsOnGoalAgainst, game_Total_goalsAgainst, game_Total_shotAttemptsAgainst, game_Total_penaltiesAgainst, game_PK_shotsOnGoalAgainst, game_PK_goalsAgainst, game_PK_shotAttemptsAgainst, game_PP_shotsOnGoalFor, game_PP_goalsFor, game_PP_shotAttemptsFor
 
     windowSpec = Window.partitionBy("playerTeam").orderBy(col("gameDate"))
+    prevRowsSpec = windowSpec.rowsBetween(Window.unboundedPreceding, -1)
     last3WindowSpec = windowSpec.rowsBetween(-2, 0)
     last7WindowSpec = windowSpec.rowsBetween(-6, 0)
     opponentWindowSpec = Window.partitionBy("opposingTeam").orderBy(col("gameDate"))
+    opponentPrevRowsSpec = opponentWindowSpec.rowsBetween(Window.unboundedPreceding, -1)
     opponentLast3WindowSpec = opponentWindowSpec.rowsBetween(-2, 0)
     opponentLast7WindowSpec = opponentWindowSpec.rowsBetween(-6, 0)
     matchupWindowSpec = Window.partitionBy("playerTeam", "opposingTeam").orderBy(
         col("gameDate")
     )
+    matchupPrevRowsSpec = matchupWindowSpec.rowsBetween(Window.unboundedPreceding, -1)
     matchupLast3WindowSpec = matchupWindowSpec.rowsBetween(-2, 0)
     matchupLast7WindowSpec = matchupWindowSpec.rowsBetween(-6, 0)
 
@@ -878,7 +958,7 @@ def window_gold_game_data():
         column_exprs += [
             when(
                 col("teamGamesPlayedRolling") > 1,
-                round(lag(col(column_name)).over(windowSpec), 2),
+                round(last(col(column_name), ignorenulls=True).over(prevRowsSpec), 2),
             )
             .otherwise(game_avg)
             .alias(f"previous_{column_name}"),
@@ -896,7 +976,10 @@ def window_gold_game_data():
             .alias(f"average_{column_name}_last_7_games"),
             when(
                 col("teamGamesPlayedRolling") > 1,
-                round(lag(col(column_name)).over(opponentWindowSpec), 2),
+                round(
+                    last(col(column_name), ignorenulls=True).over(opponentPrevRowsSpec),
+                    2,
+                ),
             )
             .otherwise(opponent_game_avg)
             .alias(f"opponent_previous_{column_name}"),
@@ -914,7 +997,10 @@ def window_gold_game_data():
             .alias(f"opponent_average_{column_name}_last_7_games"),
             when(
                 col("teamMatchupPlayedRolling") > 1,
-                round(lag(col(column_name)).over(matchupWindowSpec), 2),
+                round(
+                    last(col(column_name), ignorenulls=True).over(matchupPrevRowsSpec),
+                    2,
+                ),
             )
             .otherwise(matchup_avg)
             .alias(f"matchup_previous_{column_name}"),
@@ -933,8 +1019,10 @@ def window_gold_game_data():
         ]
 
     # Apply all column expressions at once using select
+    # previous_opposingTeam = last non-null in prior rows (same as other previous_* for consistency)
     gold_game_stats = gold_games_count.select(*column_exprs).withColumn(
-        "previous_opposingTeam", lag(col("opposingTeam")).over(windowSpec)
+        "previous_opposingTeam",
+        last(col("opposingTeam"), ignorenulls=True).over(prevRowsSpec),
     )
 
     return gold_game_stats
@@ -955,9 +1043,11 @@ def merge_player_game_stats():
     gold_game_stats = dlt.read("gold_game_stats_v2").alias("gold_game_stats")
     # schedule_2023 = dlt.read("bronze_schedule_2023").alias("schedule_2023")
 
-    # Drop schedule columns from gold_game_stats to avoid ambiguous references
-    # These columns are already in gold_player_stats and should be identical
-    gold_game_stats = gold_game_stats.drop("DAY", "DATE", "AWAY", "HOME", "dummyDay")
+    # Drop schedule columns and previous_opposingTeam from gold_game_stats to avoid ambiguous references.
+    # We use previous_opposingTeam from gold_player_stats (player-level window) so it's set for upcoming games too.
+    gold_game_stats = gold_game_stats.drop(
+        "DAY", "DATE", "AWAY", "HOME", "dummyDay", "previous_opposingTeam"
+    )
 
     lastGameTeamWindowSpec = Window.partitionBy("playerTeam").orderBy(desc("gameDate"))
 
@@ -979,12 +1069,10 @@ def merge_player_game_stats():
         )
         .withColumn(
             "is_last_played_game_team",
-            # Flag most recent game for each team in current season (8-digit format)
-            when(
-                (row_number().over(lastGameTeamWindowSpec) == 1)
-                & (col("season") == 20252026),
-                lit(1),
-            ).otherwise(lit(0)),
+            # Flag most recent game per team (any season), aligned with silver_games_rankings
+            when(row_number().over(lastGameTeamWindowSpec) == 1, lit(1)).otherwise(
+                lit(0)
+            ),
         )
         .alias("gold_merged_stats")
     )

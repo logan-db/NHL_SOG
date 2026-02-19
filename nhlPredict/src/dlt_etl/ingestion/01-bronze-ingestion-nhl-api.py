@@ -40,6 +40,7 @@ from utils.nhl_api_helper import (
     classify_situation,
     classify_shot_danger,
     is_player_on_ice,
+    _get_normalized_plays,
 )
 
 # COMMAND ----------
@@ -85,55 +86,16 @@ if one_time_load:
     print(f"   Estimated games: ~{(end_date - start_date).days * 8}")
     print(f"   Estimated runtime: 3-5 hours")
 else:
-    # INCREMENTAL LOAD: Only new data (no duplicates)
-    # Skip incremental query in skip mode (streaming tables may not exist yet)
+    # INCREMENTAL LOAD: Date range is computed inside each staging @dlt.table
+    # so we never reference DLT datasets outside a query definition (REFERENCE_DLT_DATASET_OUTSIDE_QUERY_DEFINITION).
     if skip_staging_ingestion:
-        # Skip mode: Just set a reasonable date range (won't be used anyway)
         start_date = today - timedelta(days=lookback_days)
         end_date = today
         print(f"📅 SKIP MODE: Date range not used (loading from manual staging tables)")
     else:
-        # Normal incremental: Check max date from existing bronze table
-        try:
-            max_date_result = spark.sql(
-                f"""
-                SELECT MAX(gameDate) as max_date 
-                FROM {catalog}.{schema}.bronze_player_game_stats_v2
-            """
-            ).collect()
-
-            if max_date_result and max_date_result[0]["max_date"] is not None:
-                # Convert gameDate (int format YYYYMMDD) to date object
-                max_date_str = str(max_date_result[0]["max_date"])
-                max_date = datetime.strptime(max_date_str, "%Y%m%d").date()
-
-                # Start from day after max date (minus lookback_days as safety buffer)
-                start_date = max_date - timedelta(days=lookback_days)
-                end_date = today
-
-                print(f"📅 INCREMENTAL LOAD (Smart Mode):")
-                print(f"   Last processed date: {max_date}")
-                print(
-                    f"   Processing from: {start_date} (includes {lookback_days}-day safety buffer)"
-                )
-                print(f"   Processing to: {end_date}")
-                print(f"   New date range: {(end_date - start_date).days} days")
-                print(f"   Estimated new games: ~{(end_date - start_date).days * 8}")
-                print(f"   ✅ No duplicates - only processing new/recent data")
-            else:
-                # Table exists but is empty - treat as first load
-                print(f"⚠️  Bronze table exists but is empty - performing initial load")
-                start_date = datetime(2023, 10, 1).date()
-                end_date = today
-                print(f"📅 INITIAL LOAD: {start_date} to {end_date}")
-
-        except Exception as e:
-            # Table doesn't exist yet - use fallback to lookback_days
-            print(f"⚠️  Bronze table doesn't exist yet (expected on first run)")
-            start_date = today - timedelta(days=lookback_days)
-            end_date = today
-            print(f"📅 INCREMENTAL LOAD (Fallback Mode): {start_date} to {end_date}")
-            print(f"   Will process last {lookback_days} days")
+        start_date = today - timedelta(days=lookback_days)
+        end_date = today
+        print(f"📅 INCREMENTAL: Date range will be computed inside staging (from bronze) to avoid duplicate work")
 
 # COMMAND ----------
 
@@ -525,11 +487,56 @@ def ingest_player_game_stats_staging():
 
         return spark.createDataFrame([], schema=get_player_game_stats_schema())
 
-    print(f"🏒 STAGING: NHL API ingestion: {start_date} to {end_date}")
+    # Compute date range: inside this @dlt.table we may read bronze (allowed; avoids REFERENCE_DLT_DATASET_OUTSIDE_QUERY_DEFINITION)
+    if one_time_load:
+        _start_date = start_date
+        _end_date = end_date
+        print(f"📅 INCREMENTAL: Using one_time_load range {_start_date} to {_end_date}")
+    else:
+        _start_date = None
+        _end_date = today
+        try:
+            bronze = dlt.read("bronze_player_game_stats_v2")
+            max_row = bronze.agg(max(col("gameDate")).alias("m")).first()
+            if max_row and max_row["m"] is not None:
+                max_date = datetime.strptime(str(max_row["m"]), "%Y%m%d").date()
+                _start_date = max_date - timedelta(days=lookback_days)
+                _end_date = today
+                print(f"📅 INCREMENTAL (from bronze max date): {_start_date} to {_end_date}")
+            else:
+                # dlt.read returned empty; try materialized table (e.g. same-run order or checkpoint)
+                _catalog = spark.conf.get("catalog", "lr_nhl_demo")
+                _schema = spark.conf.get("schema", "dev")
+                try:
+                    bronze_table = spark.table(f"{_catalog}.{_schema}.bronze_player_game_stats_v2")
+                    max_row = bronze_table.agg(max(col("gameDate")).alias("m")).first()
+                    if max_row and max_row["m"] is not None:
+                        max_date = datetime.strptime(str(max_row["m"]), "%Y%m%d").date()
+                        _start_date = max_date - timedelta(days=lookback_days)
+                        _end_date = today
+                        print(f"📅 INCREMENTAL (from materialized bronze table): {_start_date} to {_end_date}")
+                except Exception:
+                    pass
+                if _start_date is None:
+                    _start_date = datetime(2023, 10, 1).date()
+                    _end_date = today
+                    print(f"📅 INITIAL LOAD (bronze empty): {_start_date} to {_end_date}")
+        except Exception:
+            # Bronze read failed (e.g. table not ready); use short window so run stays incremental/fast
+            _start_date = today - timedelta(days=lookback_days)
+            _end_date = today
+            print(
+                f"📅 INCREMENTAL (fallback: bronze read failed, using last {lookback_days} day(s)): {_start_date} to {_end_date}"
+            )
+
+    print(f"🏒 STAGING: NHL API ingestion: {_start_date} to {_end_date}")
 
     # Generate date range
-    date_list = generate_date_range(start_date, end_date)
-    print(f"📅 Processing {len(date_list)} dates")
+    date_list = generate_date_range(_start_date, _end_date)
+    print(f"📅 Processing {len(date_list)} dates ({_start_date} to {_end_date})")
+    if not date_list:
+        print("⚠️ Date list is empty (_start_date > _end_date?). Returning empty staging.")
+        return spark.createDataFrame([], schema=get_player_game_stats_schema())
 
     all_player_stats = []
     games_processed = 0
@@ -547,8 +554,13 @@ def ingest_player_game_stats_staging():
                 print(f"  ⚠️ No games found for {date_str}")
                 continue
 
-            games = schedule["games"]
-            print(f"  🎮 Found {len(games)} games on {date_str}")
+            all_games = schedule["games"]
+            # Only process NHL games (gameType 2 = regular, 3 = playoff). Skip international/tournament (e.g. 9) — API often has no shift data.
+            games = [g for g in all_games if g.get("gameType", 2) in (2, 3)]
+            skipped = len(all_games) - len(games)
+            if skipped:
+                print(f"  ⚠️ Skipped {skipped} non-NHL game(s) on {date_str} (gameType not 2/3)")
+            print(f"  🎮 Found {len(games)} NHL games on {date_str}")
 
             for game in games:
                 game_id = game.get("id")
@@ -596,6 +608,13 @@ def ingest_player_game_stats_staging():
                             f"      ⚠️ Missing data for game {game_id}: {', '.join(missing)}"
                         )
                         continue
+
+                    # Diagnostic: ensure we have plays so player stats (shots, assists, etc.) can be computed
+                    play_count = len(_get_normalized_plays(pbp))
+                    if play_count == 0:
+                        print(
+                            f"      ⚠️ Game {game_id}: 0 plays extracted from play-by-play (player stats will be 0)"
+                        )
 
                     # Get rosters from boxscore
                     # Note: playerByGameStats has stats but may not have full names
@@ -715,6 +734,10 @@ def ingest_player_game_stats_staging():
     # Convert to Spark DataFrame
     if not all_player_stats:
         print("⚠️ No data collected, returning empty DataFrame")
+        print(
+            f"   Diagnostic: date_list had {len(date_list)} dates ({_start_date} to {_end_date}), "
+            f"games_processed={games_processed}. Check logs above for 'No games', 'missing', or '0 plays'."
+        )
         return spark.createDataFrame([], schema=get_player_game_stats_schema())
 
     df = spark.createDataFrame(all_player_stats, schema=get_player_game_stats_schema())
@@ -772,17 +795,56 @@ def stream_player_stats_from_staging():
     - Staging can rebuild quickly (incremental API calls)
     - Final table accumulates all history (never drops)
     - Code changes only affect staging (5-10 min rebuild)
+    - Null numeric stats are coalesced to 0 so silver/gold never see null.
     """
+    # Numeric columns to coalesce to 0 (stats that flow to silver/gold)
+    _numeric_player_cols = [
+        "icetime", "iceTimeRank", "shifts",
+        "I_F_shotsOnGoal", "I_F_missedShots", "I_F_blockedShotAttempts", "I_F_shotAttempts",
+        "I_F_unblockedShotAttempts", "I_F_goals", "I_F_primaryAssists", "I_F_secondaryAssists",
+        "I_F_points", "I_F_rebounds", "I_F_reboundGoals", "I_F_savedShotsOnGoal",
+        "I_F_savedUnblockedShotAttempts", "I_F_hits", "I_F_takeaways", "I_F_giveaways",
+        "I_F_lowDangerShots", "I_F_mediumDangerShots", "I_F_highDangerShots",
+        "I_F_lowDangerGoals", "I_F_mediumDangerGoals", "I_F_highDangerGoals",
+        "shotsOnGoalFor", "missedShotsFor", "blockedShotAttemptsFor", "shotAttemptsFor",
+        "unblockedShotAttemptsFor", "goalsFor", "reboundsFor", "reboundGoalsFor",
+        "savedShotsOnGoalFor", "savedUnblockedShotAttemptsFor",
+        "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
+        "lowDangerGoalsFor", "mediumDangerGoalsFor", "highDangerGoalsFor",
+        "shotsOnGoalAgainst", "missedShotsAgainst", "blockedShotAttemptsAgainst",
+        "shotAttemptsAgainst", "unblockedShotAttemptsAgainst", "goalsAgainst",
+        "reboundsAgainst", "reboundGoalsAgainst", "savedShotsOnGoalAgainst",
+        "savedUnblockedShotAttemptsAgainst",
+        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst", "mediumDangerGoalsAgainst", "highDangerGoalsAgainst",
+        "OnIce_F_shotsOnGoal", "OnIce_F_missedShots", "OnIce_F_blockedShotAttempts",
+        "OnIce_F_shotAttempts", "OnIce_F_unblockedShotAttempts", "OnIce_F_goals",
+        "OnIce_F_lowDangerShots", "OnIce_F_mediumDangerShots", "OnIce_F_highDangerShots",
+        "OnIce_F_lowDangerGoals", "OnIce_F_mediumDangerGoals", "OnIce_F_highDangerGoals",
+        "OnIce_A_shotsOnGoal", "OnIce_A_missedShots", "OnIce_A_blockedShotAttempts",
+        "OnIce_A_shotAttempts", "OnIce_A_unblockedShotAttempts", "OnIce_A_goals",
+        "OnIce_A_lowDangerShots", "OnIce_A_mediumDangerShots", "OnIce_A_highDangerShots",
+        "OnIce_A_lowDangerGoals", "OnIce_A_mediumDangerGoals", "OnIce_A_highDangerGoals",
+        "OffIce_F_shotsOnGoal", "OffIce_F_missedShots", "OffIce_F_blockedShotAttempts",
+        "OffIce_F_shotAttempts", "OffIce_F_unblockedShotAttempts", "OffIce_F_goals",
+        "OffIce_A_shotsOnGoal", "OffIce_A_missedShots", "OffIce_A_blockedShotAttempts",
+        "OffIce_A_shotAttempts", "OffIce_A_unblockedShotAttempts", "OffIce_A_goals",
+    ]
     if skip_staging_ingestion:
         # Skip mode: Read from _staging_manual table (like successful run last night)
         print("⏭️  STREAMING: Reading from _staging_manual table")
-        return spark.readStream.option("skipChangeCommits", "true").table(
+        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
         )
     else:
         # Normal mode: Use dlt.read_stream() to establish dependency on staging table
         print("⏭️  STREAMING: Reading from DLT staging table")
-        return dlt.read_stream("bronze_player_game_stats_v2_staging")
+        stream_df = dlt.read_stream("bronze_player_game_stats_v2_staging")
+    # Coalesce numeric stats to 0 so silver/gold never see null
+    for c in _numeric_player_cols:
+        if c in stream_df.columns:
+            stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0)))
+    return stream_df
 
 
 # COMMAND ----------
@@ -819,9 +881,28 @@ def ingest_games_historical_staging():
         # Return empty DataFrame with correct schema (DLT requires a return value)
         return spark.createDataFrame([], schema=get_games_historical_schema())
 
-    print(f"🏒 STAGING: Team game stats ingestion: {start_date} to {end_date}")
+    # Compute date range inside this @dlt.table (same logic as player staging; avoids referencing DLT dataset outside query)
+    if one_time_load:
+        _start_date = start_date
+        _end_date = end_date
+    else:
+        try:
+            bronze = dlt.read("bronze_player_game_stats_v2")
+            max_row = bronze.agg(max(col("gameDate")).alias("m")).first()
+            if max_row and max_row["m"] is not None:
+                max_date = datetime.strptime(str(max_row["m"]), "%Y%m%d").date()
+                _start_date = max_date - timedelta(days=lookback_days)
+                _end_date = today
+            else:
+                _start_date = datetime(2023, 10, 1).date()
+                _end_date = today
+        except Exception:
+            _start_date = today - timedelta(days=lookback_days)
+            _end_date = today
 
-    date_list = generate_date_range(start_date, end_date)
+    print(f"🏒 STAGING: Team game stats ingestion: {_start_date} to {_end_date}")
+
+    date_list = generate_date_range(_start_date, _end_date)
     all_team_stats = []
 
     for date_str in date_list:
@@ -972,17 +1053,20 @@ def stream_games_from_staging():
     - Staging can rebuild quickly (incremental API calls)
     - Final table accumulates all history (never drops)
     - Code changes only affect staging (5-10 min rebuild)
+    - skipChangeCommits: true so overwrites on staging (batch refresh) don't fail the stream
     """
     if skip_staging_ingestion:
-        # Skip mode: Read from _staging_manual table (like successful run last night)
+        # Skip mode: Read from _staging_manual table
         print("⏭️  STREAMING: Reading from _staging_manual table")
         return spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
         )
     else:
-        # Normal mode: Use dlt.read_stream() to establish dependency on staging table
+        # Normal mode: Read from DLT staging table (skipChangeCommits so Overwrite doesn't fail stream)
         print("⏭️  STREAMING: Reading from DLT staging table")
-        return dlt.read_stream("bronze_games_historical_v2_staging")
+        return spark.readStream.option("skipChangeCommits", "true").table(
+            f"{catalog}.{schema}.bronze_games_historical_v2_staging"
+        )
 
 
 # COMMAND ----------
