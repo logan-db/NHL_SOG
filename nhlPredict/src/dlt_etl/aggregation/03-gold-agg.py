@@ -77,18 +77,32 @@ def aggregate_games_data():
 
     base_schedule = dlt.read("silver_schedule_2023_v2")
     if base_schedule.isEmpty():
-        # Same-run data: when dlt.read(silver) is empty (silver not committed yet), build schedule
-        # from bronze so we see the current run's future games (e.g. schedule_future_days=17).
         _bronze_sched = dlt.read("bronze_schedule_2023_v2")
         if not _bronze_sched.isEmpty():
             _remapped = _bronze_sched.withColumn("DATE", to_date(col("DATE")))
             _home = _remapped.withColumn("TEAM_ABV", col("HOME"))
             _away = _remapped.withColumn("TEAM_ABV", col("AWAY"))
             base_schedule = _home.unionByName(_away)
-            print("📊 Fallback: built base_schedule from bronze_schedule_2023_v2 (same-run data for future games)")
+            print("📊 Fallback: built base_schedule from bronze_schedule_2023_v2 (dlt.read)")
         else:
-            base_schedule = spark.table(f"{_catalog}.{_schema}.silver_schedule_2023_v2")
-            print("📊 Fallback: read silver_schedule_2023_v2 from spark.table (dlt.read was empty)")
+            try:
+                base_schedule = spark.table(f"{_catalog}.{_schema}.silver_schedule_2023_v2")
+                if base_schedule.isEmpty():
+                    _bronze = spark.table(f"{_catalog}.{_schema}.bronze_schedule_2023_v2")
+                    _remapped = _bronze.withColumn("DATE", to_date(col("DATE")))
+                    base_schedule = _remapped.withColumn("TEAM_ABV", col("HOME")).unionByName(
+                        _remapped.withColumn("TEAM_ABV", col("AWAY"))
+                    )
+                    print("📊 Fallback: built base_schedule from spark.table(bronze_schedule_2023_v2)")
+                else:
+                    print("📊 Fallback: read silver_schedule_2023_v2 from spark.table")
+            except Exception:
+                _bronze = spark.table(f"{_catalog}.{_schema}.bronze_schedule_2023_v2")
+                _remapped = _bronze.withColumn("DATE", to_date(col("DATE")))
+                base_schedule = _remapped.withColumn("TEAM_ABV", col("HOME")).unionByName(
+                    _remapped.withColumn("TEAM_ABV", col("AWAY"))
+                )
+                print("📊 Fallback: built base_schedule from bronze_schedule_2023_v2 (silver missing)")
     # Normalize DATE so dropDuplicates sees same key; then 1:1 join (no 2x).
     base_schedule = base_schedule.withColumn("DATE", to_date(col("DATE")))
     base_schedule = base_schedule.dropDuplicates(["HOME", "AWAY", "DATE", "TEAM_ABV"])
@@ -102,8 +116,12 @@ def aggregate_games_data():
 
     _gh_raw = dlt.read("silver_games_historical_v2")
     if _gh_raw.isEmpty():
-        _gh_raw = spark.table(f"{_catalog}.{_schema}.silver_games_historical_v2")
-        print("📊 Fallback: read silver_games_historical_v2 from spark.table (dlt.read was empty)")
+        try:
+            _gh_raw = spark.table(f"{_catalog}.{_schema}.silver_games_historical_v2")
+            print("📊 Fallback: read silver_games_historical_v2 from spark.table")
+        except Exception:
+            _gh_raw = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2")
+            print("📊 Fallback: read bronze_games_historical_v2 (silver missing)")
     # Normalize gameDate so it doesn't collapse: handle both DateType (to_date) and int yyyyMMdd.
     # Using only "yyyyMMdd" for already-DateType gives null → 7910 rows collapsed to 2130.
     games_historical = (
@@ -193,11 +211,16 @@ def aggregate_games_data():
         .unionByName(upcoming_final_clean)
         .orderBy(desc("DATE"))
     )
-    # Normalize gameDate to date type so dropDuplicates and historical/future split are consistent
+    # Normalize gameDate to date type so dropDuplicates and historical/future split are consistent.
+    # Handle both yyyyMMdd (from games) and yyyy-MM-dd (from schedule DATE) so future rows are not lost.
     regular_season_schedule = regular_season_schedule.withColumn(
         "gameDate",
         coalesce(
-            to_date(col("gameDate").cast("string")), to_date(col("DATE").cast("string"))
+            to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+            to_date(col("gameDate").cast("string"), "yyyy-MM-dd"),
+            to_date(col("DATE").cast("string"), "yyyyMMdd"),
+            to_date(col("DATE").cast("string"), "yyyy-MM-dd"),
+            to_date(col("DATE")),
         ),
     )
     full_season_schedule_with_day = get_day_of_week(regular_season_schedule, "DATE")
@@ -261,13 +284,17 @@ def aggregate_games_data():
     ]
 
     # Normalize gameDate for split and for join: ensure date type so schedule–silver join matches.
-    # Use same normalization as silver (yyyyMMdd for int, or to_date for date/string).
+    # Schedule DATE can be DateType (yyyy-MM-dd when cast to string) or int (yyyyMMdd).
+    # Future rows often have gameDate from DATE; use both formats so we don't get null and lose upcoming games.
     schedule_with_date = schedule_df.withColumn(
         "gameDate",
         coalesce(
             to_date(col("gameDate")),
             to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+            to_date(col("gameDate").cast("string"), "yyyy-MM-dd"),
+            to_date(col("DATE")),
             to_date(col("DATE").cast("string"), "yyyyMMdd"),
+            to_date(col("DATE").cast("string"), "yyyy-MM-dd"),
         ),
     ).withColumn("_game_date", col("gameDate"))
     schedule_historical = (
@@ -1226,6 +1253,29 @@ def make_model_ready():
     )
 
     return gold_model_data
+
+
+# COMMAND ----------
+
+# DBTITLE 1,gold_one_upcoming_per_player_validation – each player has at most 1 upcoming game
+
+@dlt.expect_or_fail(
+    "at_most_one_upcoming_per_player",
+    "coalesce(max_upcoming_per_player, 0) <= 1",
+)
+@dlt.table(
+    name="gold_one_upcoming_per_player_validation",
+    table_properties={"quality": "gold", "pipelines.reset.allowed": "false"},
+)
+def validate_one_upcoming_per_player():
+    """Validates each playerId has at most 1 row with gameId IS NULL in the final dataset."""
+    gold = dlt.read("gold_model_stats_v2")
+    return (
+        gold.filter(col("gameId").isNull())
+        .groupBy("playerId")
+        .agg(count("*").alias("upcoming_count"))
+        .agg(max("upcoming_count").alias("max_upcoming_per_player"))
+    )
 
 
 # COMMAND ----------

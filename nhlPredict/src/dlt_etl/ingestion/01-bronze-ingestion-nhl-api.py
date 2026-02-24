@@ -1004,6 +1004,29 @@ def ingest_games_historical_staging():
 
     df = spark.createDataFrame(all_team_stats, schema=get_games_historical_schema())
 
+    # Coalesce numeric columns to 0 so silver/gold never see null (API gaps or sparse manual data)
+    _numeric_int_cols = [
+        "shotsOnGoalFor", "shotsOnGoalAgainst", "goalsFor", "goalsAgainst",
+        "missedShotsFor", "missedShotsAgainst", "blockedShotAttemptsFor", "blockedShotAttemptsAgainst",
+        "shotAttemptsFor", "shotAttemptsAgainst", "unblockedShotAttemptsFor", "unblockedShotAttemptsAgainst",
+        "savedShotsOnGoalFor", "savedShotsOnGoalAgainst", "savedUnblockedShotAttemptsFor", "savedUnblockedShotAttemptsAgainst",
+        "reboundsFor", "reboundGoalsFor", "reboundsAgainst", "reboundGoalsAgainst",
+        "playContinuedInZoneFor", "playContinuedOutsideZoneFor", "playContinuedInZoneAgainst", "playContinuedOutsideZoneAgainst",
+        "penaltiesFor", "penaltiesAgainst", "faceOffsWonFor", "faceOffsWonAgainst",
+        "hitsFor", "hitsAgainst", "takeawaysFor", "takeawaysAgainst", "giveawaysFor", "giveawaysAgainst",
+        "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
+        "lowDangerGoalsFor", "mediumDangerGoalsFor", "highDangerGoalsFor",
+        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst", "mediumDangerGoalsAgainst", "highDangerGoalsAgainst",
+    ]
+    _numeric_float_cols = ["corsiPercentage", "fenwickPercentage", "xGoalsFor", "xGoalsAgainst"]
+    for c in _numeric_int_cols:
+        if c in df.columns:
+            df = df.withColumn(c, coalesce(col(c), lit(0)))
+    for c in _numeric_float_cols:
+        if c in df.columns:
+            df = df.withColumn(c, coalesce(col(c), lit(0.0)))
+
     # Deduplicate records - keep most recent for each (gameId, team, situation)
     # This prevents duplicate key errors in downstream models
     initial_count = df.count()
@@ -1054,19 +1077,45 @@ def stream_games_from_staging():
     - Final table accumulates all history (never drops)
     - Code changes only affect staging (5-10 min rebuild)
     - skipChangeCommits: true so overwrites on staging (batch refresh) don't fail the stream
+    - Coalesce numeric stats to 0 so silver/gold never see null (manual table or API gaps)
     """
     if skip_staging_ingestion:
         # Skip mode: Read from _staging_manual table
         print("⏭️  STREAMING: Reading from _staging_manual table")
-        return spark.readStream.option("skipChangeCommits", "true").table(
+        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
         )
     else:
         # Normal mode: Read from DLT staging table (skipChangeCommits so Overwrite doesn't fail stream)
         print("⏭️  STREAMING: Reading from DLT staging table")
-        return spark.readStream.option("skipChangeCommits", "true").table(
+        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_games_historical_v2_staging"
         )
+
+    # Coalesce all numeric game stats to 0 so silver/gold never see null
+    # (_staging_manual may have nulls if created from older source)
+    _numeric_game_cols = [
+        "shotsOnGoalFor", "shotsOnGoalAgainst", "goalsFor", "goalsAgainst",
+        "missedShotsFor", "missedShotsAgainst", "blockedShotAttemptsFor", "blockedShotAttemptsAgainst",
+        "shotAttemptsFor", "shotAttemptsAgainst", "unblockedShotAttemptsFor", "unblockedShotAttemptsAgainst",
+        "savedShotsOnGoalFor", "savedShotsOnGoalAgainst", "savedUnblockedShotAttemptsFor", "savedUnblockedShotAttemptsAgainst",
+        "reboundsFor", "reboundGoalsFor", "reboundsAgainst", "reboundGoalsAgainst",
+        "playContinuedInZoneFor", "playContinuedOutsideZoneFor", "playContinuedInZoneAgainst", "playContinuedOutsideZoneAgainst",
+        "penaltiesFor", "penaltiesAgainst", "faceOffsWonFor", "faceOffsWonAgainst",
+        "hitsFor", "hitsAgainst", "takeawaysFor", "takeawaysAgainst", "giveawaysFor", "giveawaysAgainst",
+        "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
+        "lowDangerGoalsFor", "mediumDangerGoalsFor", "highDangerGoalsFor",
+        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst", "mediumDangerGoalsAgainst", "highDangerGoalsAgainst",
+    ]
+    _float_cols = ["corsiPercentage", "fenwickPercentage", "xGoalsFor", "xGoalsAgainst"]
+    for c in _numeric_game_cols:
+        if c in stream_df.columns:
+            stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0)))
+    for c in _float_cols:
+        if c in stream_df.columns:
+            stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0.0)))
+    return stream_df
 
 
 # COMMAND ----------
@@ -1151,6 +1200,9 @@ def ingest_schedule_v2():
 
             if schedule and "games" in schedule:
                 for game in schedule["games"]:
+                    # Only include NHL regular (2) and playoff (3) games; skip All-Star, international, etc.
+                    if game.get("gameType", 2) not in (2, 3):
+                        continue
                     game_id = game.get("id")
                     game_date = game.get("gameDate", date_str)
 

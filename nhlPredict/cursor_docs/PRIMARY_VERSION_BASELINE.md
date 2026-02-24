@@ -45,6 +45,7 @@
 - **NHL only:** Gold uses only **NHL** games (regular + playoff). Schedule is filtered to `HOME` and `AWAY` in `NHL_TEAMS`; international/Olympic games (USA, CAN, DEN, etc.) and special events (All-Star codes) are excluded. When the API returns only international games in the next N days, future count in gold will correctly be 0 until NHL games appear in the window.
 - **Config (optional):** In `resources/NHLPlayerIngestion.yml`, `schedule_future_days` (default 8) controls how many days of future schedule bronze fetches. Increase (e.g. 14 or 30) so that when NHL resumes after a break, upcoming NHL games are included.
 - **Skip mode:** With `skip_staging_ingestion: true`, bronze still fetches future schedule from the API each run.
+- **Full game/team stats:** For columns like `average_game_Total_playContinuedOutsideZoneFor_last_3_games` to flow to gold, `bronze_games_historical_v2_staging_manual` must have all numeric columns from `get_games_historical_schema()`. If the manual table lacks them, run with `skip_staging_ingestion: false` once to backfill. Bronze/silver/gold now coalesce null→0 so values propagate.
 
 ## Rollback applied (no git)
 

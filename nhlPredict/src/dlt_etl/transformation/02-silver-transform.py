@@ -101,9 +101,18 @@ def clean_schedule_data():
     # Apply the UDF to the "HOME" column
     # Bronze schedule DATE is already DateType (yyyy-MM-dd). Do NOT use "M/d/yy" or DATE becomes null
     # and schedule join matches nothing -> 2x row explosion + 0 future games.
+    _bronze = dlt.read("bronze_schedule_2023_v2")
+    if _bronze.isEmpty():
+        _catalog = spark.conf.get("catalog", "lr_nhl_demo")
+        _schema = spark.conf.get("schema", "dev")
+        try:
+            _bronze = spark.table(f"{_catalog}.{_schema}.bronze_schedule_2023_v2")
+            print("📊 silver_schedule: fallback to spark.table(bronze_schedule_2023_v2)")
+        except Exception:
+            pass
     schedule_remapped = (
-        dlt.read("bronze_schedule_2023_v2")
-        .withColumn("DAY", regexp_replace("DAY", "\\.", ""))
+        _bronze
+        .withColumn("DAY", regexp_replace(col("DAY"), "\\.", ""))
         .withColumn("DATE", to_date(col("DATE")))
     )
 
@@ -187,30 +196,49 @@ def clean_games_data():
         "highDangerShotsAgainst",
     ]
 
+    # Source: prefer bronze; when empty (e.g. post-delete stream not committed), fallback to staging_manual
+    _games_src = dlt.read("bronze_games_historical_v2")
+    if _games_src.isEmpty():
+        _catalog = spark.conf.get("catalog", "lr_nhl_demo")
+        _schema = spark.conf.get("schema", "dev")
+        try:
+            _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2")
+            if _games_src.isEmpty():
+                _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
+                print("📊 silver_games_historical: fallback to staging_manual")
+            else:
+                print("📊 silver_games_historical: fallback to spark.table(bronze_games_historical_v2)")
+        except Exception:
+            try:
+                _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
+                print("📊 silver_games_historical: fallback to staging_manual (bronze missing)")
+            except Exception:
+                pass
+
     # Call the function on the DataFrame
     game_stats_total = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"),
+        _games_src,
         select_game_cols,
         "game_Total_",
         "all",
         season_list,
     )
     game_stats_pp = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"),
+        _games_src,
         select_game_cols,
         "game_PP_",
         "5on4",
         season_list,
     )
     game_stats_pk = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"),
+        _games_src,
         select_game_cols,
         "game_PK_",
         "4on5",
         season_list,
     )
     game_stats_ev = select_rename_game_columns(
-        dlt.read("bronze_games_historical_v2"),
+        _games_src,
         select_game_cols,
         "game_EV_",
         "5on5",
@@ -289,6 +317,7 @@ def merge_games_data():
     # PRIMARY_CONFIGURATION: 1:1 join per (game, team). Schedule has 2 rows/game (home/away),
     # games has 2 rows/game (home/away). Join on (HOME,AWAY,DATE) + TEAM_ABV==team so no 4x.
     # Normalize gameDate to date: bronze has IntegerType (YYYYMMDD), schedule has DATE (date).
+    # silver_games_historical already converts to DateType (yyyy-MM-dd when cast); yyyyMMdd would return null.
     sched = dlt.read("silver_schedule_2023_v2")
     games = (
         dlt.read("silver_games_historical_v2")
@@ -296,7 +325,11 @@ def merge_games_data():
             "gameDate",
             when(
                 col("gameDate").isNotNull(),
-                to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+                coalesce(
+                    to_date(col("gameDate")),
+                    to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+                    to_date(col("gameDate").cast("string"), "yyyy-MM-dd"),
+                ),
             ).otherwise(col("gameDate")),
         )
         .withColumn(
@@ -329,14 +362,23 @@ def merge_games_data():
             coalesce(col("gameId"), col("GAME_ID").cast("long")),
         ).drop("GAME_ID")
 
-    # Coalesce numeric game stats to 0 for historical rows so rankings/gold never get null
-    _numeric_game_cols = [
-        "game_Total_goalsFor", "game_Total_goalsAgainst", "game_Total_shotsOnGoalFor",
-        "game_Total_shotsOnGoalAgainst", "game_Total_shotAttemptsFor", "game_Total_shotAttemptsAgainst",
-        "game_Total_penaltiesFor", "game_Total_penaltiesAgainst",
-        "game_PP_goalsFor", "game_PK_goalsAgainst", "game_PP_shotsOnGoalFor", "game_PK_shotsOnGoalAgainst",
-        "game_PP_shotAttemptsFor", "game_PK_shotAttemptsAgainst",
+    # Coalesce ALL numeric game stats to 0 for historical rows so rankings/gold never get null.
+    # Silver games_historical has game_Total_*, game_PP_*, game_PK_*, game_EV_* (from select_game_cols).
+    # Only a subset was previously coalesced; gold needs all for average_*_last_3_games etc.
+    _game_stat_suffixes = [
+        "corsiPercentage", "fenwickPercentage", "shotsOnGoalFor", "missedShotsFor",
+        "blockedShotAttemptsFor", "shotAttemptsFor", "goalsFor", "reboundsFor", "reboundGoalsFor",
+        "playContinuedInZoneFor", "playContinuedOutsideZoneFor", "savedShotsOnGoalFor",
+        "savedUnblockedShotAttemptsFor", "penaltiesFor", "faceOffsWonFor", "hitsFor",
+        "takeawaysFor", "giveawaysFor", "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
+        "shotsOnGoalAgainst", "missedShotsAgainst", "blockedShotAttemptsAgainst", "shotAttemptsAgainst",
+        "goalsAgainst", "reboundsAgainst", "reboundGoalsAgainst", "playContinuedInZoneAgainst",
+        "playContinuedOutsideZoneAgainst", "savedShotsOnGoalAgainst", "savedUnblockedShotAttemptsAgainst",
+        "penaltiesAgainst", "faceOffsWonAgainst", "hitsAgainst", "takeawaysAgainst", "giveawaysAgainst",
+        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
     ]
+    _prefixes = ["game_Total_", "game_PP_", "game_PK_", "game_EV_"]
+    _numeric_game_cols = [p + s for p in _prefixes for s in _game_stat_suffixes]
     for c in _numeric_game_cols:
         if c in silver_games_schedule.columns:
             silver_games_schedule = silver_games_schedule.withColumn(
