@@ -356,9 +356,12 @@ display(
 # MAGIC     matchup_previous_player_Total_shotsOnGoal,
 # MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games,
 # MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games
-# MAGIC FROM lr_nhl_demo.dev.clean_prediction_v2
-# MAGIC -- WHERE gameId IS NULL AND is_last_played_game_team = 1 AND season = 2024
-# MAGIC WHERE gameDate IS NOT NULL
+# MAGIC FROM (
+# MAGIC   SELECT *, ROW_NUMBER() OVER (PARTITION BY shooterName, gameDate, playerTeam, opposingTeam ORDER BY absVarianceAvgLast7SOG DESC, predictedSOG DESC) AS rn
+# MAGIC   FROM lr_nhl_demo.dev.clean_prediction_v2
+# MAGIC   WHERE gameDate IS NOT NULL
+# MAGIC ) sub
+# MAGIC WHERE rn = 1
 # MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
 
 # COMMAND ----------

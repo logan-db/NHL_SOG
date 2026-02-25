@@ -1,0 +1,15 @@
+command: ['flask', '--app', 'app.py', 'run', '--host', '0.0.0.0', '--port', '8000']
+
+env:
+  - name: PGHOST
+    value: 'ep-small-dawn-d147t6wz.database.us-west-2.cloud.databricks.com'
+  - name: PGDATABASE
+    value: 'databricks_postgres'
+  - name: PGUSER
+    value: '90d692de-257c-4877-b833-55b8d520bc0b'
+  - name: PGPORT
+    value: '5432'
+  - name: PGSSLMODE
+    value: 'require'
+  - name: ENDPOINT_NAME
+    value: 'projects/adca98b0-c69f-4d8b-8ced-5e542178c3e3/branches/br-weathered-cloud-d1dvufkn/endpoints/primary'

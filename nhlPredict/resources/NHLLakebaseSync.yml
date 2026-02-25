@@ -1,0 +1,82 @@
+# Lakebase sync pipelines for NHL app tables
+# Syncs lr_nhl_demo.dev tables to Lakebase (lr-lakebase)
+# Target catalog lr-lakebase must be registered to your Lakebase instance
+
+resources:
+  synced_database_tables:
+    # 1. clean_prediction_summary - Slim prediction table (~25 cols, no clean_prediction_v2)
+    # Primary key: shooterName + gameDate + playerTeam + opposingTeam (unique per player-game)
+    clean_prediction_summary_sync:
+      name: lr-lakebase.public.clean_prediction_summary
+      spec:
+        source_table_full_name: lr_nhl_demo.dev.clean_prediction_summary
+        primary_key_columns:
+          - shooterName
+          - gameDate
+          - playerTeam
+          - opposingTeam
+        scheduling_policy: TRIGGERED
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: lr_nhl_demo
+          storage_schema: dev
+
+    # 2. nhl_schedule_by_day - Upcoming games (DATE, HOME, AWAY)
+    # Primary key: DATE + HOME + AWAY for unique game rows
+    nhl_schedule_by_day_sync:
+      name: lr-lakebase.public.nhl_schedule_by_day
+      spec:
+        source_table_full_name: lr_nhl_demo.dev.2025_26_official_nhl_schedule_by_day
+        primary_key_columns:
+          - DATE
+          - HOME
+          - AWAY
+        scheduling_policy: SNAPSHOT
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: lr_nhl_demo
+          storage_schema: dev
+
+    # 4. llm_summary - Player explanations for predictions
+    llm_summary_sync:
+      name: lr-lakebase.public.llm_summary
+      spec:
+        source_table_full_name: lr_nhl_demo.dev.llm_summary
+        primary_key_columns:
+          - shooterName
+          - gameDate
+          - playerTeam
+          - opposingTeam
+        scheduling_policy: TRIGGERED
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: lr_nhl_demo
+          storage_schema: dev
+
+    # 5. gold_game_stats_clean - Historical game results
+    # One row per team per game; (gameId, playerTeam) is unique
+    gold_game_stats_clean_sync:
+      name: lr-lakebase.public.gold_game_stats_clean
+      spec:
+        source_table_full_name: lr_nhl_demo.dev.gold_game_stats_clean
+        primary_key_columns:
+          - gameId
+          - playerTeam
+        scheduling_policy: TRIGGERED
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: lr_nhl_demo
+          storage_schema: dev
+
+    # 6. team_code_mappings - Team abbreviation → full name lookup
+    team_code_mappings_sync:
+      name: lr-lakebase.public.team_code_mappings
+      spec:
+        source_table_full_name: lr_nhl_demo.dev.team_code_mappings
+        primary_key_columns:
+          - abbreviation
+        scheduling_policy: SNAPSHOT
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: lr_nhl_demo
+          storage_schema: dev

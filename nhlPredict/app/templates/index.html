@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Upcoming Games Section -->
+<section id="upcoming" class="section">
+  <h2 class="section-heading">Upcoming Games</h2>
+  <div class="games-grid" id="upcoming-games">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<!-- Key Metrics (mirrors dashboard counters) -->
+<section class="section">
+  <h2 class="section-heading">Player SOG Predictions</h2>
+  <div class="stats-grid" id="player-stats-cards">
+    <div class="stat-card">
+      <div class="stat-value" id="stat-avg-sog">—</div>
+      <div class="stat-label">Avg SOG per Game</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-last-sog">—</div>
+      <div class="stat-label">SOG Last Game</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-pred-sog">—</div>
+      <div class="stat-label">Predicted SOG Next</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-games-played">—</div>
+      <div class="stat-label">Games Played</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 1.5rem;">
+    <h3 class="card-title">Upcoming Player Predictions</h3>
+    <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem;">Top SOG predictions for upcoming games (Date, Player, Team, Opponent, Predicted SOG, 2+/3+ Hit Rates)</p>
+    <div class="data-table-wrapper">
+      <table class="data-table" id="upcoming-predictions-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Player</th>
+            <th>Team</th>
+            <th>Opp</th>
+            <th class="numeric">Pred SOG</th>
+            <th class="numeric">Pred Variance</th>
+            <th class="numeric">Avg SOG (7)</th>
+            <th class="numeric">Opp SOG Rank %</th>
+            <th>Explanation</th>
+          </tr>
+        </thead>
+        <tbody id="upcoming-predictions-body">
+          <tr><td colspan="9" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Player Stats Section -->
+<section id="players" class="section">
+  <h2 class="section-heading">Player Stats & Percentile Ranks</h2>
+  <p class="text-secondary" style="margin-bottom: 1rem;">Player percentile ranks: SOG, Goals, PP SOG, PP SOG %, Ice Time (mirrors dashboard pivot)</p>
+  <div class="data-table-wrapper">
+    <table class="data-table" id="player-stats-table">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th class="numeric">SOG Rank %</th>
+          <th class="numeric">Goals Rank %</th>
+          <th class="numeric">PP SOG Rank %</th>
+          <th class="numeric">PP SOG % (7g)</th>
+          <th class="numeric">Ice Time Rank</th>
+        </tr>
+      </thead>
+      <tbody id="player-stats-body">
+        <tr><td colspan="6" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Team Stats Section -->
+<section id="teams" class="section">
+  <h2 class="section-heading">Team Stats</h2>
+  <p class="text-secondary" style="margin-bottom: 1rem;">Team percentile ranks: SOG, Goals, PP Goals</p>
+  <div class="data-table-wrapper">
+    <table class="data-table" id="team-stats-table">
+      <thead>
+        <tr>
+          <th>Team</th>
+          <th class="numeric">SOG Rank %</th>
+          <th class="numeric">Goals Rank %</th>
+          <th class="numeric">PP SOG Rank %</th>
+        </tr>
+      </thead>
+      <tbody id="team-stats-body">
+        <tr><td colspan="4" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 1.5rem;">
+    <h3 class="card-title">Opponent Defense Stats</h3>
+    <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem;">SOGA, Goals Against, PK SOGA, Penalties rank</p>
+    <div class="data-table-wrapper">
+      <table class="data-table" id="opponent-stats-table">
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th class="numeric">SOGA</th>
+            <th class="numeric">Goals Against Rank %</th>
+            <th class="numeric">PK SOGA Rank %</th>
+            <th class="numeric">Penalties Rank %</th>
+          </tr>
+        </thead>
+        <tbody id="opponent-stats-body">
+          <tr><td colspan="5" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Historical Games Section -->
+<section id="games" class="section">
+  <h2 class="section-heading">Historical Games</h2>
+  <p class="text-secondary" style="margin-bottom: 1rem;">Recent game results: Date, Home vs Away, Goals, Win/Loss</p>
+  <div class="data-table-wrapper">
+    <table class="data-table" id="historical-games-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Home</th>
+          <th>Away</th>
+          <th class="numeric">Goals For</th>
+          <th class="numeric">Goals Ag.</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody id="historical-games-body">
+        <tr><td colspan="6" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -184,6 +184,27 @@ display(upcoming_games)
 # DBTITLE 1,Upcoming Games Data Quality Checks
 # assert upcoming games have null 'gameId'
 # assert upcoming_games.count() <= gold_model_stats.filter(col("gameId").isNull()).count()
+from pyspark.sql.functions import first
+
+filtered_upcoming_games = (
+    upcoming_games.filter(
+        col("gameId").isNull()
+        & col("playerId").isNotNull()
+        & col("gameDate").isNotNull()
+    )
+    .orderBy("playerId", "gameDate")
+    .groupBy("playerId")
+    .agg(
+        first("gameDate", ignorenulls=True).alias("gameDate"),
+        *[
+            first(c, ignorenulls=True).alias(c)
+            for c in upcoming_games.columns
+            if c not in ["playerId", "gameDate"]
+        ],
+    )
+)
+
+upcoming_games = filtered_upcoming_games
 
 # assert upcoming games 'playerId' is unique
 assert upcoming_games.select("playerId").distinct().count() == upcoming_games.count()

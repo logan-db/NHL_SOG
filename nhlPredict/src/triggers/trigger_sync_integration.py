@@ -34,10 +34,16 @@ from databricks.sdk.service.database import (
 
 # COMMAND ----------
 
-# Configuration for synced tables
+# Configuration for synced tables (Delta -> Lakebase)
 SYNCED_TABLES = [
-    "lr-lakebase-catalog.public.nhl_player_data",
-    "lr-lakebase-catalog.public.nhl_team_data",
+    "lr-lakebase.public.nhl_player_data",
+    "lr-lakebase.public.nhl_team_data",
+    # NHL app tables (from NHLLakebaseSync.yml)
+    "lr-lakebase.public.clean_prediction_summary",
+    "lr-lakebase.public.nhl_schedule_by_day",
+    "lr-lakebase.public.llm_summary",
+    "lr-lakebase.public.gold_game_stats_clean",
+    "lr-lakebase.public.team_code_mappings",
 ]
 
 # COMMAND ----------
@@ -140,7 +146,7 @@ for synced_table_name in SYNCED_TABLES:
 # COMMAND ----------
 
 print("✅ Synced table pipelines triggered successfully!")
-print("📊 Player data sync: lr-lakebase-catalog.public.nhl_player_data")
-print("📊 Team data sync: lr-lakebase-catalog.public.nhl_team_data")
+print("📊 Player data sync: lr-lakebase.public.nhl_player_data")
+print("📊 Team data sync: lr-lakebase.public.nhl_team_data")
 print("🔄 Pipelines will update the synced tables with latest data from source tables")
 print("🎉 Synced tables are now being updated!")

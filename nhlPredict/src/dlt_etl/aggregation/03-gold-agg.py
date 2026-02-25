@@ -891,6 +891,14 @@ def aggregate_games_data():
     if filtered_count > 0:
         print(f"🧹 Filtered out {filtered_count} international/non-NHL games")
 
+    # Ensure (gameId, playerId) uniqueness: no duplicate player-game rows.
+    # Historical: one row per (gameId, playerId). Upcoming: one row per (NULL, playerId) = one per player.
+    before_dedup = gold_player_stats.count()
+    gold_player_stats = gold_player_stats.dropDuplicates(["gameId", "playerId"])
+    after_dedup = gold_player_stats.count()
+    if before_dedup != after_dedup:
+        print(f"⚠️  Deduped (gameId, playerId): removed {before_dedup - after_dedup} duplicate rows")
+
     return gold_player_stats
 
 
@@ -1275,6 +1283,30 @@ def validate_one_upcoming_per_player():
         .groupBy("playerId")
         .agg(count("*").alias("upcoming_count"))
         .agg(max("upcoming_count").alias("max_upcoming_per_player"))
+    )
+
+
+# COMMAND ----------
+
+# DBTITLE 1,gold_game_player_unique_validation – no duplicate (gameId, playerId)
+
+@dlt.expect_or_fail(
+    "no_duplicate_game_player",
+    "total_count = distinct_count",
+)
+@dlt.table(
+    name="gold_game_player_unique_validation",
+    table_properties={"quality": "gold", "pipelines.reset.allowed": "false"},
+)
+def validate_game_player_unique():
+    """Validates (gameId, playerId) is unique in gold_player_stats_v2 (historical + upcoming).
+    Uses coalesce(gameId,'UPCOMING') because countDistinct excludes NULL, and upcoming rows have gameId=NULL."""
+    gold = dlt.read("gold_player_stats_v2")
+    return gold.agg(
+        count("*").alias("total_count"),
+        countDistinct(coalesce(col("gameId"), lit("UPCOMING")), col("playerId")).alias(
+            "distinct_count"
+        ),
     )
 
 

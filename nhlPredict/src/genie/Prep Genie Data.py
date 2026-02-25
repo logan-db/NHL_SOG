@@ -261,6 +261,8 @@ games_clean = games_clean.withColumn(
         col("sum_game_Total_goalsFor") > col("sum_game_Total_goalsAgainst"), "Yes"
     ).otherwise("No"),
 ).filter(col("gameId").isNotNull())
+# Dedupe by PK for Lakebase sync (gameId, playerTeam must be unique)
+games_clean = games_clean.dropDuplicates(["gameId", "playerTeam"])
 display(games_clean)
 
 # COMMAND ----------
