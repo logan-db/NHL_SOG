@@ -89,7 +89,7 @@ def api_upcoming_games():
     rows = _query(
         """
         SELECT DISTINCT "DATE"::date AS game_date, "HOME" AS home, "AWAY" AS away
-        FROM nhl_schedule_by_day
+        FROM public.nhl_schedule_by_day
         WHERE "DATE"::date >= CURRENT_DATE
         ORDER BY "DATE" ASC
         LIMIT 50
@@ -121,12 +121,12 @@ def api_upcoming_predictions():
             p."playerTeam" AS player_team, p."opposingTeam" AS opposing_team,
             p."predictedSOG" AS predicted_sog, p."absVarianceAvgLast7SOG" AS abs_variance_avg_last7_sog,
             p."playerAvgSOGLast7" AS player_avg_sog_last7,
-            p."oppSOGAgainstRank%" AS opp_sog_against_rank,
+            p."oppSOGAgainstRank%%" AS opp_sog_against_rank,
             s."Explanation" AS explanation,
             p."playerAvgSOGLast7" AS average_player_total_shotsongoal_last_7_games,
             p."playerLastSOG" AS previous_player_total_shotsongoal
-        FROM clean_prediction_summary p
-        LEFT JOIN llm_summary s ON p."shooterName" = s."shooterName"
+        FROM public.clean_prediction_summary p
+        LEFT JOIN public.llm_summary s ON p."shooterName" = s."shooterName"
             AND p."gameDate" = s."gameDate" AND p."playerTeam" = s."playerTeam"
             AND p."opposingTeam" = s."opposingTeam"
         WHERE p."gameId" IS NULL
@@ -157,9 +157,9 @@ def api_player_stats():
         SELECT "shooterName" AS shooter_name,
             NULL::double precision AS player_sog_rank, NULL::double precision AS player_goals_for_rank,
             NULL::double precision AS player_pp_sog_rank,
-            "playerLast7PPSOG%" AS player_last7_pp_sog_pct,
+            "playerLast7PPSOG%%" AS player_last7_pp_sog_pct,
             NULL::double precision AS player_ice_time_rank
-        FROM clean_prediction_summary
+        FROM public.clean_prediction_summary
         WHERE "is_last_played_game" = true
         ORDER BY "playerAvgSOGLast7" DESC NULLS LAST
         LIMIT 100
@@ -182,9 +182,9 @@ def api_team_stats():
     rows = _query(
         """
         SELECT DISTINCT ON ("playerTeam") "playerTeam" AS player_team,
-            "teamSOGForRank%" AS team_sog_for_rank, "teamGoalsForRank%" AS team_goals_for_rank,
-            "teamPPSOGRank%" AS team_pp_sog_rank
-        FROM clean_prediction_summary
+            "teamSOGForRank%%" AS team_sog_for_rank, "teamGoalsForRank%%" AS team_goals_for_rank,
+            "teamPPSOGRank%%" AS team_pp_sog_rank
+        FROM public.clean_prediction_summary
         WHERE "is_last_played_game_team" = 1
         ORDER BY "playerTeam", "gameDate" DESC
         LIMIT 50
@@ -207,10 +207,10 @@ def api_opponent_stats():
         """
         SELECT DISTINCT ON ("opposingTeam") "opposingTeam" AS opposing_team,
             NULL::double precision AS opp_sog_against,
-            "oppGoalsAgainstRank%" AS opp_goals_against_rank,
-            "oppPKSOGRank%" AS opp_pk_sog_rank,
-            "oppPenaltiesRank%" AS opp_penalties_rank
-        FROM clean_prediction_summary
+            "oppGoalsAgainstRank%%" AS opp_goals_against_rank,
+            "oppPKSOGRank%%" AS opp_pk_sog_rank,
+            "oppPenaltiesRank%%" AS opp_penalties_rank
+        FROM public.clean_prediction_summary
         ORDER BY "opposingTeam", "gameDate" DESC
         LIMIT 50
         """,
@@ -234,7 +234,7 @@ def api_historical_games():
             "sum_game_Total_goalsFor" AS goals_for,
             "sum_game_Total_goalsAgainst" AS goals_against,
             "isWin" AS is_win
-        FROM gold_game_stats_clean
+        FROM public.gold_game_stats_clean
         WHERE "gameId" IS NOT NULL AND "home_or_away" = 'HOME'
         ORDER BY "gameDate" DESC
         LIMIT 100
