@@ -1,11 +1,11 @@
 """
 NHL API Helper Module
 
-This module provides comprehensive parsing of nhl-api-py data to recreate
-MoneyPuck CSV schema exactly, ensuring zero changes to downstream silver/gold layers.
+This module provides comprehensive parsing of nhl-api-py data with a schema
+that ensures zero changes to downstream silver/gold layers.
 
 Key Functions:
-- classify_situation: Map NHL situationCode to MoneyPuck situation values
+- classify_situation: Map NHL situationCode to situation values (all, 5on4, 4on5, 5on5)
 - calculate_onice_office_stats: Calculate on-ice and off-ice statistics
 - classify_shot_danger: Determine shot quality (low/medium/high danger)
 - detect_rebounds: Identify rebound shots and goals
@@ -29,9 +29,9 @@ from nhlpy import NHLClient
 
 def classify_situation(situation_code: str, team_side: str) -> str:
     """
-    Classify NHL situationCode to MoneyPuck situation values.
+    Classify NHL situationCode to situation values.
 
-    MoneyPuck uses: "all", "5on4", "4on5", "5on5"
+    Uses: "all", "5on4", "4on5", "5on5"
     NHL situationCode format: "XHAY" where H=home skaters, A=away skaters
     Examples:
         - "1551" = 5 home, 5 away (even strength)
@@ -62,10 +62,10 @@ def classify_situation(situation_code: str, team_side: str) -> str:
         elif home_skaters > away_skaters:
             # Home has more skaters = home power play
             # Could be 5on4, 5on3, 4on3, etc.
-            return "5on4"  # Simplified to 5on4 for MoneyPuck compatibility
+            return "5on4"  # Simplified to 5on4 (PP)
         elif home_skaters < away_skaters:
             # Away has more skaters = home penalty kill
-            return "4on5"  # Simplified to 4on5 for MoneyPuck compatibility
+            return "4on5"  # Simplified to 4on5 (PK)
         else:
             # Equal but not 5on5 (e.g., 4on4, 3on3)
             return "5on5"  # Default to 5on5
@@ -74,10 +74,10 @@ def classify_situation(situation_code: str, team_side: str) -> str:
             return "5on5"
         elif away_skaters > home_skaters:
             # Away has more skaters = away power play
-            return "5on4"  # Simplified to 5on4 for MoneyPuck compatibility
+            return "5on4"  # Simplified to 5on4 (PP)
         elif away_skaters < home_skaters:
             # Home has more skaters = away penalty kill
-            return "4on5"  # Simplified to 4on5 for MoneyPuck compatibility
+            return "4on5"  # Simplified to 4on5 (PK)
         else:
             # Equal but not 5on5 (e.g., 4on4, 3on3)
             return "5on5"  # Default to 5on5
@@ -100,7 +100,7 @@ def classify_shot_danger(
     - y ranges from -42.5 to 42.5 (rink width is 85 feet)
     - Coordinates are relative to attacking direction
 
-    Classification based on MoneyPuck/expected goals models:
+    Classification based on expected goals models:
     - High danger: Slot area (<15 ft from goal, good angle)
     - Medium danger: Mid-range (15-35 ft) with decent angle
     - Low danger: Perimeter shots (>35 ft) or extreme angles
@@ -472,7 +472,6 @@ def aggregate_team_stats_by_situation(
     Aggregate team-level statistics by situation from play-by-play data.
 
     Creates stats for each situation: "all", "5on4", "4on5", "5on5"
-    Matches MoneyPuck schema exactly.
 
     CRITICAL: NHL API uses different team ID systems:
     - Schedule API: Uses franchise IDs (e.g., STL=19, SEA=55)
@@ -489,7 +488,7 @@ def aggregate_team_stats_by_situation(
 
     Returns:
         Dict with keys "all", "5on4", "4on5", "5on5", each containing
-        team stats (For/Against) matching MoneyPuck columns
+        team stats (For/Against)
     """
     team_side = "home" if is_home else "away"
 
@@ -938,7 +937,6 @@ def aggregate_player_stats_by_situation(
 
     Creates stats for each situation: "all", "5on4", "4on5", "5on5"
     Includes individual stats (I_F_*), OnIce stats, and OffIce stats.
-    Matches MoneyPuck schema exactly.
 
     Args:
         pbp_data: Play-by-play data dict
@@ -957,7 +955,7 @@ def aggregate_player_stats_by_situation(
 
     Returns:
         List of dicts, one per situation ("all", "5on4", "4on5", "5on5"),
-        each containing player stats matching MoneyPuck columns plus metadata
+        each containing player stats plus metadata
     """
     situations = ["all", "5on4", "4on5", "5on5"]
     stats = {situation: defaultdict(int) for situation in situations}
@@ -1398,6 +1396,49 @@ def fetch_with_retry(
             time.sleep(wait_time)
 
     return None
+
+
+def fetch_future_schedule(
+    client: NHLClient,
+    schedule_future_days: int = 8,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch upcoming NHL schedule from the API (yesterday through +N days).
+    Used by gold layer when bronze/silver schedule tables are empty (cold start).
+
+    Returns list of dicts with GAME_ID, DAY, DATE, AWAY, HOME for NHL games only.
+    """
+    from datetime import date, timedelta
+
+    today = date.today()
+    future_games = []
+    for i in range(-1, schedule_future_days - 1):
+        future_date = today + timedelta(days=i)
+        date_str = future_date.strftime("%Y-%m-%d")
+        try:
+            schedule = fetch_with_retry(client, client.schedule.daily_schedule, date=date_str)
+            if not schedule or "games" not in schedule:
+                continue
+            for game in schedule["games"]:
+                if game.get("gameType", 2) not in (2, 3):  # NHL regular/playoff only
+                    continue
+                game_date = game.get("gameDate", date_str)
+                try:
+                    game_date_obj = datetime.strptime(game_date[:10], "%Y-%m-%d").date()
+                except Exception:
+                    game_date_obj = future_date
+                home_team = game.get("homeTeam", {})
+                away_team = game.get("awayTeam", {})
+                future_games.append({
+                    "GAME_ID": game.get("id"),
+                    "DAY": game_date_obj.strftime("%a."),
+                    "DATE": game_date_obj,
+                    "AWAY": away_team.get("abbrev", "UNK"),
+                    "HOME": home_team.get("abbrev", "UNK"),
+                })
+        except Exception as e:
+            print(f"   ⚠️  Schedule fetch for {date_str}: {e}")
+    return future_games
 
 
 # =============================================================================

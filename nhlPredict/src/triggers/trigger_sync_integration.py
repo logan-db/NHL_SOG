@@ -35,14 +35,13 @@ from databricks.sdk.service.database import (
 # COMMAND ----------
 
 # Configuration for synced tables (Delta -> Lakebase)
+# Must match NHLLakebaseSync.yml; only include tables that exist in sync config
 SYNCED_TABLES = [
-    "lr-lakebase.public.nhl_player_data",
-    "lr-lakebase.public.nhl_team_data",
-    # NHL app tables (from NHLLakebaseSync.yml)
     "lr-lakebase.public.clean_prediction_summary",
     "lr-lakebase.public.nhl_schedule_by_day",
     "lr-lakebase.public.llm_summary",
     "lr-lakebase.public.gold_game_stats_clean",
+    "lr-lakebase.public.gold_player_stats_clean",
     "lr-lakebase.public.team_code_mappings",
 ]
 
@@ -134,6 +133,7 @@ def check_pipeline_status(synced_table_name: str):
 # COMMAND ----------
 
 # Check status of all synced tables
+w = WorkspaceClient()
 print("📊 Checking synced table status...")
 for synced_table_name in SYNCED_TABLES:
     check_pipeline_status(synced_table_name)
@@ -146,7 +146,5 @@ for synced_table_name in SYNCED_TABLES:
 # COMMAND ----------
 
 print("✅ Synced table pipelines triggered successfully!")
-print("📊 Player data sync: lr-lakebase.public.nhl_player_data")
-print("📊 Team data sync: lr-lakebase.public.nhl_team_data")
 print("🔄 Pipelines will update the synced tables with latest data from source tables")
-print("🎉 Synced tables are now being updated!")
+print("📊 Tables: clean_prediction_summary, nhl_schedule_by_day, llm_summary, gold_game_stats_clean, team_code_mappings")

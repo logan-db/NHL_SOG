@@ -195,7 +195,7 @@ class TestPlayerGameStatsSchema:
         )
 
     def test_no_legacy_columns(self):
-        """Test that old MoneyPuck column names are not present."""
+        """Test that legacy column names are not present."""
         schema = get_bronze_player_stats_schema()
         schema_columns = {field.name for field in schema.fields}
 

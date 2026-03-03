@@ -25,7 +25,7 @@ NHL API → Bronze (DLT) → Silver (DLT) → Gold (DLT) → ML Models
 ```
 
 **Pipeline:**
-- `01-bronze-ingestion-nhl-api.py` - Ingests NHL API data with MoneyPuck-compatible schema
+- `01-bronze-ingestion-nhl-api.py` - Ingests NHL API data
 - `02-silver-transform.py` - Transforms and enriches player statistics
 - `03-gold-agg.py` - Aggregates features for ML models
 
@@ -110,7 +110,7 @@ nhlPredict/
 ## Key Features
 
 ### Schema Preservation
-- Maintains MoneyPuck-compatible schema at bronze layer
+- Maintains consistent schema at bronze layer
 - Zero changes required to silver/gold layers
 - ML models work without retraining
 

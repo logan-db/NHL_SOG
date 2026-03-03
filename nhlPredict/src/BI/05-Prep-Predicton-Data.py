@@ -33,7 +33,7 @@ display(full_prediction)
 
 # COMMAND ----------
 
-from pyspark.sql.functions import when, lit, col, lag, count, sum, desc
+from pyspark.sql.functions import when, lit, col, lag, count, sum, desc, unix_timestamp
 from pyspark.sql.window import Window
 
 windowSpec = Window.partitionBy("playerTeam", "playerId", "season").orderBy("gameDate")
@@ -160,6 +160,14 @@ lastPlayerMatchupWindowSpec = Window.partitionBy(
     "season", "playerId", "playerTeam", "opposingTeam"
 ).orderBy(col("gameDate").desc())
 
+# Last 30 days window for 2+/3+ hit rates (calendar days, in seconds for range)
+thirty_days_sec = 30 * 24 * 60 * 60
+windowLast30d = (
+    Window.partitionBy("playerId", "playerTeam", "season")
+    .orderBy(unix_timestamp(col("gameDate").cast("string"), "yyyy-MM-dd"))
+    .rangeBetween(-thirty_days_sec, 0)
+)
+
 clean_prediction_edit = (
     clean_prediction.withColumn("predictedSOG", round(col("predictedSOG"), 2))
     .withColumn(
@@ -192,6 +200,20 @@ clean_prediction_edit = (
     .withColumn(
         "latestMatchupFlag",
         when(col("latestMatchupCounter") >= 2, lit(True)).otherwise(lit(False)),
+    )
+    .withColumn(
+        "player_2+_Last30HitRate",
+        when(count(col("SOG_2+")).over(windowLast30d) > 0,
+             sum(col("SOG_2+")).over(windowLast30d)
+             / count(col("SOG_2+")).over(windowLast30d))
+        .otherwise(lit(None)),
+    )
+    .withColumn(
+        "player_3+_Last30HitRate",
+        when(count(col("SOG_3+")).over(windowLast30d) > 0,
+             sum(col("SOG_3+")).over(windowLast30d)
+             / count(col("SOG_3+")).over(windowLast30d))
+        .otherwise(lit(None)),
     )
     .orderBy(
         desc("gameDate"),
@@ -318,13 +340,21 @@ display(
 # MAGIC     `teamGoalsForRank%` DOUBLE COMMENT 'Player Team percentage rank of total goals for. Higher is better',
 # MAGIC     `teamSOGForRank%` DOUBLE COMMENT 'Player Team percentage rank of total shots on goal for. Higher is better',
 # MAGIC     `teamPPSOGRank%` DOUBLE COMMENT 'Player Team percentage rank of power play shots on goal per penalty. Higher is better',
-# MAGIC     `oppGoalsAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total goals against. Higher is better',
-# MAGIC     `oppSOGAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total shots on goal against. Higher is better',
-# MAGIC     `oppPenaltiesRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total penalties for. Higher is better',
-# MAGIC     `oppPKSOGRank%` DOUBLE COMMENT 'Opponent Team percentage rank of penalty kill shots on goal against per penalty. Higher is better',
+# MAGIC     `oppGoalsAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total goals against. Lower = opponent allows more goals = better',
+# MAGIC     `oppSOGAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total shots on goal against. Lower = opponent allows more shots = better',
+# MAGIC     `oppPenaltiesRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total penalties for. Higher = opponent takes more penalties = better',
+# MAGIC     `oppPKSOGRank%` DOUBLE COMMENT 'Opponent Team percentage rank of penalty kill shots on goal against per penalty. Lower = opponent allows more PK SOG = better',
 # MAGIC     matchup_previous_player_Total_shotsOnGoal DOUBLE COMMENT 'Total shots on goal by the player the last game they played against this opposingTeam',
 # MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games DOUBLE COMMENT 'Average shots on goal by the player over the last 3 games they played against this opposingTeam',
-# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games DOUBLE COMMENT 'Average shots on goal by the player over the last 7 games they played against this opposingTeam'
+# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games DOUBLE COMMENT 'Average shots on goal by the player over the last 7 games they played against this opposingTeam',
+# MAGIC     `player_2+_SeasonHitRate` DOUBLE COMMENT 'Player 2+ SOG hit rate for the season',
+# MAGIC     `player_3+_SeasonHitRate` DOUBLE COMMENT 'Player 3+ SOG hit rate for the season',
+# MAGIC     `player_2+_SeasonMatchupHitRate` DOUBLE COMMENT 'Player 2+ SOG hit rate vs this opponent this season',
+# MAGIC     `player_3+_SeasonMatchupHitRate` DOUBLE COMMENT 'Player 3+ SOG hit rate vs this opponent this season',
+# MAGIC     `player_2+_Last30HitRate` DOUBLE COMMENT 'Player 2+ SOG hit rate in last 30 days',
+# MAGIC     `player_3+_Last30HitRate` DOUBLE COMMENT 'Player 3+ SOG hit rate in last 30 days',
+# MAGIC     previous_player_Total_iceTimeRank INT COMMENT 'Player ice time rank among teammates in last game (1=most). Higher=more usage',
+# MAGIC     previous_player_PP_iceTimeRank INT COMMENT 'Player PP ice time rank among teammates in last game (1=most)'
 # MAGIC )
 # MAGIC COMMENT 'Summary of clean predictions for NHL games';
 # MAGIC
@@ -355,7 +385,15 @@ display(
 # MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`,
 # MAGIC     matchup_previous_player_Total_shotsOnGoal,
 # MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games,
-# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games
+# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games,
+# MAGIC     `player_2+_SeasonHitRate`,
+# MAGIC     `player_3+_SeasonHitRate`,
+# MAGIC     `player_2+_SeasonMatchupHitRate`,
+# MAGIC     `player_3+_SeasonMatchupHitRate`,
+# MAGIC     `player_2+_Last30HitRate`,
+# MAGIC     `player_3+_Last30HitRate`,
+# MAGIC     previous_player_Total_iceTimeRank,
+# MAGIC     previous_player_PP_iceTimeRank
 # MAGIC FROM (
 # MAGIC   SELECT *, ROW_NUMBER() OVER (PARTITION BY shooterName, gameDate, playerTeam, opposingTeam ORDER BY absVarianceAvgLast7SOG DESC, predictedSOG DESC) AS rn
 # MAGIC   FROM lr_nhl_demo.dev.clean_prediction_v2

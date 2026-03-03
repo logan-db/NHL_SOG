@@ -11,12 +11,15 @@ from pyspark.sql.functions import col, expr, desc
 # COMMAND ----------
 
 # DBTITLE 1,Define Latest Games Dataset
+# NHL uses 8-digit season format: 20252026 = 2025-26 season
+CURRENT_SEASON = 20252026
+
 latest_games = (
     spark.table("dev.clean_prediction_summary")
     .filter(
         (col("gameId").isNull())
         & (col("is_last_played_game") == True)
-        & (col("season") == 2025)
+        & (col("season") == CURRENT_SEASON)
         # & (col("shooterName") == "Alex Ovechkin")
     )
     .orderBy(desc("predictedSOG"), "gameDate")
@@ -26,11 +29,16 @@ latest_games = (
 # COMMAND ----------
 
 # DBTITLE 1,Parse metadata
+rows = latest_games.limit(1).collect()
+if not rows:
+    raise ValueError(
+        "No rows in latest_games. Check clean_prediction_summary has upcoming games "
+        f"for season={CURRENT_SEASON} (NHL 8-digit format)."
+    )
+first_row = rows[0]
+
 # Initialize an empty dictionary to store column names and values
 column_value_dict = {}
-
-# Get the first row of the DataFrame
-first_row = latest_games.limit(1).collect()[0]
 
 # Iterate through each column in the DataFrame
 for column in latest_games.columns:
@@ -81,22 +89,31 @@ print(input_column_names_clean)
 endpoint_name = "databricks-claude-3-7-sonnet"
 
 prompt = f"""
-You are provided with a row of NHL statistics for a given player. The goal is to explain and analyze the players next games shots on goal (predictedSOG). The input is a row of NHL statistics of a players previous games along with the players predicted shots on goal for the next game (predictedSOG). Use the input row and provide analysis on why the model predicted this predictedSOG value. 
+You are an NHL analytics expert. Analyze this player's upcoming game and provide a well-formatted 2-4 paragraph analysis. Cover:
 
-When analyzing the stats, use the following schema comments to understand what each column/statistic means in order to better explain: 
+1. **Player profile**: Their role (e.g., major shooter, powerplay specialist), recent form, shot consistency. Note if they take most shots on powerplay (playerLast7PPSOG% high) or even strength.
 
+2. **Key metrics**: Predicted SOG (predictedSOG), average SOG (playerAvgSOGLast7, playerAvgSOGLast3), last game SOG (playerLastSOG). How often they hit 2+ and 3+ SOG this season and vs this opponent. Whether they consistently shoot.
+
+3. **Matchup**: How the opponent ranks in SOG allowed (oppSOGAgainstRank%), penalties (oppPenaltiesRank%), PK (oppPKSOGRank%). If opponent allows lots of penalties and the player is a PP specialist, highlight that advantage.
+
+4. **Recommendation**: Whether they are a strong SOG pick based on the data. Be specific with numbers.
+
+Schema/column meanings for reference:
 {modified_comments}
-      
-State the predictedSOG value along with other statistics during your Analysis.
+
+Keep the analysis concise (2-4 short paragraphs). Use specific stats from the input. Format with clear structure.
 
 Input Row Data:
 
 """
 
 # Use ai_query for batch inference
+# Escape single quotes in prompt for SQL string literal (e.g. "player's" -> "player''s")
+prompt_escaped = prompt.replace("'", "''")
 ai_query_expr = f"""
 ai_query('{endpoint_name}', 
-    request => '{prompt}' || STRING(struct(*)),
+    request => '{prompt_escaped}' || STRING(struct(*)),
     returnType => 'STRING'
     ) AS Explanation
 """
@@ -331,10 +348,10 @@ latest_games.printSchema()
 # MAGIC       teamGoalsForRank%: Player Team percentage rank of total goals for. Higher is better.
 # MAGIC       teamSOGForRank%: Player Team percentage rank of total shots on goal for. Higher is better.
 # MAGIC       teamPPSOGRank%: Player Team percentage rank of power play shots on goal per penalty. Higher is better.
-# MAGIC       oppGoalsAgainstRank%: Opponent Team percentage rank of total goals against. Higher is better.
-# MAGIC       oppSOGAgainstRank%: Opponent Team percentage rank of total shots on goal against. Higher is better.
-# MAGIC       oppPenaltiesRank%: Opponent Team percentage rank of total penalties for. Higher is better.
-# MAGIC       oppPKSOGRank%: Opponent Team percentage rank of penalty kill shots on goal against per penalty. Higher is better.
+# MAGIC       oppGoalsAgainstRank%: Opponent Team percentage rank of total goals against. Lower = opponent allows more goals = better.
+# MAGIC       oppSOGAgainstRank%: Opponent Team percentage rank of total shots on goal against. Lower = opponent allows more shots = better.
+# MAGIC       oppPenaltiesRank%: Opponent Team percentage rank of total penalties for. Higher = opponent takes more penalties = better.
+# MAGIC       oppPKSOGRank%: Opponent Team percentage rank of penalty kill shots on goal against per penalty. Lower = opponent allows more PK SOG = better.
 # MAGIC
 # MAGIC     Instructions:
 # MAGIC     1. Analyze the data in the table above, the data is relevant statistics for player Shots on Goal (SOG) predictions in upcoming NHL Games.

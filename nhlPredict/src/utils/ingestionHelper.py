@@ -183,7 +183,7 @@ def select_rename_game_columns(
 def get_day_of_week(df: DataFrame, date_column: str) -> DataFrame:
     """
     Adds a 'DAY' column to the DataFrame representing the day of the week based on the given date column.
-    If 'EASTERN' or 'LOCAL' columns are null, it replaces them with the default value '7:00 PM Default'.
+    If 'EASTERN' or 'LOCAL' columns are null or missing, adds/replaces them with the default value '7:00 PM Default'.
 
     Args:
         df (DataFrame): The input DataFrame.
@@ -192,15 +192,24 @@ def get_day_of_week(df: DataFrame, date_column: str) -> DataFrame:
     Returns:
         DataFrame: The modified DataFrame with the 'DAY' column and updated 'EASTERN' and 'LOCAL' columns.
     """
+    default_time = lit("7:00 PM Default")
 
     df_with_day = df.withColumn("DAY", date_format(date_column, "E"))
-    df_with_default_time = df_with_day.withColumn(
-        "EASTERN",
-        when(col("EASTERN").isNull(), lit("7:00 PM Default")).otherwise(col("EASTERN")),
-    )
-    df_with_default_time = df_with_default_time.withColumn(
-        "LOCAL",
-        when(col("LOCAL").isNull(), lit("7:00 PM Default")).otherwise(col("LOCAL")),
-    )
+    # Add EASTERN if missing (e.g. NHL API fallback schedule has no time columns)
+    if "EASTERN" in df_with_day.columns:
+        df_with_day = df_with_day.withColumn(
+            "EASTERN",
+            when(col("EASTERN").isNull(), default_time).otherwise(col("EASTERN")),
+        )
+    else:
+        df_with_day = df_with_day.withColumn("EASTERN", default_time)
+    # Add LOCAL if missing
+    if "LOCAL" in df_with_day.columns:
+        df_with_day = df_with_day.withColumn(
+            "LOCAL",
+            when(col("LOCAL").isNull(), default_time).otherwise(col("LOCAL")),
+        )
+    else:
+        df_with_day = df_with_day.withColumn("LOCAL", default_time)
 
-    return df_with_default_time
+    return df_with_day

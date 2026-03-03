@@ -3,24 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}NHL Game & Player Analysis{% endblock %}</title>
+  <title>{% block title %}SOG Predict — NHL Shots on Goal{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥅</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
   <header class="app-header">
     <div class="header-content">
       <h1 class="logo">
-        <span class="logo-icon">🏒</span>
-        NHL Game & Player Analysis
+        <span class="logo-mark">◈</span>
+        <span class="logo-text">SOG Predict</span>
+        <span class="logo-sub">NHL Shots on Goal</span>
       </h1>
+      <div class="header-meta">
+        <div id="pipeline-status" class="pipeline-status" title="Last ingestion pipeline completion">
+          <span class="status-icon">⏱</span>
+          <span class="status-text">Data: loading…</span>
+        </div>
+      </div>
       <nav class="main-nav">
-        <a href="#upcoming" class="nav-link">Upcoming Games</a>
-        <a href="#players" class="nav-link">Player Stats</a>
-        <a href="#teams" class="nav-link">Team Stats</a>
-        <a href="#games" class="nav-link">Historical Games</a>
+        <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
+        <a href="#" class="nav-link" data-tab="predictions">Predictions</a>
+        <a href="#" class="nav-link" data-tab="my-picks">My Picks</a>
+        <a href="#" class="nav-link" data-tab="historical">Historical</a>
       </nav>
     </div>
   </header>
@@ -30,9 +38,11 @@
   </main>
 
   <footer class="app-footer">
-    <p>NHL Shots on Goal Analysis • Powered by Lakebase</p>
+    <p>Powered by Lakebase • Databricks ML</p>
   </footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script>window.APP_API_BASE = "{{ request.script_root or '' }}";</script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

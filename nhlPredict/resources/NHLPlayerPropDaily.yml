@@ -4,9 +4,9 @@ resources:
     NHLPlayerPropDaily:
       name: NHLPlayerPropDaily
       schedule:
-        quartz_cron_expression: 46 0 13 * * ?
-        timezone_id: UTC
-        pause_status: PAUSED
+        quartz_cron_expression: 0 0 9 * * ?
+        timezone_id: America/Chicago
+        pause_status: UNPAUSED
 
       email_notifications:
         on_failure:
@@ -17,16 +17,12 @@ resources:
           notebook_task:
             notebook_path: ../src/setup/01-Ingestion-createVols.sql
 
-        - task_key: createSampleMV
-          notebook_task:
-            notebook_path: ../src/setup/exampleMV.sql
-        
         - task_key: ingest_transform_job
           depends_on:
               - task_key: createVols
           pipeline_task:
             pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
-            full_refresh: false
+            full_refresh: true
 
         - task_key: Write_out_Delta_Tables
           depends_on:
@@ -136,15 +132,23 @@ resources:
             notebook_path: ../src/genie/Prep Genie Data.py
             source: WORKSPACE
 
-        - task_key: trigger_synced_tables
+        - task_key: backfill_user_picks_actual_sog
           depends_on:
             - task_key: BI_Prep
-            - task_key: genie_prep
-          run_if: AT_LEAST_ONE_SUCCESS
+          notebook_task:
+            notebook_path: ../src/triggers/backfill_user_picks_actual_sog.py
+            source: WORKSPACE
+          environment_key: ServerlessBackfill
+
+        - task_key: trigger_lakebase_sync
+          depends_on:
+            - task_key: generate_explanations
+            - task_key: backfill_user_picks_actual_sog
           notebook_task:
             notebook_path: ../src/triggers/trigger_sync_integration.py
             source: WORKSPACE
-            
+          environment_key: ServerlessSync
+
       job_clusters:
         - job_cluster_key: LR-ML
           new_cluster:
@@ -192,17 +196,28 @@ resources:
         - name: time_col
           default: gameDate
         - name: train_model_param
-          default: false
+          default: "false"
         - name: n_estimators_param
-          default: 200 # Prod use 100
+          default: "200"
         - name: trial_eval_param
-          default: 300 # Prod use 200
+          default: "300"
         - name: trial_experiment_param
-          default: 4320825364109465
+          default: "4320825364109465"
         - name: training_experiment_param
-          default: 4320825364109641
+          default: "4320825364109641"
       environments:
         - environment_key: Default
           spec:
             environment_version: "1"
+        - environment_key: ServerlessBackfill
+          spec:
+            client: "4"
+            dependencies:
+              - psycopg[binary]
+              - databricks-sdk>=0.77
+        - environment_key: ServerlessSync
+          spec:
+            client: "4"
+            dependencies:
+              - databricks-sdk
 

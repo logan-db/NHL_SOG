@@ -263,6 +263,67 @@ games_clean = games_clean.withColumn(
 ).filter(col("gameId").isNotNull())
 # Dedupe by PK for Lakebase sync (gameId, playerTeam must be unique)
 games_clean = games_clean.dropDuplicates(["gameId", "playerTeam"])
+
+# Backfill 0-0 scores from player stats when silver_games_rankings has incorrect zeros
+# (ETL issue: schedule-games join can produce gameId with null stats -> coalesced to 0)
+player_goals_by_game = (
+    gold_player_stats_v2.filter(col("gameId").isNotNull())
+    .groupBy("gameId", "playerTeam")
+    .agg(sum("player_Total_goals").cast("int").alias("derived_goals"))
+)
+games_clean = (
+    games_clean.alias("g")
+    .join(
+        player_goals_by_game.alias("pg_team"),
+        (col("g.gameId") == col("pg_team.gameId")) & (col("g.playerTeam") == col("pg_team.playerTeam")),
+        "left",
+    )
+    .join(
+        player_goals_by_game.alias("pg_opp"),
+        (col("g.gameId") == col("pg_opp.gameId")) & (col("g.opposingTeam") == col("pg_opp.playerTeam")),
+        "left",
+    )
+    .withColumn(
+        "_orig_gf",
+        col("g.sum_game_Total_goalsFor"),
+    )
+    .withColumn(
+        "_orig_ga",
+        col("g.sum_game_Total_goalsAgainst"),
+    )
+    .withColumn(
+        "_should_backfill",
+        (col("_orig_gf") == 0)
+        & (col("_orig_ga") == 0)
+        & col("pg_team.derived_goals").isNotNull()
+        & col("pg_opp.derived_goals").isNotNull(),
+    )
+    .withColumn(
+        "sum_game_Total_goalsFor",
+        when(col("_should_backfill"), col("pg_team.derived_goals")).otherwise(
+            col("g.sum_game_Total_goalsFor")
+        ),
+    )
+    .withColumn(
+        "sum_game_Total_goalsAgainst",
+        when(col("_should_backfill"), col("pg_opp.derived_goals")).otherwise(
+            col("g.sum_game_Total_goalsAgainst")
+        ),
+    )
+    .select(
+        *[
+            col("sum_game_Total_goalsFor") if c == "sum_game_Total_goalsFor" else col("sum_game_Total_goalsAgainst") if c == "sum_game_Total_goalsAgainst" else col(f"g.{c}")
+            for c in game_clean_cols
+        ]
+    )
+)
+# Recompute isWin after potential backfill
+games_clean = games_clean.withColumn(
+    "isWin",
+    when(
+        col("sum_game_Total_goalsFor") > col("sum_game_Total_goalsAgainst"), "Yes"
+    ).otherwise("No"),
+)
 display(games_clean)
 
 # COMMAND ----------

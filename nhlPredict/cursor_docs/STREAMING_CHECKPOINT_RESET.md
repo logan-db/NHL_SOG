@@ -1,4 +1,12 @@
-# Fix: DIFFERENT_DELTA_TABLE_READ_BY_STREAMING_SOURCE
+# Fix: Streaming Checkpoint Errors (DIFFERENT_DELTA_TABLE, No such file or directory)
+
+## Error: No such file or directory: .../checkpoints/.../0/state
+
+This occurs when the stream's checkpoint references files that no longer exist (e.g. after switching `skipChangeCommits` ↔ `ignoreChanges`, or a Full Refresh that left state inconsistent). **Fix:** Delete pipeline + redeploy (same as below).
+
+---
+
+## Error: DIFFERENT_DELTA_TABLE_READ_BY_STREAMING_SOURCE
 
 ## Why this happens
 

@@ -16,14 +16,19 @@ resources:
             path: ../src/dlt_etl/aggregation/03-gold-agg.py
       serverless: true
       catalog: lr_nhl_demo
+      # Optional: usage_policy_id for serverless budget attribution. Must be the policy UUID from
+      # Settings > Compute > Serverless budget policies (not the display name).
+      usage_policy_id: "2fd2c389-48a5-440d-bdc4-744a1fc67473"
       configuration:
         bundle.sourcePath: ${workspace.file_path}/src
         schema: dev
         catalog: lr_nhl_demo
+        # "false" = incremental (daily updates). "true" = full historical load.
         one_time_load: "false"
-        # true = fast runs, read from *_staging_manual (no API). false = run API for play-by-play, backfill.
-        # If you switch true↔false and get DIFFERENT_DELTA_TABLE_READ: delete pipeline, redeploy, run (STREAMING_CHECKPOINT_RESET.md).
+        # true = stream reads from *_staging_manual (fast, no API). Requires staging_manual populated.
         skip_staging_ingestion: "true"
+        # With skip_staging=true, streams read from staging_manual; set false (no hybrid).
+        use_manual_for_historical: "false"
         lookback_days: "1"
         schedule_future_days: "8"
       notifications:

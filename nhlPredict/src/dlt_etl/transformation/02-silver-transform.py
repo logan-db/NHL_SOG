@@ -196,7 +196,6 @@ def clean_games_data():
         "highDangerShotsAgainst",
     ]
 
-    # Source: prefer bronze; when empty (e.g. post-delete stream not committed), fallback to staging_manual
     _games_src = dlt.read("bronze_games_historical_v2")
     if _games_src.isEmpty():
         _catalog = spark.conf.get("catalog", "lr_nhl_demo")
@@ -207,11 +206,11 @@ def clean_games_data():
                 _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
                 print("📊 silver_games_historical: fallback to staging_manual")
             else:
-                print("📊 silver_games_historical: fallback to spark.table(bronze_games_historical_v2)")
+                print("📊 silver_games_historical: fallback to spark.table(bronze)")
         except Exception:
             try:
                 _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
-                print("📊 silver_games_historical: fallback to staging_manual (bronze missing)")
+                print("📊 silver_games_historical: fallback to staging_manual")
             except Exception:
                 pass
 
@@ -323,14 +322,11 @@ def merge_games_data():
         dlt.read("silver_games_historical_v2")
         .withColumn(
             "gameDate",
-            when(
-                col("gameDate").isNotNull(),
-                coalesce(
-                    to_date(col("gameDate")),
-                    to_date(col("gameDate").cast("string"), "yyyyMMdd"),
-                    to_date(col("gameDate").cast("string"), "yyyy-MM-dd"),
-                ),
-            ).otherwise(col("gameDate")),
+            coalesce(
+                to_date(col("gameDate")),
+                to_date(col("gameDate").cast("string"), "yyyyMMdd"),
+                to_date(col("gameDate").cast("string"), "yyyy-MM-dd"),
+            ),
         )
         .withColumn(
             "homeTeamCode",
@@ -354,12 +350,15 @@ def merge_games_data():
     )
     silver_games_schedule = sched.join(games, join_cond, how="outer")
 
-    # Normalize game id to a single column: downstream and schema expect gameId only.
-    # Schedule may provide GAME_ID (bronze) or gameId; games provides gameId. Unify so we never reference GAME_ID.
+    # Normalize game id: prefer gameId from games (proves join matched and stats exist).
+    # Only fall back to schedule GAME_ID when games.gameId is null - but then game stats
+    # are also null (join failed). Using GAME_ID would create rows with gameId set but
+    # 0-0 goals after coalesce. Avoid that: use games.gameId only so we only have
+    # gameId when we actually have game stats.
     if "GAME_ID" in silver_games_schedule.columns:
         silver_games_schedule = silver_games_schedule.withColumn(
             "gameId",
-            coalesce(col("gameId"), col("GAME_ID").cast("long")),
+            col("gameId"),  # Do NOT coalesce with GAME_ID - avoids 0-0 from join misses
         ).drop("GAME_ID")
 
     # Coalesce ALL numeric game stats to 0 for historical rows so rankings/gold never get null.
@@ -929,32 +928,27 @@ def clean_rank_players():
         "OffIce_A_shotAttempts",
     ]
 
-    # Prefer bronze; if empty (e.g. same run before stream commits), use staging so silver gets data in one run.
-    # Read both so DLT orders staging before silver; then choose source.
     _bronze = dlt.read("bronze_player_game_stats_v2")
     _staging = dlt.read("bronze_player_game_stats_v2_staging")
     _player_src = _bronze if not _bronze.isEmpty() else _staging
     if _bronze.isEmpty() and not _staging.isEmpty():
-        print("📊 silver_players_ranked: bronze empty this run — using bronze_player_game_stats_v2_staging")
-    # When both DLT reads are empty (e.g. skip_staging + stream not committed yet), use materialized tables
-    # so silver gets data after delete/recreate or when run order leaves bronze "empty" in dlt.read().
+        print("📊 silver_players_ranked: bronze empty — using bronze_player_game_stats_v2_staging")
     if _player_src.isEmpty():
         _catalog = spark.conf.get("catalog", "lr_nhl_demo")
         _schema = spark.conf.get("schema", "dev")
         for _name, _tbl in [
             ("bronze_player_game_stats_v2", f"{_catalog}.{_schema}.bronze_player_game_stats_v2"),
+            ("bronze_player_game_stats_v2_staging", f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging"),
             ("bronze_player_game_stats_v2_staging_manual", f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual"),
         ]:
             try:
                 _fallback = spark.table(_tbl)
                 if _fallback is not None and not _fallback.isEmpty():
                     _player_src = _fallback
-                    print(f"📊 silver_players_ranked: fallback to spark.table({_name}) — {_fallback.count()} rows")
+                    print(f"📊 silver_players_ranked: fallback to {_name} — {_fallback.count()} rows")
                     break
             except Exception:
                 continue
-        if _player_src.isEmpty():
-            print("⚠️ silver_players_ranked: both bronze and staging empty; set skip_staging_ingestion=false and run again")
 
     # Call the function on the DataFrame (single source so situation filters work)
     player_game_stats_total = select_rename_columns(
@@ -1028,6 +1022,29 @@ def clean_rank_players():
             joined_player_stats = joined_player_stats.withColumn(
                 c, coalesce(col(c), lit(0))
             )
+
+    # Compute iceTimeRank: rank among teammates by icetime within each game (1 = most ice time)
+    # NHL API does not provide this; we compute from icetime. Critical for player role/usage features.
+    ice_time_rank_total_window = (
+        Window.partitionBy("gameId", "playerTeam")
+        .orderBy(col("player_Total_icetime").desc_nulls_last())
+    )
+    ice_time_rank_pp_window = (
+        Window.partitionBy("gameId", "playerTeam")
+        .orderBy(col("player_PP_icetime").desc_nulls_last())
+    )
+    joined_player_stats = (
+        joined_player_stats
+        .withColumn(
+            "player_Total_iceTimeRank",
+            rank().over(ice_time_rank_total_window),
+        )
+        .withColumn(
+            "player_PP_iceTimeRank",
+            rank().over(ice_time_rank_pp_window),
+        )
+    )
+
     joined_player_stats = joined_player_stats.alias("joined_player_stats")
 
     # Check for duplicates in silver_games_schedule_v2 before joining

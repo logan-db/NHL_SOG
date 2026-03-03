@@ -23,6 +23,7 @@ resources:
 
     # 2. nhl_schedule_by_day - Upcoming games (DATE, HOME, AWAY)
     # Primary key: DATE + HOME + AWAY for unique game rows
+    # Source must be deduplicated (see upload_to_vol.py for schedule table)
     nhl_schedule_by_day_sync:
       name: lr-lakebase.public.nhl_schedule_by_day
       spec:
@@ -62,6 +63,21 @@ resources:
         primary_key_columns:
           - gameId
           - playerTeam
+        scheduling_policy: TRIGGERED
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: lr_nhl_demo
+          storage_schema: dev
+
+    # 5b. gold_player_stats_clean - Historical player stats per game (SOG, goals, points)
+    # One row per player per game; (gameId, playerId) is unique
+    gold_player_stats_clean_sync:
+      name: lr-lakebase.public.gold_player_stats_clean
+      spec:
+        source_table_full_name: lr_nhl_demo.dev.gold_player_stats_clean
+        primary_key_columns:
+          - gameId
+          - playerId
         scheduling_policy: TRIGGERED
         create_database_objects_if_missing: true
         new_pipeline_spec:

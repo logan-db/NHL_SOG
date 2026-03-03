@@ -170,7 +170,7 @@ def calculate_date_range():
 
 # DBTITLE 1,Player Game Stats Schema
 def get_player_game_stats_schema():
-    """Schema for player game-by-game statistics (MoneyPuck-compatible)."""
+    """Schema for player game-by-game statistics."""
     return StructType(
         [
             StructField("playerId", IntegerType(), True),
@@ -214,7 +214,6 @@ def get_player_game_stats_schema():
             StructField("Total_lowDangerGoals", IntegerType(), True),
             StructField("Total_mediumDangerGoals", IntegerType(), True),
             StructField("Total_highDangerGoals", IntegerType(), True),
-            # MoneyPuck compatibility columns
             StructField(
                 "iceTimeRank", IntegerType(), True
             ),  # Not calculated from API, set to NULL
@@ -227,7 +226,7 @@ def get_player_game_stats_schema():
 
 # DBTITLE 1,Team Game Stats Schema
 def get_team_game_stats_schema():
-    """Schema for team game statistics (MoneyPuck-compatible)."""
+    """Schema for team game statistics."""
     return StructType(
         [
             StructField("season", IntegerType(), True),
@@ -242,7 +241,6 @@ def get_team_game_stats_schema():
             StructField("team_Total_shotsOnGoal", IntegerType(), True),
             StructField("team_Total_shotAttempts", IntegerType(), True),
             StructField("team_Total_goals", IntegerType(), True),
-            # MoneyPuck compatibility columns
             StructField(
                 "playoffGame", IntegerType(), True
             ),  # 0 = regular season, 1 = playoffs
@@ -255,7 +253,7 @@ def get_team_game_stats_schema():
 
 # DBTITLE 1,Schedule Schema
 def get_schedule_schema():
-    """Schema for NHL schedule (MoneyPuck-compatible)."""
+    """Schema for NHL schedule."""
     return StructType(
         [
             StructField("SEASON", IntegerType(), True),
@@ -388,7 +386,6 @@ def ingest_player_game_stats_v2():
         new_df = spark.createDataFrame(
             all_player_stats, schema=get_player_game_stats_schema()
         )
-        # Add MoneyPuck compatibility columns
         new_df = new_df.withColumn("iceTimeRank", lit(None).cast(IntegerType()))
         new_count = new_df.count()
         print(f"✅ Fetched {new_count:,} new records from API")
@@ -524,7 +521,7 @@ def ingest_games_historical_v2():
         new_df = spark.createDataFrame(
             all_team_stats, schema=get_team_game_stats_schema()
         )
-        # Add MoneyPuck compatibility columns (0 = regular season, 1 = playoffs)
+        # 0 = regular season, 1 = playoffs
         new_df = new_df.withColumn("playoffGame", lit(0).cast(IntegerType()))
         new_count = new_df.count()
         print(f"✅ Fetched {new_count:,} new records from API")

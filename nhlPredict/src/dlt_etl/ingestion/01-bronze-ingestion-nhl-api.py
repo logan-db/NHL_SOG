@@ -7,10 +7,9 @@
 # MAGIC ## NHL API Bronze Layer Pipeline
 # MAGIC
 # MAGIC This pipeline ingests data from the official NHL API using nhl-api-py
-# MAGIC and transforms it into MoneyPuck-compatible schema.
+# MAGIC and transforms it into the standard player/game schema.
 # MAGIC
 # MAGIC **Data Source**: NHL API via nhl-api-py library
-# MAGIC **Target Schema**: MoneyPuck-compatible (maintains backward compatibility)
 # MAGIC **Strategy**: Zero downstream changes - preserves all existing columns
 
 # COMMAND ----------
@@ -66,6 +65,9 @@ one_time_load = spark.conf.get("one_time_load", "false").lower() == "true"
 skip_staging_ingestion = (
     spark.conf.get("skip_staging_ingestion", "false").lower() == "true"
 )  # Use existing staging data (skip API calls)
+use_manual_for_historical = (
+    spark.conf.get("use_manual_for_historical", "false").lower() == "true"
+)  # Staging = manual (historical) + API (incremental)
 lookback_days = int(
     spark.conf.get("lookback_days", "1")
 )  # Safety buffer for late-arriving data (default: 1 day)
@@ -152,7 +154,7 @@ def extract_player_name(player: Dict) -> str:
 def get_player_game_stats_schema():
     """
     Returns the schema for bronze_player_game_stats_v2 table.
-    Matches MoneyPuck schema exactly to ensure zero downstream changes.
+    Ensures zero downstream changes.
     """
     return StructType(
         [
@@ -454,6 +456,102 @@ def get_skaters_schema():
 # ==============================================================================
 
 
+def _fetch_player_stats_from_api(_start_date: date, _end_date: date):
+    """Fetch player stats from NHL API for date range. Returns deduplicated DataFrame."""
+    date_list = generate_date_range(_start_date, _end_date)
+    if not date_list:
+        return spark.createDataFrame([], schema=get_player_game_stats_schema())
+    all_player_stats = []
+    games_processed = 0
+    for date_str in date_list:
+        try:
+            schedule = fetch_with_retry(
+                nhl_client, nhl_client.schedule.daily_schedule, date=date_str
+            )
+            if not schedule or "games" not in schedule:
+                continue
+            games = [g for g in schedule["games"] if g.get("gameType", 2) in (2, 3)]
+            for game in games:
+                game_id = game.get("id")
+                home_team = game.get("homeTeam", {})
+                away_team = game.get("awayTeam", {})
+                try:
+                    pbp = fetch_with_retry(
+                        nhl_client, nhl_client.game_center.play_by_play, game_id=game_id
+                    )
+                    shift_response = fetch_with_retry(
+                        nhl_client,
+                        nhl_client.game_center.shift_chart_data,
+                        game_id=game_id,
+                    )
+                    shifts = (
+                        shift_response.get("data", [])
+                        if isinstance(shift_response, dict)
+                        else shift_response
+                    )
+                    boxscore = fetch_with_retry(
+                        nhl_client, nhl_client.game_center.boxscore, game_id=game_id
+                    )
+                    if not pbp or not shifts or not boxscore:
+                        continue
+                    home_team_id = boxscore.get("homeTeam", {}).get("id")
+                    away_team_id = boxscore.get("awayTeam", {}).get("id")
+                    home_players = (
+                        boxscore.get("playerByGameStats", {}).get("homeTeam", {}).get("forwards", [])
+                        + boxscore.get("playerByGameStats", {}).get("homeTeam", {}).get("defense", [])
+                    )
+                    away_players = (
+                        boxscore.get("playerByGameStats", {}).get("awayTeam", {}).get("forwards", [])
+                        + boxscore.get("playerByGameStats", {}).get("awayTeam", {}).get("defense", [])
+                    )
+                    player_names = {}
+                    if "rosterSpots" in pbp:
+                        for rp in pbp.get("rosterSpots", []):
+                            pid = str(rp.get("playerId"))
+                            fn = rp.get("firstName", {})
+                            ln = rp.get("lastName", {})
+                            fn = fn.get("default", "") if isinstance(fn, dict) else (fn if isinstance(fn, str) else "")
+                            ln = ln.get("default", "") if isinstance(ln, dict) else (ln if isinstance(ln, str) else "")
+                            n = f"{fn} {ln}".strip()
+                            if n:
+                                player_names[pid] = n
+                    for player in home_players:
+                        pid = str(player.get("playerId"))
+                        player_stats = aggregate_player_stats_by_situation(
+                            pbp_data=pbp, shift_data=shifts, player_id=pid,
+                            team_id=home_team_id, team_side="home",
+                            player_name=player_names.get(pid, ""),
+                            player_team=home_team.get("abbrev"),
+                            opposing_team=away_team.get("abbrev"),
+                            position=player.get("position"), is_home=True,
+                            game_id=game_id, game_date=int(date_str.replace("-", "")),
+                            season=game.get("season"),
+                        )
+                        all_player_stats.extend(player_stats)
+                    for player in away_players:
+                        pid = str(player.get("playerId"))
+                        player_stats = aggregate_player_stats_by_situation(
+                            pbp_data=pbp, shift_data=shifts, player_id=pid,
+                            team_id=away_team_id, team_side="away",
+                            player_name=player_names.get(pid, ""),
+                            player_team=away_team.get("abbrev"),
+                            opposing_team=home_team.get("abbrev"),
+                            position=player.get("position"), is_home=False,
+                            game_id=game_id, game_date=int(date_str.replace("-", "")),
+                            season=game.get("season"),
+                        )
+                        all_player_stats.extend(player_stats)
+                    games_processed += 1
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    if not all_player_stats:
+        return spark.createDataFrame([], schema=get_player_game_stats_schema())
+    df = spark.createDataFrame(all_player_stats, schema=get_player_game_stats_schema())
+    return df.dropDuplicates(["playerId", "gameId", "situation"])
+
+
 # DBTITLE 1,bronze_player_game_stats_v2_staging - API Ingestion (Batch)
 @dlt.table(
     name="bronze_player_game_stats_v2_staging",
@@ -472,11 +570,65 @@ def ingest_player_game_stats_staging():
 
     This table rebuilds on code changes, but is FAST due to incremental date logic:
     - skip_staging_ingestion=true: Use existing staging data (no API calls!)
+    - use_manual_for_historical=true: Staging = staging_manual (historical) + API (incremental)
     - one_time_load=true: Full historical (only on first run)
     - one_time_load=false: Only recent dates (5-10 min API calls)
 
     The final streaming table reads from this staging table and preserves all history.
     """
+
+    # HYBRID MODE: staging_manual (historical) + API (incremental). Stream reads from staging.
+    if use_manual_for_historical and not skip_staging_ingestion:
+        try:
+            manual_df = spark.table(
+                f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
+            )
+            manual_count = manual_df.count()
+            if manual_count > 0:
+                max_row = manual_df.agg(
+                    max(col("gameDate").cast("int")).alias("m")
+                ).first()
+                if max_row and max_row["m"] is not None:
+                    max_date_int = int(max_row["m"])
+                    max_date = datetime.strptime(
+                        str(max_date_int), "%Y%m%d"
+                    ).date()
+                    api_start = max_date - timedelta(days=lookback_days)
+                    api_end = today
+                    if api_start <= api_end:
+                        print(
+                            f"📂 HYBRID: staging_manual has {manual_count} rows (max gameDate={max_date})"
+                        )
+                        print(
+                            f"   Fetching incremental from API: {api_start} to {api_end}"
+                        )
+                        # Run API fetch for incremental range (reuse logic below)
+                        incremental_df = _fetch_player_stats_from_api(
+                            _start_date=api_start, _end_date=api_end
+                        )
+                        inc_count = incremental_df.count()
+                        if inc_count > 0:
+                            # API first so late-arriving corrections override manual on overlap
+                            combined = incremental_df.unionByName(
+                                manual_df
+                            ).dropDuplicates(
+                                ["playerId", "gameId", "situation"]
+                            )
+                            combined_count = combined.count()
+                            overlap = manual_count + inc_count - combined_count
+                            print(
+                                f"✅ HYBRID: staging = {combined_count} rows (manual {manual_count} + {inc_count} incremental, {overlap} overlap)"
+                            )
+                            return combined
+                        else:
+                            print("   No new API data; using manual only")
+                            return manual_df
+                print(f"📂 HYBRID: using staging_manual only ({manual_count} rows)")
+                return manual_df
+        except Exception as e:
+            print(
+                f"⚠️ HYBRID: staging_manual read failed ({e}), falling back to incremental API"
+            )
 
     # SKIP MODE: Return empty DataFrame (actual data read from _manual tables by streaming flows)
     if skip_staging_ingestion:
@@ -837,13 +989,19 @@ def stream_player_stats_from_staging():
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
         )
     else:
-        # Normal mode: Use dlt.read_stream() to establish dependency on staging table
-        print("⏭️  STREAMING: Reading from DLT staging table")
-        stream_df = dlt.read_stream("bronze_player_game_stats_v2_staging")
+        # Normal mode: Read from DLT staging. Use ignoreChanges (not skipChangeCommits) so we
+        # actually process the staging overwrite. skipChangeCommits skips overwrites = 0 rows.
+        # ignoreChanges re-processes rewritten files so we get the new data each run.
+        print("⏭️  STREAMING: Reading from DLT staging table (ignoreChanges for overwrite)")
+        stream_df = spark.readStream.option("ignoreChanges", "true").table(
+            f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
+        )
     # Coalesce numeric stats to 0 so silver/gold never see null
     for c in _numeric_player_cols:
         if c in stream_df.columns:
             stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0)))
+    # Dedupe by (playerId, gameId, situation) - ignoreChanges can emit duplicates on overwrite
+    stream_df = stream_df.dropDuplicates(["playerId", "gameId", "situation"])
     return stream_df
 
 
@@ -1162,8 +1320,19 @@ def ingest_schedule_v2():
             f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
         )
     else:
-        print(f"   📊 Historical: Reading from final streaming table")
         games_df = dlt.read("bronze_games_historical_v2")
+        if games_df.isEmpty():
+            try:
+                games_df = spark.table(f"{catalog}.{schema}.bronze_games_historical_v2")
+                if games_df.isEmpty():
+                    games_df = spark.table(
+                        f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
+                    )
+                print(f"   📊 Historical: Fallback to spark.table (stream not committed yet)")
+            except Exception:
+                pass
+        if not games_df.isEmpty():
+            print(f"   📊 Historical: Reading from streaming table")
 
     # Derive historical schedule
     historical_schedule = games_df.groupBy("gameId", "gameDate").agg(
@@ -1184,12 +1353,14 @@ def ingest_schedule_v2():
     print(f"   ✅ Historical schedule: {historical_schedule.count()} games")
 
     # PART 2: Fetch FUTURE games from NHL schedule API
-    # Config: schedule_future_days (default 8 = today + 7 ahead) so gold has upcoming NHL games.
+    # Config: schedule_future_days (default 8). We include today-1 to avoid losing "today's" games
+    # when the pipeline runs across the UTC date boundary (e.g. early Feb 26 UTC = still Feb 25 in Eastern;
+    # NHL games are North American). Fetches: today-1, today, today+1, ..., today+(schedule_future_days-2).
     schedule_future_days = int(spark.conf.get("schedule_future_days", "8"))
-    print(f"   📅 Fetching future schedule from NHL API (next {schedule_future_days} days)...")
+    print(f"   📅 Fetching future schedule from NHL API (yesterday + next {schedule_future_days} days)...")
 
     future_games = []
-    for i in range(0, schedule_future_days):
+    for i in range(-1, schedule_future_days - 1):
         future_date = today + timedelta(days=i)
         date_str = future_date.strftime("%Y-%m-%d")
 
@@ -1305,9 +1476,19 @@ def ingest_skaters_v2():
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
         )
     else:
-        # Normal mode: final table has accumulated historical data
-        print(f"   📊 Reading from final streaming table (normal mode)")
         player_stats = dlt.read("bronze_player_game_stats_v2")
+        if player_stats.isEmpty():
+            try:
+                player_stats = spark.table(f"{catalog}.{schema}.bronze_player_game_stats_v2")
+                if player_stats.isEmpty():
+                    player_stats = spark.table(
+                        f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
+                    )
+                print(f"   📊 Fallback to spark.table (stream not committed yet)")
+            except Exception:
+                pass
+        if not player_stats.isEmpty():
+            print(f"   📊 Reading from final streaming table (normal mode)")
 
     # Aggregate by player, team, season, situation
     skaters_df = (
@@ -1363,7 +1544,7 @@ print(
 3. bronze_schedule_2023_v2_nhl_api - NHL schedule (using existing)
 4. bronze_skaters_2023_v2_nhl_api - Aggregated player stats
 
-🎯 Schema compatibility: 100% MoneyPuck-compatible
+🎯 Schema compatibility: 100% downstream-compatible
 🔄 Downstream impact: ZERO changes required
 
 🚀 Ready to run in DLT pipeline!

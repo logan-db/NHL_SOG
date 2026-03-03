@@ -38,7 +38,7 @@ resources:
               - task_key: upload_player_stats
           pipeline_task:
             pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
-            full_refresh: false
+            full_refresh: true
 
         - task_key: Write_out_Delta_Tables
           depends_on:
@@ -132,7 +132,24 @@ resources:
           notebook_task:
             notebook_path: ../src/genie/Prep Genie Data.py
             source: WORKSPACE
-            
+
+        - task_key: backfill_user_picks_actual_sog
+          depends_on:
+            - task_key: BI_Prep
+          notebook_task:
+            notebook_path: ../src/triggers/backfill_user_picks_actual_sog.py
+            source: WORKSPACE
+          environment_key: ServerlessBackfill
+
+        - task_key: trigger_lakebase_sync
+          depends_on:
+            - task_key: generate_explanations
+            - task_key: backfill_user_picks_actual_sog
+          notebook_task:
+            notebook_path: ../src/triggers/trigger_sync_integration.py
+            source: WORKSPACE
+          environment_key: ServerlessSync
+
       job_clusters:
         - job_cluster_key: LR-ML
           new_cluster:
@@ -176,4 +193,15 @@ resources:
         - environment_key: Default
           spec:
             environment_version: "1"
+        - environment_key: ServerlessBackfill
+          spec:
+            client: "4"
+            dependencies:
+              - psycopg[binary]
+              - databricks-sdk>=0.77
+        - environment_key: ServerlessSync
+          spec:
+            client: "4"
+            dependencies:
+              - databricks-sdk
 
