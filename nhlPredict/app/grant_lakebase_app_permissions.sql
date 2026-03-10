@@ -9,12 +9,12 @@
 -- Usage: python scripts/run_lakebase_migration.py app/grant_lakebase_app_permissions.sql
 
 -- Schema
-GRANT USAGE ON SCHEMA public TO "90d692de-257c-4877-b833-55b8d520bc0b";
+GRANT USAGE ON SCHEMA public TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
 
 -- All synced + app tables (skip if table doesn't exist yet)
 DO $$
 DECLARE
-  app_principal TEXT := '90d692de-257c-4877-b833-55b8d520bc0b';
+  app_principal TEXT := '2e0ea180-83dc-4a75-b2d6-6972f90187b4';
   t TEXT;
 BEGIN
   FOR t IN (SELECT unnest(ARRAY[
@@ -32,7 +32,7 @@ END $$;
 -- App-created tables (run create_favorites_tables.sql first)
 DO $$
 DECLARE
-  app_principal TEXT := '90d692de-257c-4877-b833-55b8d520bc0b';
+  app_principal TEXT := '2e0ea180-83dc-4a75-b2d6-6972f90187b4';
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'user_favorites') THEN
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorites TO %I', app_principal);

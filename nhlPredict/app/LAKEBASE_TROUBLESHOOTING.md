@@ -1,8 +1,19 @@
 # Lakebase App Troubleshooting
 
-## "password authentication failed for user '90d692de-...'" (backfill job)
+## Stored credentials
 
-**Cause:** The backfill job (`backfill_user_picks_actual_sog.py`) connects to Lakebase with OAuth. The OAuth token from `generate_database_credential` is bound to the **identity that makes the API call** (the job's run-as user, e.g. job owner). The PostgreSQL `user` in the connection string must match that identity. If you use the app's service principal UUID (`90d692de-...`) as `PGUSER`, authentication fails because the token was issued for a different identity.
+The Lakebase app role password (for service principal `2e0ea180-83dc-4a75-b2d6-6972f90187b4`) is stored in **Databricks Secrets**:
+
+- **Scope:** `nhlPredict`
+- **Key:** `lakebase-app-role-password`
+
+The app uses OAuth at runtime and does not need this password. Use it only for manual psql connections as the app role (e.g. debugging). To retrieve in a notebook: `dbutils.secrets.get(scope="nhlPredict", key="lakebase-app-role-password")`.
+
+---
+
+## "password authentication failed for user '2e0ea180-...'" (backfill job)
+
+**Cause:** The backfill job (`backfill_user_picks_actual_sog.py`) connects to Lakebase with OAuth. The OAuth token from `generate_database_credential` is bound to the **identity that makes the API call** (the job's run-as user, e.g. job owner). The PostgreSQL `user` in the connection string must match that identity. If you use the app's service principal UUID (`2e0ea180-...`) as `PGUSER`, authentication fails because the token was issued for a different identity.
 
 **Fix (deployed in code):** The backfill script now uses `w.current_user.me().user_name` (the job's run-as identity) as PGUSER instead of the hardcoded app UUID. Redeploy the job and re-run.
 
@@ -20,22 +31,22 @@
    - Via Databricks CLI: `databricks psql <instance-name> -p PROFILE -- -d databricks_postgres`
    - Or via your existing psql connection used for `\d public.gold_game_stats_clean`
 
-2. **Get your app's PostgreSQL role name** from `app.yaml` → `env.PGUSER` (e.g. `90d692de-257c-4877-b833-55b8d520bc0b`)
+2. **Get your app's PostgreSQL role name** from `app.yaml` → `env.PGUSER` (e.g. `2e0ea180-83dc-4a75-b2d6-6972f90187b4`)
 
 3. **Run the following SQL** (replace `<app_role>` with your `PGUSER` value, in double quotes if it contains hyphens):
 
 ```sql
 -- Grant SELECT on all synced tables to the app role
-GRANT USAGE ON SCHEMA public TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT ON public.clean_prediction_summary TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT ON public.llm_summary TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT ON public.nhl_schedule_by_day TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT ON public.gold_game_stats_clean TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT ON public.team_code_mappings TO "90d692de-257c-4877-b833-55b8d520bc0b";
+GRANT USAGE ON SCHEMA public TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT ON public.clean_prediction_summary TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT ON public.llm_summary TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT ON public.nhl_schedule_by_day TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT ON public.gold_game_stats_clean TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT ON public.team_code_mappings TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
 
 -- Or grant on all existing and future tables in public:
--- GRANT SELECT ON ALL TABLES IN SCHEMA public TO "90d692de-257c-4877-b833-55b8d520bc0b";
--- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO "90d692de-257c-4877-b833-55b8d520bc0b";
+-- GRANT SELECT ON ALL TABLES IN SCHEMA public TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+-- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
 ```
 
 4. **Redeploy the app** (or just refresh) – no code change needed; the app will now have read access.

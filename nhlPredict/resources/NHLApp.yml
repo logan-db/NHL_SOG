@@ -1,0 +1,10 @@
+# NHL Predict app - deploys with bundle. App.yaml in app/ defines Lakebase env (PGHOST, PGUSER, ENDPOINT_NAME).
+# Lakebase permissions: run grant_lakebase_app_permissions.sql with the PGUSER from app.yaml.
+# Deployed to: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/app
+resources:
+  apps:
+    nhl_predict_app:
+      name: nhl-predict-app
+      # Local path (relative to resources/). Bundle deploys to workspace .../files/app
+      source_code_path: ../app
+      description: NHL SOG predictions app with Lakebase backend

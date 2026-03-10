@@ -356,7 +356,8 @@ display(
 # MAGIC     previous_player_Total_iceTimeRank INT COMMENT 'Player ice time rank among teammates in last game (1=most). Higher=more usage',
 # MAGIC     previous_player_PP_iceTimeRank INT COMMENT 'Player PP ice time rank among teammates in last game (1=most)'
 # MAGIC )
-# MAGIC COMMENT 'Summary of clean predictions for NHL games';
+# MAGIC COMMENT 'Summary of clean predictions for NHL games'
+# MAGIC TBLPROPERTIES (delta.enableChangeDataFeed = true);
 # MAGIC
 # MAGIC INSERT INTO lr_nhl_demo.dev.clean_prediction_summary
 # MAGIC SELECT

@@ -40,4 +40,4 @@ ADD CONSTRAINT user_picks_unique UNIQUE (user_id, game_date, home_team, away_tea
 CREATE INDEX IF NOT EXISTS idx_user_picks_backfill ON public.user_picks (game_date) WHERE hit IS NULL;
 
 -- Grants
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorite_teams TO "90d692de-257c-4877-b833-55b8d520bc0b";
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorite_teams TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";

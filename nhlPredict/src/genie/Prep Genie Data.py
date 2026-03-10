@@ -334,22 +334,23 @@ display(gold_player_stats_clean)
 # COMMAND ----------
 
 spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_player_stats_clean")
-gold_player_stats_clean.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.gold_player_stats_clean"
+gold_player_stats_clean.write.format("delta").mode("overwrite").option(
+    "delta.enableChangeDataFeed", "true"
+).saveAsTable("lr_nhl_demo.dev.gold_player_stats_clean")
+# Ensure CDF for Lakebase TRIGGERED sync
+spark.sql(
+    "ALTER TABLE lr_nhl_demo.dev.gold_player_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
 
 # COMMAND ----------
 
 spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_game_stats_clean")
-games_clean.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.gold_game_stats_clean"
-)
-
-# Enable Change Data Feed on gold_game_stats_clean for synced database tables
-print("Enabling Change Data Feed on gold_game_stats_clean...")
+games_clean.write.format("delta").mode("overwrite").option(
+    "delta.enableChangeDataFeed", "true"
+).saveAsTable("lr_nhl_demo.dev.gold_game_stats_clean")
+# Belt-and-suspenders: ensure CDF for Lakebase TRIGGERED sync (option may not apply on saveAsTable)
 spark.sql(
     "ALTER TABLE lr_nhl_demo.dev.gold_game_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
-print("✅ Change Data Feed enabled on gold_game_stats_clean")
 
 # COMMAND ----------

@@ -16,20 +16,27 @@ resources:
             path: ../src/dlt_etl/aggregation/03-gold-agg.py
       serverless: true
       catalog: lr_nhl_demo
-      # Optional: usage_policy_id for serverless budget attribution. Must be the policy UUID from
+      # Serverless usage policy for budget attribution. Policy UUID from
       # Settings > Compute > Serverless budget policies (not the display name).
       usage_policy_id: "2fd2c389-48a5-440d-bdc4-744a1fc67473"
+      # Tags propagate to cluster and billing; use for cost attribution with the policy
+      tags:
+        team: nhl-predict
+        cost_center: nhl-ingestion
+        usage_policy: serverless-budget
       configuration:
         bundle.sourcePath: ${workspace.file_path}/src
         schema: dev
         catalog: lr_nhl_demo
-        # "false" = incremental (daily updates). "true" = full historical load.
+        # === PIPELINE MODES ===
+        # FULL LOAD: one_time_load="true" — Backfill 2023-10-01 to today. Run first or after reset. ~3–5 hours.
+        # INCREMENTAL: one_time_load="false" — Daily updates from (bronze max - lookback_days) to today. ~5–10 min.
+        # Use "false" now that bronze is loaded.
         one_time_load: "false"
-        # true = stream reads from *_staging_manual (fast, no API). Requires staging_manual populated.
-        skip_staging_ingestion: "true"
-        # With skip_staging=true, streams read from staging_manual; set false (no hybrid).
+        # skip_staging_ingestion: "true" = use *_staging_manual only (no API). For manual backfill from CSV/parquet.
+        skip_staging_ingestion: "false"
         use_manual_for_historical: "false"
-        lookback_days: "1"
+        lookback_days: "2"
         schedule_future_days: "8"
       notifications:
         - email_recipients:
@@ -37,5 +44,4 @@ resources:
           alerts:
             - on-update-success
             - on-update-failure
-            - on-flow-failure
       root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl

@@ -135,8 +135,13 @@ df_out = latest_games.selectExpr("*", ai_query_expr)
 # DBTITLE 1,Save Dataframe to UC
 df_out.write.format("delta").mode("overwrite").option(
     "mergeSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.llm_summary")
-
+).option("delta.enableChangeDataFeed", "true").saveAsTable(
+    "lr_nhl_demo.dev.llm_summary"
+)
+# Ensure CDF for Lakebase TRIGGERED sync (option may not apply on saveAsTable)
+spark.sql(
+    "ALTER TABLE lr_nhl_demo.dev.llm_summary SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+)
 print("Data written to table: lr_nhl_demo.dev.llm_summary")
 
 # COMMAND ----------

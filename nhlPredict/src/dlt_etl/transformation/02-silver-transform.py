@@ -102,14 +102,6 @@ def clean_schedule_data():
     # Bronze schedule DATE is already DateType (yyyy-MM-dd). Do NOT use "M/d/yy" or DATE becomes null
     # and schedule join matches nothing -> 2x row explosion + 0 future games.
     _bronze = dlt.read("bronze_schedule_2023_v2")
-    if _bronze.isEmpty():
-        _catalog = spark.conf.get("catalog", "lr_nhl_demo")
-        _schema = spark.conf.get("schema", "dev")
-        try:
-            _bronze = spark.table(f"{_catalog}.{_schema}.bronze_schedule_2023_v2")
-            print("📊 silver_schedule: fallback to spark.table(bronze_schedule_2023_v2)")
-        except Exception:
-            pass
     schedule_remapped = (
         _bronze
         .withColumn("DAY", regexp_replace(col("DAY"), "\\.", ""))
@@ -121,6 +113,8 @@ def clean_schedule_data():
     home_schedule = schedule_remapped.withColumn("TEAM_ABV", col("HOME"))
     away_schedule = schedule_remapped.withColumn("TEAM_ABV", col("AWAY"))
     full_schedule = home_schedule.unionAll(away_schedule)
+    _sched_cnt = full_schedule.count()
+    print(f"🔢 SILVER silver_schedule_2023_v2: bronze→full_schedule = {_sched_cnt:,} rows")
 
     # Return ALL schedule records (not just first game per team)
     # This enables full historical data processing in downstream tables
@@ -201,18 +195,9 @@ def clean_games_data():
         _catalog = spark.conf.get("catalog", "lr_nhl_demo")
         _schema = spark.conf.get("schema", "dev")
         try:
-            _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2")
-            if _games_src.isEmpty():
-                _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
-                print("📊 silver_games_historical: fallback to staging_manual")
-            else:
-                print("📊 silver_games_historical: fallback to spark.table(bronze)")
+            _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
         except Exception:
-            try:
-                _games_src = spark.table(f"{_catalog}.{_schema}.bronze_games_historical_v2_staging_manual")
-                print("📊 silver_games_historical: fallback to staging_manual")
-            except Exception:
-                pass
+            pass
 
     # Call the function on the DataFrame
     game_stats_total = select_rename_game_columns(
@@ -300,6 +285,8 @@ def clean_games_data():
         if c in joined_game_stats.columns:
             joined_game_stats = joined_game_stats.withColumn(c, coalesce(col(c), lit(0)))
 
+    _games_cnt = joined_game_stats.count()
+    print(f"🔢 SILVER silver_games_historical_v2: _games_src→joined_game_stats = {_games_cnt:,} rows")
     return joined_game_stats
 
 
@@ -383,19 +370,6 @@ def merge_games_data():
             silver_games_schedule = silver_games_schedule.withColumn(
                 c, when(col("gameId").isNotNull(), coalesce(col(c), lit(0))).otherwise(col(c))
             )
-
-    # Diagnostic: at this point in the run, how many rows have game stats (join matched).
-    # If this runs before upstream data is available, counts can be 0; final table may still fill later.
-    _join_total = silver_games_schedule.filter(col("gameId").isNotNull()).count()
-    _join_with_sog = (
-        silver_games_schedule.filter(col("gameId").isNotNull())
-        .filter(col("game_Total_shotsOnGoalAgainst").isNotNull())
-        .count()
-    )
-    print(
-        f"📊 silver_games_schedule_v2 join (this run): {_join_total} historical rows, "
-        f"{_join_with_sog} with game_Total_shotsOnGoalAgainst"
-    )
 
     upcoming_final_clean = (
         silver_games_schedule.filter(col("gameId").isNull())
@@ -507,8 +481,7 @@ def merge_games_data():
     for column in columns_to_add:
         playoff_games = playoff_games.withColumn(column, lit(None))
 
-    if playoff_games.count() > 0:
-        print("Adding playoff games to schedule")
+    if not playoff_games.isEmpty():
         full_season_schedule = regular_season_schedule.unionByName(playoff_games)
     else:
         full_season_schedule = regular_season_schedule
@@ -521,13 +494,10 @@ def merge_games_data():
         ["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"]
     )
 
-    # Log deduplication results
-    original_count = full_season_schedule_with_day.count()
-    deduped_count = full_season_schedule_deduped.count()
-    print(f"📊 silver_games_schedule_v2 deduplication:")
-    print(f"   Original: {original_count} rows")
-    print(f"   Deduped: {deduped_count} rows")
-    print(f"   Removed: {original_count - deduped_count} duplicates")
+    # Log only the final output (right before return). Early count() on dlt.read() can trigger
+    # evaluation before DLT materializes, yielding misleading 0s; catalog is source of truth.
+    _final_cnt = full_season_schedule_deduped.count()
+    print(f"🔢 SILVER silver_games_schedule_v2: final output = {_final_cnt:,} rows")
 
     return full_season_schedule_deduped
 
@@ -931,24 +901,16 @@ def clean_rank_players():
     _bronze = dlt.read("bronze_player_game_stats_v2")
     _staging = dlt.read("bronze_player_game_stats_v2_staging")
     _player_src = _bronze if not _bronze.isEmpty() else _staging
-    if _bronze.isEmpty() and not _staging.isEmpty():
-        print("📊 silver_players_ranked: bronze empty — using bronze_player_game_stats_v2_staging")
     if _player_src.isEmpty():
         _catalog = spark.conf.get("catalog", "lr_nhl_demo")
         _schema = spark.conf.get("schema", "dev")
-        for _name, _tbl in [
-            ("bronze_player_game_stats_v2", f"{_catalog}.{_schema}.bronze_player_game_stats_v2"),
-            ("bronze_player_game_stats_v2_staging", f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging"),
-            ("bronze_player_game_stats_v2_staging_manual", f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual"),
-        ]:
-            try:
-                _fallback = spark.table(_tbl)
-                if _fallback is not None and not _fallback.isEmpty():
-                    _player_src = _fallback
-                    print(f"📊 silver_players_ranked: fallback to {_name} — {_fallback.count()} rows")
-                    break
-            except Exception:
-                continue
+        try:
+            _player_src = spark.table(f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual")
+        except Exception:
+            pass
+
+    _player_src_cnt = _player_src.count()
+    print(f"🔢 SILVER silver_players_ranked: _player_src (bronze/staging) = {_player_src_cnt:,} rows")
 
     # Call the function on the DataFrame (single source so situation filters work)
     player_game_stats_total = select_rename_columns(
@@ -1046,6 +1008,8 @@ def clean_rank_players():
     )
 
     joined_player_stats = joined_player_stats.alias("joined_player_stats")
+    _joined_cnt = joined_player_stats.count()
+    print(f"🔢 SILVER silver_players_ranked: after situation joins (Total+PP+PK+EV) = {_joined_cnt:,} rows")
 
     # Check for duplicates in silver_games_schedule_v2 before joining
     schedule_with_penalty = dlt.read("silver_games_schedule_v2").select(
@@ -1073,6 +1037,8 @@ def clean_rank_players():
     schedule_deduped = schedule_with_penalty.dropDuplicates(
         ["playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away"]
     )
+    _sched_dedup_cnt = schedule_deduped.count()
+    print(f"🔢 SILVER silver_players_ranked: schedule_deduped = {_sched_dedup_cnt:,} rows (join keys for players)")
 
     joined_player_stats_silver = (
         joined_player_stats.join(
@@ -1310,4 +1276,6 @@ def clean_rank_players():
         on=["playerId", "shooterName", "gameDate", "playerTeam", "season"],
     ).orderBy(desc("gameDate"), "playerTeam")
 
+    _final_cnt = final_joined_player_rank.count()
+    print(f"🔢 SILVER silver_players_ranked: FINAL (after grouped_df join) = {_final_cnt:,} rows")
     return final_joined_player_rank

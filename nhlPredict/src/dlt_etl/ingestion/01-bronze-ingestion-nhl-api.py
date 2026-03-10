@@ -639,7 +639,9 @@ def ingest_player_game_stats_staging():
 
         return spark.createDataFrame([], schema=get_player_game_stats_schema())
 
-    # Compute date range: inside this @dlt.table we may read bronze (allowed; avoids REFERENCE_DLT_DATASET_OUTSIDE_QUERY_DEFINITION)
+    # Compute date range: DLT blocks reads to pipeline tables (bronze, staging) due to circular deps.
+    # Use staging_manual first (NOT a pipeline table — regular UC table, DLT won't intercept).
+    # Fallback: today - lookback_days (avoids 3–4 hr full load).
     if one_time_load:
         _start_date = start_date
         _end_date = end_date
@@ -647,38 +649,30 @@ def ingest_player_game_stats_staging():
     else:
         _start_date = None
         _end_date = today
+        _catalog = spark.conf.get("catalog", "lr_nhl_demo")
+        _schema = spark.conf.get("schema", "dev")
+        _manual_qual = f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual"
+        print(f"📅 INCREMENTAL: Resolving date range (staging_manual or lookback)")
+
+        # 1. staging_manual — NOT in pipeline, spark.table/spark.sql should work
         try:
-            bronze = dlt.read("bronze_player_game_stats_v2")
-            max_row = bronze.agg(max(col("gameDate")).alias("m")).first()
-            if max_row and max_row["m"] is not None:
-                max_date = datetime.strptime(str(max_row["m"]), "%Y%m%d").date()
-                _start_date = max_date - timedelta(days=lookback_days)
+            row = spark.sql(
+                f"SELECT CAST(MAX(gameDate) AS STRING) as m FROM {_manual_qual}"
+            ).first()
+            if row and row["m"]:
+                max_val = datetime.strptime(str(row["m"]), "%Y%m%d").date()
+                _start_date = max_val - timedelta(days=lookback_days)
                 _end_date = today
-                print(f"📅 INCREMENTAL (from bronze max date): {_start_date} to {_end_date}")
-            else:
-                # dlt.read returned empty; try materialized table (e.g. same-run order or checkpoint)
-                _catalog = spark.conf.get("catalog", "lr_nhl_demo")
-                _schema = spark.conf.get("schema", "dev")
-                try:
-                    bronze_table = spark.table(f"{_catalog}.{_schema}.bronze_player_game_stats_v2")
-                    max_row = bronze_table.agg(max(col("gameDate")).alias("m")).first()
-                    if max_row and max_row["m"] is not None:
-                        max_date = datetime.strptime(str(max_row["m"]), "%Y%m%d").date()
-                        _start_date = max_date - timedelta(days=lookback_days)
-                        _end_date = today
-                        print(f"📅 INCREMENTAL (from materialized bronze table): {_start_date} to {_end_date}")
-                except Exception:
-                    pass
-                if _start_date is None:
-                    _start_date = datetime(2023, 10, 1).date()
-                    _end_date = today
-                    print(f"📅 INITIAL LOAD (bronze empty): {_start_date} to {_end_date}")
-        except Exception:
-            # Bronze read failed (e.g. table not ready); use short window so run stays incremental/fast
+                print(f"📅 INCREMENTAL (from staging_manual max {max_val}): {_start_date} to {_end_date}")
+        except Exception as e:
+            print(f"   ⚠️ staging_manual unavailable: {e}")
+
+        # 2. Fallback: fixed lookback (bronze/staging blocked by DLT)
+        if _start_date is None:
             _start_date = today - timedelta(days=lookback_days)
             _end_date = today
             print(
-                f"📅 INCREMENTAL (fallback: bronze read failed, using last {lookback_days} day(s)): {_start_date} to {_end_date}"
+                f"📅 INCREMENTAL (using today-{lookback_days}d): {_start_date} to {_end_date}"
             )
 
     print(f"🏒 STAGING: NHL API ingestion: {_start_date} to {_end_date}")
@@ -989,11 +983,12 @@ def stream_player_stats_from_staging():
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
         )
     else:
-        # Normal mode: Read from DLT staging. Use ignoreChanges (not skipChangeCommits) so we
-        # actually process the staging overwrite. skipChangeCommits skips overwrites = 0 rows.
-        # ignoreChanges re-processes rewritten files so we get the new data each run.
-        print("⏭️  STREAMING: Reading from DLT staging table (ignoreChanges for overwrite)")
-        stream_df = spark.readStream.option("ignoreChanges", "true").table(
+        # Normal mode: Read from DLT staging. Staging overwrites each run; Delta fails with
+        # DELTA_SOURCE_TABLE_IGNORE_CHANGES. Use skipChangeCommits to skip overwrite commits
+        # (per error) so the stream does not fail. Tradeoff: may skip new data on overwrite;
+        # run full refresh if bronze does not receive updates.
+        print("⏭️  STREAMING: Reading from DLT staging table (skipChangeCommits for overwrite)")
+        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
         )
     # Coalesce numeric stats to 0 so silver/gold never see null
@@ -1039,22 +1034,23 @@ def ingest_games_historical_staging():
         # Return empty DataFrame with correct schema (DLT requires a return value)
         return spark.createDataFrame([], schema=get_games_historical_schema())
 
-    # Compute date range inside this @dlt.table (same logic as player staging; avoids referencing DLT dataset outside query)
+    # Compute date range (staging_manual first — not in pipeline; fallback lookback)
     if one_time_load:
         _start_date = start_date
         _end_date = end_date
     else:
+        _start_date = None
+        _end_date = today
+        _manual_qual = f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
         try:
-            bronze = dlt.read("bronze_player_game_stats_v2")
-            max_row = bronze.agg(max(col("gameDate")).alias("m")).first()
-            if max_row and max_row["m"] is not None:
-                max_date = datetime.strptime(str(max_row["m"]), "%Y%m%d").date()
+            row = spark.sql(f"SELECT CAST(MAX(gameDate) AS STRING) as m FROM {_manual_qual}").first()
+            if row and row["m"]:
+                max_date = datetime.strptime(str(row["m"]), "%Y%m%d").date()
                 _start_date = max_date - timedelta(days=lookback_days)
                 _end_date = today
-            else:
-                _start_date = datetime(2023, 10, 1).date()
-                _end_date = today
-        except Exception:
+        except Exception as e:
+            print(f"   ⚠️ staging_manual for games: {e}")
+        if _start_date is None:
             _start_date = today - timedelta(days=lookback_days)
             _end_date = today
 
@@ -1244,8 +1240,9 @@ def stream_games_from_staging():
             f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
         )
     else:
-        # Normal mode: Read from DLT staging table (skipChangeCommits so Overwrite doesn't fail stream)
-        print("⏭️  STREAMING: Reading from DLT staging table")
+        # Normal mode: Read from DLT staging. Use skipChangeCommits (same as player stats)
+        # so overwrites on staging do not fail the stream.
+        print("⏭️  STREAMING: Reading from DLT staging table (skipChangeCommits)")
         stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_games_historical_v2_staging"
         )
@@ -1273,6 +1270,8 @@ def stream_games_from_staging():
     for c in _float_cols:
         if c in stream_df.columns:
             stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0.0)))
+    # Dedupe by (gameId, team, situation) - ignoreChanges can emit duplicates on overwrite
+    stream_df = stream_df.dropDuplicates(["gameId", "team", "situation"])
     return stream_df
 
 
@@ -1335,9 +1334,10 @@ def ingest_schedule_v2():
             print(f"   📊 Historical: Reading from streaming table")
 
     # Derive historical schedule
+    # Use max() not first() — first() is order-dependent and can yield null HOME/AWAY
     historical_schedule = games_df.groupBy("gameId", "gameDate").agg(
-        first(when(col("home_or_away") == "HOME", col("team"))).alias("HOME"),
-        first(when(col("home_or_away") == "AWAY", col("team"))).alias("AWAY"),
+        max(when(col("home_or_away") == "HOME", col("team"))).alias("HOME"),
+        max(when(col("home_or_away") == "AWAY", col("team"))).alias("AWAY"),
     )
 
     historical_schedule = (

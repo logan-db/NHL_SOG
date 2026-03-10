@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS public.user_picks (
 CREATE INDEX IF NOT EXISTS idx_user_picks_user_date ON public.user_picks (user_id, game_date DESC);
 
 -- Grant to app role (replace with your PGUSER from app.yaml)
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorites TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorite_teams TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_picks TO "90d692de-257c-4877-b833-55b8d520bc0b";
-GRANT USAGE, SELECT ON SEQUENCE public.user_picks_id_seq TO "90d692de-257c-4877-b833-55b8d520bc0b";
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorites TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorite_teams TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_picks TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT USAGE, SELECT ON SEQUENCE public.user_picks_id_seq TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";

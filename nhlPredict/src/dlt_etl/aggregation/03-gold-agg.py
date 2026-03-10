@@ -20,6 +20,7 @@ import sys
 
 sys.path.append(spark.conf.get("bundle.sourcePath", "."))
 
+import builtins
 from datetime import date, timedelta
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
@@ -73,9 +74,7 @@ def aggregate_games_data():
 
     _catalog = spark.conf.get("catalog", "lr_nhl_demo")
     _schema = spark.conf.get("schema", "dev")
-    # Known-good fallback: pipeline config targets lr_nhl_demo.dev (NHLPlayerIngestion.yml)
-    _fallback_catalog, _fallback_schema = "lr_nhl_demo", "dev"
-    print(f"📊 Gold target: catalog={_catalog}, schema={_schema} (fallback: {_fallback_catalog}.{_fallback_schema})")
+    print(f"📊 Gold target: catalog={_catalog}, schema={_schema}")
 
     # CRITICAL: Establish DLT dependencies so gold runs AFTER bronze+silver. Without these,
     # gold can run before ingest_skaters/ingest_schedule/stream commit, yielding 0 rows.
@@ -84,41 +83,27 @@ def aggregate_games_data():
     _ = dlt.read("bronze_games_historical_v2")
     _ = dlt.read("bronze_player_game_stats_v2")
 
-    # Always dlt.read first (creates dependency). If empty, use spark.table (catalog).
-    # In skip_staging mode, dlt.read can return empty due to execution order; spark.table has committed data.
-    # When config-derived catalog/schema yields 0 rows, try known-good lr_nhl_demo.dev (fixes 504-row gold bug).
+    # Prefer dlt.read() for DLT pipeline tables. Use spark.table() only for static tables.
+    # Catalog is source of truth for row counts; logs were misleading due to partial evaluations.
     def _read_silver(name):
-        df = dlt.read(name)
-        used_fallback = False
-        if df.isEmpty():
-            tries = [(_catalog, _schema)]
-            if (_fallback_catalog, _fallback_schema) != (_catalog, _schema):
-                tries.append((_fallback_catalog, _fallback_schema))
-            for _cat, _sch in tries:
-                try:
-                    candidate = spark.table(f"{_cat}.{_sch}.{name}")
-                    cnt = candidate.count()
-                    print(f"📊 Fallback: spark.table({_cat}.{_sch}.{name}) — {cnt} rows")
-                    if cnt > 0:
-                        df = candidate
-                        used_fallback = True
-                        break
-                except Exception as e:
-                    print(f"📊 Fallback {_cat}.{_sch}.{name} failed: {e}")
-        cnt = df.count()
-        _src = "spark.table fallback" if used_fallback else "dlt.read"
-        print(f"📊 SILVER READ {name}: {cnt:,} rows (from {_src})")
-        return df
+        return dlt.read(name)
 
-    # Data-driven future cutoff: use max game date from historical so "future" is independent of job run date.
+    # Future cutoff: games after this date are "upcoming" (no stats yet). Use max(data) but floor at
+    # yesterday so we never mark played games (before today) as upcoming when data is stale.
     _players_for_cutoff = _read_silver("silver_players_ranked")
     _max_date_row = _players_for_cutoff.agg(max(to_date(col("gameDate"))).alias("max_d")).first()
+    _max_from_data = _max_date_row[0] if _max_date_row and _max_date_row[0] is not None else None
+    _yesterday = date.today() - timedelta(days=1)
     future_cutoff_date = (
-        _max_date_row[0] if _max_date_row and _max_date_row[0] is not None else date.today()
+        builtins.max(_max_from_data, _yesterday) if _max_from_data else _yesterday
     )
-    print(f"📊 Future cutoff date (max historical gameDate): {future_cutoff_date} (driver date.today()={date.today()})")
+    print(
+        f"📊 Future cutoff date: {future_cutoff_date} "
+        f"(max_data={_max_from_data}, yesterday={_yesterday}, today={date.today()})"
+    )
 
     base_schedule = _read_silver("silver_schedule_2023_v2")
+    print(f"🔢 GOLD: base_schedule (silver_schedule_2023_v2) = {base_schedule.count():,} rows")
     if base_schedule.isEmpty():
         # Build from bronze_schedule, or from games if schedule empty (e.g. ingest not run yet)
         for _src_name, _src_tbl in [
@@ -138,6 +123,7 @@ def aggregate_games_data():
                         break
                 else:
                     # Build schedule from games: (HOME, AWAY, DATE) per game
+                    # Use max() not first() — first() is order-dependent and can yield null HOME/AWAY
                     if not _src.isEmpty():
                         _gh = _src.withColumn("homeTeamCode",
                             when(col("home_or_away")=="HOME", col("team")).otherwise(col("opposingTeam"))
@@ -145,8 +131,8 @@ def aggregate_games_data():
                             when(col("home_or_away")=="AWAY", col("team")).otherwise(col("opposingTeam"))
                         )
                         _agg = _gh.groupBy("gameId", "gameDate").agg(
-                            first(when(col("home_or_away")=="HOME", col("team"))).alias("HOME"),
-                            first(when(col("home_or_away")=="AWAY", col("team"))).alias("AWAY"),
+                            max(when(col("home_or_away")=="HOME", col("team"))).alias("HOME"),
+                            max(when(col("home_or_away")=="AWAY", col("team"))).alias("AWAY"),
                         )
                         _agg = _agg.withColumn("DATE", to_date(col("gameDate").cast("string"), "yyyyMMdd"))
                         _home = _agg.withColumn("TEAM_ABV", col("HOME")).select("HOME","AWAY","DATE","TEAM_ABV")
@@ -204,6 +190,7 @@ def aggregate_games_data():
             print("❌ Cannot import NHLClient for schedule fallback; pipeline will fail")
 
     _gh_raw = _read_silver("silver_games_historical_v2")
+    print(f"🔢 GOLD: silver_games_historical_v2 = {_gh_raw.count():,} rows")
     if _gh_raw.isEmpty():
         for _tbl in ["bronze_games_historical_v2", "bronze_games_historical_v2_staging_manual"]:
             try:
@@ -252,6 +239,8 @@ def aggregate_games_data():
     # games_historical count (7910) and dropping future schedule rows.
     silver_games_schedule = base_schedule.join(games_historical, join_cond, how="left")
     _join_count = silver_games_schedule.count()
+    _hist_from_join = silver_games_schedule.filter(col("gameId").isNotNull()).count()
+    print(f"🔢 GOLD: base_schedule⋈games_historical = {_join_count:,} rows (historical={_hist_from_join:,})")
     # If join 2x (e.g. duplicate keys in materialized table), keep one row per schedule key.
     if _join_count > _base_count + 100:
         silver_games_schedule = silver_games_schedule.dropDuplicates(
@@ -341,6 +330,11 @@ def aggregate_games_data():
     )
 
     players_df = _read_silver("silver_players_ranked")
+    _players_cnt = players_df.count()
+    print(f"🔢 GOLD: players_df (silver_players_ranked) = {_players_cnt:,} rows")
+    if _players_cnt == 0:
+        print("⚠️  GOLD: players_df is EMPTY — join keys from schedule_df (sample):")
+        schedule_df.limit(3).select("playerTeam", "gameId", "gameDate", "opposingTeam", "season", "home_or_away").show(truncate=False)
     # Normalize join keys so schedule–players join matches (types can differ between dlt and spark.table).
     # Use same date normalization as schedule (yyyyMMdd for int, else to_date) so join keys match.
     players_df = (
@@ -406,7 +400,14 @@ def aggregate_games_data():
     _with_player = historical_joined.filter(col("playerId").isNotNull()).count()
     _sched_hist_count = schedule_historical.count()
     _players_count = players_df.count()
+    print(f"🔢 GOLD: schedule_historical⋈players_df = {_hist_count:,} rows (with_playerId={_with_player:,})")
     print(f"📊 JOIN DIAGNOSTIC: schedule_historical={_sched_hist_count}, players_df={_players_count}, historical_joined={_hist_count}, with_playerId={_with_player}")
+    if _sched_hist_count > 0 and _players_count > 0 and _with_player == 0:
+        print("⚠️  GOLD: JOIN MISMATCH — schedule has rows, players has rows, but 0 matches. Check join key types/schema:")
+        print("   Schedule join key sample (playerTeam, gameId, gameDate):")
+        schedule_historical.limit(2).select("playerTeam", "gameId", "gameDate").show(truncate=False)
+        print("   Players join key sample (playerTeam, gameId, gameDate):")
+        players_df.limit(2).select("playerTeam", "gameId", "gameDate").show(truncate=False)
     print(f"🔍 ROW COUNT CHECKPOINT 1 (schedule ⋈ players): historical_joined={_hist_count:,}, with_playerId={_with_player:,}")
     if _hist_count == 0 and _sched_hist_count > 0:
         raise RuntimeError(

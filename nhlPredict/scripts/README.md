@@ -54,6 +54,8 @@ rm /tmp/lakebase_token
 
 Replace `YOUR_EMAIL` with your Databricks account email. The OAuth token expires in ~1 hour.
 
+**App role password:** The Lakebase app role password is stored in Databricks Secrets (`nhlPredict` scope, `lakebase-app-role-password` key). See `app/LAKEBASE_TROUBLESHOOTING.md` for usage.
+
 ---
 
 ## Trigger Lakebase Sync (single table or all)

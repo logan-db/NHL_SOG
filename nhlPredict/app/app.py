@@ -1038,11 +1038,12 @@ def api_historical_games():
         conditions.append('("HOME" = %s OR "AWAY" = %s)')
         params.extend([team, team])
     params.append(limit)
+    # Outer query columns (aliases from subquery): game_date, home, away, goals_for, goals_against, is_win, game_id
     order_map = {
-        "date": '"gameDate"', "home": '"HOME"', "away": '"AWAY"',
-        "goals_for": '"sum_game_Total_goalsFor"', "goals_against": '"sum_game_Total_goalsAgainst"', "result": '"isWin"',
+        "date": "game_date", "home": "home", "away": "away",
+        "goals_for": "goals_for", "goals_against": "goals_against", "result": "is_win",
     }
-    order_col = order_map.get(sort_by, '"gameDate"')
+    order_col = order_map.get(sort_by, "game_date")
     order = "ASC" if sort_dir == "asc" else "DESC"
     where_clause = " AND ".join(conditions)
     # One row per game: prefer home_or_away='HOME', fallback to AWAY row (swap goals/isWin when using AWAY)
