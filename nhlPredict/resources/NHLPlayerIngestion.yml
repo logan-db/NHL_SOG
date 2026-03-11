@@ -32,7 +32,7 @@ resources:
         # FULL LOAD: one_time_load="true" — Backfill 2023-10-01 to today. Run first or after reset. ~3–5 hours.
         # INCREMENTAL: one_time_load="false" — Daily updates from (bronze max - lookback_days) to today. ~5–10 min.
         # Use "false" now that bronze is loaded.
-        one_time_load: "false"
+        one_time_load: "true"
         # skip_staging_ingestion: "true" = use *_staging_manual only (no API). For manual backfill from CSV/parquet.
         skip_staging_ingestion: "false"
         use_manual_for_historical: "false"

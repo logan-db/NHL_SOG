@@ -15,8 +15,14 @@ Uses the Databricks SDK to obtain an OAuth token and run SQL via psycopg.
 **Usage:**
 ```bash
 cd nhlPredict
-python scripts/run_lakebase_migration.py app/migrate_pick_types_and_team_favorites.sql
+
+# Run all migrations in order (full setup)
+python scripts/run_lakebase_migration.py --all
+python scripts/run_lakebase_migration.py --profile dev --all
+
+# Run specific migration(s)
 python scripts/run_lakebase_migration.py app/create_favorites_tables.sql app/grant_lakebase_app_permissions.sql
+python scripts/run_lakebase_migration.py --profile dev app/migrate_user_picks_add_actual_sog.sql
 ```
 
 Env vars (optional; defaults match `app/app.yaml`):
