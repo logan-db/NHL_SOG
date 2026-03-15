@@ -1,22 +1,23 @@
-/* SOG Predict — Light Tech + Ice Hockey Theme */
+/* SOG Predict — Modern Tech Theme */
 :root {
-  --bg-deep: #f0f7fc;
+  --bg-deep: #f8fafc;
   --bg-card: #ffffff;
-  --bg-elevated: #f8fafc;
-  --border: #cbd5e1;
-  --accent: #0066a1;
-  --accent-dim: rgba(0, 102, 161, 0.12);
-  --accent-glow: rgba(0, 102, 161, 0.25);
-  --accent-ice: #38bdf8;
-  --warn: #ea580c;
-  --danger: #dc2626;
-  --text: #1e293b;
+  --bg-elevated: #f1f5f9;
+  --border: #e2e8f0;
+  --accent: #6366f1;
+  --accent-secondary: #8b5cf6;
+  --accent-dim: rgba(99, 102, 241, 0.1);
+  --accent-glow: rgba(99, 102, 241, 0.2);
+  --accent-ice: #06b6d4;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --text: #0f172a;
   --text-muted: #64748b;
   --text-dim: #94a3b8;
-  --ice-rink: #e0f2fe;
-  --font-display: 'Oswald', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-body: 'Inter', -apple-system, sans-serif;
+  --ice-rink: #f0f9ff;
+  --font-display: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -24,22 +25,22 @@
 body {
   margin: 0;
   font-family: var(--font-body);
-  background: linear-gradient(180deg, var(--bg-deep) 0%, var(--ice-rink) 100%);
-  background-attachment: fixed;
+  background: var(--bg-deep);
   color: var(--text);
   min-height: 100vh;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Header */
 .app-header {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   padding: 0.75rem 1.5rem;
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 1px 3px rgba(0, 102, 161, 0.08);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
 }
 
 .header-content {
@@ -64,9 +65,9 @@ body {
 
 .logo-text {
   font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .logo-sub {
@@ -110,7 +111,7 @@ body {
   border-radius: 12px;
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 102, 161, 0.08);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
 }
 
 .yesterday-grid {
@@ -128,7 +129,7 @@ body {
   background: rgba(255, 255, 255, 0.8);
   border-radius: 8px;
   padding: 1rem;
-  border: 1px solid rgba(0, 102, 161, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.15);
 }
 
 .yesterday-card-title {
@@ -531,8 +532,9 @@ body {
 .section { margin-bottom: 2rem; }
 .section-heading {
   font-family: var(--font-display);
-  font-size: 1.25rem;
-  letter-spacing: 0.05em;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin-bottom: 1rem;
   color: var(--text);
 }
@@ -896,6 +898,7 @@ body {
 .stat-placeholder {
   color: var(--text-muted);
   font-style: italic;
+  font-family: var(--font-body);
 }
 
 .player-detail-panel .key-metrics-grid {
@@ -1030,7 +1033,7 @@ body {
   border-radius: 10px;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  box-shadow: 0 1px 3px rgba(0, 102, 161, 0.06);
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.06);
 }
 
 .picks-accuracy-summary {
@@ -1045,7 +1048,7 @@ body {
 
 .picks-accuracy-stats {
   background: var(--accent-dim);
-  border: 1px solid rgba(0, 102, 161, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 8px;
   padding: 0.75rem 1rem;
   font-size: 0.95rem;
@@ -1350,7 +1353,7 @@ body {
   padding: 1.5rem;
   max-width: 380px;
   width: 100%;
-  box-shadow: 0 8px 32px rgba(0, 102, 161, 0.15);
+  box-shadow: 0 8px 32px rgba(99, 102, 241, 0.15);
 }
 .pick-modal h3 { margin: 0 0 1rem; font-size: 1.1rem; }
 .pick-type-options {
@@ -1378,6 +1381,230 @@ body {
 /* Pick result badges */
 .pick-hit { color: #059669; font-weight: 600; }
 .pick-miss { color: var(--danger); font-weight: 600; }
+
+/* Player Analysis Page (full view) */
+.player-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+.player-page-back {
+  margin-bottom: 1rem;
+}
+
+.back-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: color 0.15s;
+  padding: 0.35rem 0;
+}
+
+.back-link:hover {
+  color: var(--accent);
+}
+
+.player-page-hero {
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(224, 242, 254, 0.6) 100%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 1.75rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.06);
+}
+
+.player-page-name {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.2rem 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.player-page-matchup {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  margin: 0 0 1rem 0;
+  font-weight: 500;
+}
+
+.player-page-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.player-page-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.player-section-title {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 0 0 1rem 0;
+}
+
+
+.player-summary-section .ai-analysis-markdown {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.player-summary-section .empty-state {
+  padding: 1rem 0;
+}
+
+.player-page-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.player-page-metrics-grid .key-metric {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.player-page-metrics-grid .key-metric .value {
+  font-family: var(--font-mono);
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.player-page-metrics-grid .key-metric .label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-top: 0.35rem;
+}
+
+.player-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.player-chart-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.125rem;
+}
+
+.player-chart-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 0.75rem 0;
+  font-weight: 600;
+}
+
+.player-chart-wrapper {
+  height: 200px;
+  position: relative;
+}
+
+.chart-no-data {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Player page stat rows: proper spacing between label and value */
+.player-page .stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.5rem 0;
+}
+.player-page .stat-row span:first-child {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.player-page .stat-row span:last-child {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-align: right;
+  min-width: 4.5em;
+}
+
+.player-hit-rates-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0 2.5rem;
+}
+
+.player-hit-rates-grid .stat-row {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.player-hit-rates-grid .stat-row:last-child {
+  border-bottom: none;
+}
+
+.player-stats-block .stat-row,
+#player-page-stats .stat-row {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.player-stats-block .stat-row:last-child,
+#player-page-stats .stat-row:last-child {
+  border-bottom: none;
+}
+
+.player-stats-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.player-stats-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.125rem;
+}
+
+.player-stats-block-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 0 0 0.75rem 0;
+}
+
+@media (max-width: 768px) {
+  .player-page-metrics-grid { grid-template-columns: repeat(2, 1fr); }
+  .player-charts-row { grid-template-columns: 1fr; }
+  .player-hit-rates-grid { grid-template-columns: 1fr; }
+  .player-stats-row { grid-template-columns: 1fr; }
+}
 
 /* Responsive */
 @media (max-width: 768px) {

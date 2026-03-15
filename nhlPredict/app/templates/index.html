@@ -1,6 +1,67 @@
 {% extends "base.html" %}
 
 {% block content %}
+<!-- Player Analysis Page (full view, shown when #player in URL) -->
+<div id="player-page" class="player-page" style="display: none;">
+  <div class="player-page-back">
+    <a href="#" id="player-page-back" class="back-link">← Back to Dashboard</a>
+  </div>
+  <div class="player-page-hero">
+    <h1 id="player-page-name" class="player-page-name">—</h1>
+    <p id="player-page-matchup" class="player-page-matchup">—</p>
+    <div class="player-page-actions">
+      <button type="button" class="btn-star" id="player-page-fav-btn" title="Favorite">☆ Favorite</button>
+      <button type="button" class="btn-pick" id="player-page-pick-btn" title="Pick for game" style="display:none;">Pick for game</button>
+    </div>
+  </div>
+  <section class="player-page-section player-summary-section">
+    <h2 class="player-section-title">AI Analysis & Summary</h2>
+    <div id="player-page-explanation" class="player-explanation"></div>
+    <div id="player-page-ai-generate" class="player-ai-generate">
+      <button type="button" class="btn-ai-generate" id="player-page-btn-ai-generate">Generate AI analysis</button>
+      <div id="player-page-ai-loading" class="player-ai-loading" style="display:none;">Analyzing…</div>
+    </div>
+  </section>
+  <section class="player-page-section">
+    <h2 class="player-section-title">Key Metrics</h2>
+    <div class="player-page-metrics-grid" id="player-page-metrics"></div>
+  </section>
+  <section class="player-page-section player-charts-row">
+    <div class="player-chart-card">
+      <h3 class="player-chart-title">SOG Trend</h3>
+      <div class="player-chart-wrapper">
+        <canvas id="player-sog-trend-chart"></canvas>
+      </div>
+    </div>
+    <div class="player-chart-card">
+      <h3 class="player-chart-title">Season Hit Rates Over Time</h3>
+      <div class="player-chart-wrapper">
+        <canvas id="player-hit-rates-chart"></canvas>
+      </div>
+    </div>
+  </section>
+  <section class="player-page-section">
+    <h2 class="player-section-title">2+ / 3+ SOG Hit Rates</h2>
+    <div class="player-hit-rates-grid" id="player-page-hit-rates"></div>
+  </section>
+  <section class="player-page-section player-stats-row">
+    <div class="player-stats-block">
+      <h3 class="player-stats-block-title" id="player-page-team-label">Team Rankings</h3>
+      <div id="player-page-team"></div>
+    </div>
+    <div class="player-stats-block">
+      <h3 class="player-stats-block-title">Opponent Rankings</h3>
+      <div id="player-page-opponent"></div>
+    </div>
+  </section>
+  <section class="player-page-section">
+    <h2 class="player-section-title">Player Stats</h2>
+    <div id="player-page-stats"></div>
+  </section>
+</div>
+
+<!-- Main App (hidden when on player page) -->
+<div id="main-app">
 <!-- Filters (shown on Dashboard + Predictions) -->
 <section class="section section-filters" id="filters">
   <div class="filters-bar">
@@ -190,8 +251,9 @@
 </section>
 </section>
 </div>
+</div><!-- /#main-app -->
 
-<!-- Player Detail Overlay -->
+<!-- Player Detail Overlay (legacy - kept for fallback) -->
 <div class="player-detail-overlay" id="player-detail-overlay">
   <div class="player-detail-panel">
     <div class="header">

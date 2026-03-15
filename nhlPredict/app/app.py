@@ -899,6 +899,49 @@ def api_player_sog_chart():
     return jsonify(points=points, player=p.get("shooter_name"))
 
 
+@app.route("/api/player-hit-rates-history")
+def api_player_hit_rates_history():
+    """Cumulative 2+ and 3+ SOG hit rates over the season (time-series for line chart)."""
+    player = request.args.get("player", "").strip()
+    player_team = request.args.get("player_team", "").strip()
+    if not player:
+        return jsonify(points=[], error="player required")
+    where_clause = '"shooterName" = %s AND "gameId" IS NOT NULL'
+    params = [player]
+    if player_team:
+        where_clause = '"shooterName" = %s AND "playerTeam" = %s AND "gameId" IS NOT NULL'
+        params.append(player_team)
+    sql = f"""
+        WITH games AS (
+            SELECT "gameDate"::date AS game_date,
+                COALESCE(("player_Total_shotsOnGoal")::int, 0) AS sog
+            FROM public.gold_player_stats_clean
+            WHERE {where_clause}
+            ORDER BY "gameDate" ASC
+        ),
+        running AS (
+            SELECT game_date,
+                COUNT(*) OVER (ORDER BY game_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)::int AS n,
+                SUM(CASE WHEN sog >= 2 THEN 1 ELSE 0 END) OVER (ORDER BY game_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)::int AS hit_2,
+                SUM(CASE WHEN sog >= 3 THEN 1 ELSE 0 END) OVER (ORDER BY game_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)::int AS hit_3
+            FROM games
+        )
+        SELECT to_char(game_date, 'YYYY-MM-DD') AS game_date,
+            (hit_2::float / NULLIF(n, 0))::float AS hit_rate_2plus,
+            (hit_3::float / NULLIF(n, 0))::float AS hit_rate_3plus
+        FROM running
+        ORDER BY game_date
+        LIMIT 82
+    """
+    rows = []
+    try:
+        rows = _query_one(sql, tuple(params))
+    except Exception as e:
+        print(f"Hit rates history query failed: {e}")
+    points = [{"game_date": r["game_date"], "hit_rate_2plus": r["hit_rate_2plus"], "hit_rate_3plus": r["hit_rate_3plus"]} for r in (rows or [])]
+    return jsonify(points=points, player=player)
+
+
 @app.route("/api/player-stats")
 def api_player_stats():
     # clean_prediction_summary has player stats but not player percentile ranks (use NULL)

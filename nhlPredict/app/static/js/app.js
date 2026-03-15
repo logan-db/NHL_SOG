@@ -464,7 +464,7 @@ function renderTopPicks() {
   }).join('');
   grid.querySelectorAll('.top-pick-card').forEach(card => {
     card.addEventListener('click', () => {
-      openPlayerDetail(card.dataset.player, card.dataset.team, card.dataset.opp, card.dataset.date);
+      navigateToPlayerPage(card.dataset.player, card.dataset.team, card.dataset.opp, card.dataset.date);
     });
   });
 }
@@ -675,7 +675,7 @@ function renderGames() {
     row.addEventListener('click', e => {
       if (e.target.closest('.btn-star') || e.target.closest('.btn-pick')) return;
       e.stopPropagation();
-      openPlayerDetail(
+      navigateToPlayerPage(
         row.dataset.player,
         row.dataset.team,
         row.dataset.opp,
@@ -722,7 +722,7 @@ function renderPredictionsTable() {
   tbody.querySelectorAll('.player-row').forEach(row => {
     row.addEventListener('click', e => {
       if (e.target.closest('.btn-star')) return;
-      openPlayerDetail(row.dataset.player, row.dataset.team, row.dataset.opp, row.dataset.date);
+      navigateToPlayerPage(row.dataset.player, row.dataset.team, row.dataset.opp, row.dataset.date);
     });
   });
   tbody.querySelectorAll('.btn-star').forEach(btn => {
@@ -730,7 +730,324 @@ function renderPredictionsTable() {
   });
 }
 
-// ----- Player detail -----
+// ----- Player page (full view) & routing -----
+let playerPageCharts = { sogTrend: null, hitRates: null };
+
+function getPlayerPageParams() {
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  if (!hash.startsWith('player')) return null;
+  const q = hash.indexOf('?');
+  if (q < 0) return null;
+  const params = new URLSearchParams(hash.slice(q));
+  const player = params.get('player');
+  if (!player) return null;
+  return {
+    player,
+    player_team: params.get('player_team') || params.get('team') || '',
+    opposing_team: params.get('opposing_team') || params.get('opp') || '',
+    game_date: params.get('game_date') || params.get('date') || '',
+  };
+}
+
+function navigateToPlayerPage(player, team, opp, date) {
+  const p = new URLSearchParams({ player });
+  if (team) p.set('player_team', team);
+  if (opp) p.set('opposing_team', opp);
+  if (date) p.set('game_date', date);
+  window.location.hash = 'player?' + p.toString();
+}
+
+function hidePlayerPage() {
+  const playerPage = document.getElementById('player-page');
+  const mainApp = document.getElementById('main-app');
+  if (playerPage) playerPage.style.display = 'none';
+  if (mainApp) mainApp.style.display = '';
+  if (playerPageCharts.sogTrend) {
+    playerPageCharts.sogTrend.destroy();
+    playerPageCharts.sogTrend = null;
+  }
+  if (playerPageCharts.hitRates) {
+    playerPageCharts.hitRates.destroy();
+    playerPageCharts.hitRates = null;
+  }
+}
+
+function showPlayerPage() {
+  const playerPage = document.getElementById('player-page');
+  const mainApp = document.getElementById('main-app');
+  if (playerPage) playerPage.style.display = 'block';
+  if (mainApp) mainApp.style.display = 'none';
+}
+
+function renderHitRatesChart(canvasId, points) {
+  const wrapper = document.getElementById(canvasId)?.closest('.player-chart-wrapper');
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !window.Chart) return;
+  if (playerPageCharts.hitRates) {
+    playerPageCharts.hitRates.destroy();
+    playerPageCharts.hitRates = null;
+  }
+  const pts = points || [];
+  if (pts.length === 0) {
+    if (wrapper) {
+      canvas.style.display = 'none';
+      let msg = wrapper.querySelector('.chart-no-data');
+      if (!msg) {
+        msg = document.createElement('div');
+        msg.className = 'chart-no-data';
+        msg.textContent = 'No game history yet';
+        wrapper.appendChild(msg);
+      }
+      msg.style.display = '';
+    }
+    return;
+  }
+  if (wrapper) {
+    const msg = wrapper.querySelector('.chart-no-data');
+    if (msg) msg.style.display = 'none';
+    canvas.style.display = '';
+  }
+  const labels = pts.map((x) => {
+    const d = x.game_date;
+    if (!d) return '';
+    const m = d.slice(5, 7);
+    const day = d.slice(8, 10);
+    return `${parseInt(m, 10)}/${parseInt(day, 10)}`;
+  });
+  const data2plus = pts.map((x) => (x.hit_rate_2plus != null ? (parseFloat(x.hit_rate_2plus) * 100).toFixed(1) : null));
+  const data3plus = pts.map((x) => (x.hit_rate_3plus != null ? (parseFloat(x.hit_rate_3plus) * 100).toFixed(1) : null));
+  const chartFont = { family: "'Inter', -apple-system, sans-serif", size: 10 };
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#6366f1';
+  const accent2 = getComputedStyle(document.documentElement).getPropertyValue('--accent-secondary').trim() || '#8b5cf6';
+  playerPageCharts.hitRates = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '2+ SOG %',
+          data: data2plus,
+          borderColor: accent,
+          backgroundColor: accent + '20',
+          fill: true,
+          tension: 0.3,
+          pointRadius: pts.length > 20 ? 0 : 2,
+          pointHoverRadius: 4,
+        },
+        {
+          label: '3+ SOG %',
+          data: data3plus,
+          borderColor: accent2,
+          backgroundColor: accent2 + '20',
+          fill: true,
+          tension: 0.3,
+          pointRadius: pts.length > 20 ? 0 : 2,
+          pointHoverRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { display: true, position: 'top', labels: { font: chartFont, usePointStyle: true } },
+      },
+      scales: {
+        x: {
+          ticks: { font: chartFont, maxTicksLimit: 10, maxRotation: 45 },
+          grid: { display: false },
+        },
+        y: {
+          beginAtZero: true,
+          max: 100,
+          ticks: { font: chartFont, callback: (v) => v + '%' },
+          border: { display: false },
+          grid: { color: 'rgba(0,0,0,0.06)' },
+        },
+      },
+    },
+  });
+}
+
+function renderSogTrendChart(canvasId, chartPoints) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !window.Chart) return;
+  if (playerPageCharts.sogTrend) {
+    playerPageCharts.sogTrend.destroy();
+    playerPageCharts.sogTrend = null;
+  }
+  const labels = (chartPoints || []).map((x) => x.label);
+  const values = (chartPoints || []).map((x) => parseFloat(x.value) || 0);
+  const isPredicted = (chartPoints || []).map((x) => x.label === 'Predicted');
+  const chartFont = { family: "'Inter', -apple-system, sans-serif", size: 11 };
+  playerPageCharts.sogTrend = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'SOG',
+        data: values,
+        backgroundColor: values.map((_, i) => (isPredicted[i] ? 'rgba(99, 102, 241, 0.85)' : 'rgba(99, 102, 241, 0.5)')),
+        borderRadius: 4,
+        borderSkipped: false,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { font: chartFont },
+          grid: { display: false },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { font: chartFont },
+          border: { display: false },
+          grid: { color: 'rgba(0,0,0,0.06)' },
+        },
+      },
+    },
+  });
+}
+
+async function loadAndRenderPlayerPage(params) {
+  const playerPage = document.getElementById('player-page');
+  if (!playerPage) return;
+  showPlayerPage();
+  playerPage.querySelector('#player-page-name').textContent = 'Loading…';
+  playerPage.querySelector('#player-page-matchup').textContent = '';
+
+  const apiParams = { player: params.player };
+  if (params.player_team) apiParams.player_team = params.player_team;
+  if (params.opposing_team) apiParams.opposing_team = params.opposing_team;
+  if (params.game_date) apiParams.game_date = params.game_date;
+
+  const [detailRes, chartRes, hitRatesRes] = await Promise.all([
+    fetchAPI('/player-detail', apiParams),
+    fetchAPI('/player-sog-chart', { player: params.player }),
+    fetchAPI('/player-hit-rates-history', { player: params.player, player_team: params.player_team }),
+  ]);
+  const data = detailRes;
+  if (!data?.player) {
+    playerPage.querySelector('#player-page-name').textContent = 'Player not found';
+    return;
+  }
+  const p = data.player;
+  const chartPoints = chartRes?.points || [];
+  const hitRatesPoints = hitRatesRes?.points || [];
+
+  document.getElementById('player-page-name').textContent = p.shooter_name;
+  document.getElementById('player-page-matchup').textContent = `${p.player_team} vs ${p.opposing_team}`;
+  document.getElementById('player-page-team-label').textContent = `Team Rankings (${p.player_team})`;
+
+  const fav = isFavorite(p.shooter_name, p.player_team);
+  const favBtn = document.getElementById('player-page-fav-btn');
+  if (favBtn) {
+    favBtn.textContent = fav ? '★ Favorited' : '☆ Favorite';
+    favBtn.classList.toggle('active', fav);
+    favBtn.onclick = async () => {
+      await toggleFavorite(p.shooter_name, p.player_team);
+      favBtn.textContent = isFavorite(p.shooter_name, p.player_team) ? '★ Favorited' : '☆ Favorite';
+      favBtn.classList.toggle('active', isFavorite(p.shooter_name, p.player_team));
+    };
+  }
+  const pickBtn = document.getElementById('player-page-pick-btn');
+  const dateVal = params.game_date || dateStr(p.game_date);
+  if (pickBtn && dateVal) {
+    const game = allGames.find((g) =>
+      (g.home === p.player_team && g.away === p.opposing_team) || (g.home === p.opposing_team && g.away === p.player_team)
+    );
+    const gd = game ? dateStr(game.game_date) : dateStr(dateVal);
+    const [home, away] = game ? [game.home, game.away] : [p.opposing_team, p.player_team];
+    pickBtn.style.display = '';
+    pickBtn.onclick = () => openPickModal(gd, home, away, p.shooter_name, p.player_team, p.opposing_team, p.predicted_sog, p.player_id);
+  }
+
+  document.getElementById('player-page-metrics').innerHTML = `
+    <div class="key-metric"><div class="value">${num(p.predicted_sog)}</div><div class="label">Predicted SOG</div></div>
+    <div class="key-metric"><div class="value">${num(p.player_avg_sog_last7)}</div><div class="label">Avg SOG (7g)</div></div>
+    <div class="key-metric"><div class="value">${num(p.previous_player_total_shotsongoal, 0)}</div><div class="label">Last Game</div></div>
+    <div class="key-metric"><div class="value">${num(p.abs_variance_avg_last7_sog)}</div><div class="label">Variance</div></div>
+  `;
+
+  renderSogTrendChart('player-sog-trend-chart', chartPoints);
+  renderHitRatesChart('player-hit-rates-chart', hitRatesPoints);
+
+  const hitRateTip = 'Not enough games played yet to calculate.';
+  document.getElementById('player-page-hit-rates').innerHTML = `
+    <div class="stat-row" title="${escapeHtml(hitRateTip)}"><span>2+ SOG % (Season)</span><span class="key-metric-value">${pctHitRate(p.player_2plus_season_hit_rate)}</span></div>
+    <div class="stat-row" title="${escapeHtml(hitRateTip)}"><span>3+ SOG % (Season)</span><span class="key-metric-value">${pctHitRate(p.player_3plus_season_hit_rate)}</span></div>
+    <div class="stat-row" title="${escapeHtml(hitRateTip)}"><span>2+ SOG % (vs Opp)</span><span class="key-metric-value">${pctHitRate(p.player_2plus_season_matchup_hit_rate)}</span></div>
+    <div class="stat-row" title="${escapeHtml(hitRateTip)}"><span>3+ SOG % (vs Opp)</span><span class="key-metric-value">${pctHitRate(p.player_3plus_season_matchup_hit_rate)}</span></div>
+    <div class="stat-row" title="${escapeHtml(hitRateTip)}"><span>2+ SOG % (Last 30d)</span><span class="key-metric-value">${pctHitRate(p.player_2plus_last30_hit_rate)}</span></div>
+    <div class="stat-row" title="${escapeHtml(hitRateTip)}"><span>3+ SOG % (Last 30d)</span><span class="key-metric-value">${pctHitRate(p.player_3plus_last30_hit_rate)}</span></div>
+  `;
+
+  document.getElementById('player-page-stats').innerHTML = `
+    ${statRowWithRank('PP SOG % (7g)', p.player_last7_pp_sog_pct, true, 'PP SOG %')}
+    ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank)}
+    ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank)}
+    ${statRowMatchup('Matchup last SOG', p.matchup_last_sog)}
+    ${statRowMatchup('Matchup avg SOG (7g)', p.matchup_avg_sog_last7)}
+  `;
+
+  document.getElementById('player-page-team').innerHTML = `
+    ${statRowWithRank('SOG % rank', p.team_sog_for_rank)}
+    ${statRowWithRank('Goals % rank', p.team_goals_for_rank)}
+    ${statRowWithRank('PP SOG rank', p.team_pp_sog_rank)}
+  `;
+
+  document.getElementById('player-page-opponent').innerHTML = `
+    ${statRowWithRank('Goals against rank', p.opp_goals_against_rank)}
+    ${statRowWithRank('SOG against rank', p.opp_sog_against_rank)}
+    ${statRowWithRank('PK SOG rank', p.opp_pk_sog_rank)}
+    ${statRowWithRank('Penalties rank', p.opp_penalties_rank)}
+  `;
+
+  const explEl = document.getElementById('player-page-explanation');
+  const genBtn = document.getElementById('player-page-btn-ai-generate');
+  const loadEl = document.getElementById('player-page-ai-loading');
+  if (explEl) {
+    explEl.innerHTML = p.explanation
+      ? formatAIAnalysisMarkdown(p.explanation)
+      : '<p class="empty-state" style="font-size:0.9rem;">No pre-computed analysis. Click "Generate AI analysis" below.</p>';
+  }
+  if (genBtn) {
+    genBtn.style.display = dateVal ? '' : 'none';
+    genBtn.textContent = 'Generate AI analysis';
+    genBtn.onclick = async () => {
+      genBtn.style.display = 'none';
+      if (loadEl) loadEl.style.display = '';
+      const apiParams2 = { player: p.shooter_name };
+      if (p.player_team) apiParams2.player_team = p.player_team;
+      if (p.opposing_team) apiParams2.opposing_team = p.opposing_team;
+      if (dateVal) apiParams2.game_date = dateVal;
+      const res = await fetchAPI('/player-ai-analysis', apiParams2);
+      if (loadEl) loadEl.style.display = 'none';
+      genBtn.style.display = '';
+      if (res?.analysis) {
+        explEl.innerHTML = formatAIAnalysisMarkdown(res.analysis);
+        genBtn.textContent = 'Regenerate analysis';
+      } else {
+        showToast(res?.error || 'AI analysis failed', 'error');
+      }
+    };
+  }
+}
+
+function handleRoute() {
+  const params = getPlayerPageParams();
+  if (params) {
+    loadAndRenderPlayerPage(params);
+  } else {
+    hidePlayerPage();
+  }
+}
+
+// ----- Player detail (legacy overlay - now redirects to full page) -----
 function statRowWithRank(label, value, isRank = true, title = '') {
   const r = isRank ? rankClass(value) : { text: num(value), className: '' };
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
@@ -1335,6 +1652,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('historical-apply')?.addEventListener('click', () => loadHistorical());
+
+  document.getElementById('player-page-back')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.location.hash = '';
+  });
+  window.addEventListener('hashchange', handleRoute);
+  handleRoute();
 
   loadPipelineStatus();
   showTab('dashboard');
