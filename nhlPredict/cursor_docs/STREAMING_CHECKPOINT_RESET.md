@@ -47,7 +47,8 @@ You can use that instead of deleting the pipeline:
 
 1. **Workflows** → **Delta Live Tables** → **NHLPlayerIngestion** → **Run**.
 2. In the run dialog, open **Advanced** and select **Reset streaming flow checkpoints** (or “Clear state for streaming flows only”).
-3. Start the update.
+3. **Important:** Both streams (`stream_player_stats_from_staging` and `stream_games_from_staging`) have separate checkpoints. If one fails first, the other still has the old checkpoint — run again with **Reset streaming flow checkpoints** checked.
+4. Start the update.
 
 Then you do **not** need to drop tables or delete the pipeline.
 

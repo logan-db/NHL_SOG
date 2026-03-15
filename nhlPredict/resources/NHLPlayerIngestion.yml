@@ -32,16 +32,16 @@ resources:
         # FULL LOAD: one_time_load="true" — Backfill 2023-10-01 to today. Run first or after reset. ~3–5 hours.
         # INCREMENTAL: one_time_load="false" — Daily updates from (bronze max - lookback_days) to today. ~5–10 min.
         # Use "false" now that bronze is loaded.
-        one_time_load: "true"
+        one_time_load: "false"
         # skip_staging_ingestion: "true" = use *_staging_manual only (no API). For manual backfill from CSV/parquet.
         skip_staging_ingestion: "false"
         use_manual_for_historical: "false"
         lookback_days: "2"
-        schedule_future_days: "8"
+        schedule_future_days: "4"
       notifications:
         - email_recipients:
             - logan.rupert@databricks.com
           alerts:
-            - on-update-success
+            # - on-update-success
             - on-update-failure
       root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl

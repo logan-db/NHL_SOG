@@ -1,5 +1,24 @@
 # NHL SOG Scripts
 
+## Create Lakebase Catalog (one-time)
+
+Register a Lakebase Autoscaling project as a Unity Catalog catalog (e.g. `lr-lakebase` from `lr-database-instance`).
+
+**Prerequisites:**
+- Databricks CLI authenticated: `databricks auth login --host <workspace-url>`
+- `pip install databricks-sdk`
+
+**Usage:**
+```bash
+python scripts/create_lakebase_catalog.py
+python scripts/create_lakebase_catalog.py --profile dev
+python scripts/create_lakebase_catalog.py --catalog lr-lakebase --instance lr-database-instance
+```
+
+The script tries CLI, REST API, and SDK methods. If all fail (autoscale catalog creation may not be fully API-supported), it prints manual Catalog Explorer steps.
+
+---
+
 ## Lakebase Migrations (local)
 
 Run SQL migrations against Lakebase Postgres from your machine (CREATE TABLE, GRANT, ALTER, etc.).
@@ -48,13 +67,13 @@ Generate a token and run psql manually:
 python -c "
 from databricks.sdk import WorkspaceClient
 cred = WorkspaceClient().postgres.generate_database_credential(
-    endpoint='projects/adca98b0-c69f-4d8b-8ced-5e542178c3e3/branches/br-weathered-cloud-d1dvufkn/endpoints/primary'
+    endpoint='projects/lr-database-instance/branches/production/endpoints/primary'
 )
 print(cred.token)
 " > /tmp/lakebase_token
 
 export PGPASSWORD=$(cat /tmp/lakebase_token)
-psql "host=ep-small-dawn-d147t6wz.database.us-west-2.cloud.databricks.com port=5432 dbname=databricks_postgres user=YOUR_EMAIL sslmode=require" -f app/migrate_pick_types_and_team_favorites.sql
+psql "host=ep-patient-credit-d1nz67uh.database.us-west-2.cloud.databricks.com port=5432 dbname=databricks_postgres user=YOUR_EMAIL sslmode=require" -f app/migrate_pick_types_and_team_favorites.sql
 rm /tmp/lakebase_token
 ```
 

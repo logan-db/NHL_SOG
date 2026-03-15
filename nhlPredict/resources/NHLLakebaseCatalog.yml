@@ -1,0 +1,24 @@
+# # Lakebase catalog for NHL app - creates provisioned instance + UC catalog if not exists
+# # Catalog lr-lakebase is required by NHLLakebaseSync synced tables
+# #
+# # IMPORTANT: The bundle database_catalog resource ONLY supports provisioned instances.
+# # For autoscale (e.g. lr-database-instance), you must register manually:
+# #   1. Catalog Explorer → Create → Lakebase Postgres (Autoscaling)
+# #   2. Select project lr-database-instance, branch, database databricks_postgres
+# #   3. Catalog name: lr-lakebase
+# #   4. Then deploy with NHLLakebaseSync only (this file excluded from include)
+# #
+# # If you have provisioned quota: add this file to databricks.yml include (before NHLLakebaseSync)
+
+# resources:
+#   database_instances:
+#     lr_lakebase_instance:
+#       name: lr-database-instance
+#       capacity: CU_2
+
+#   database_catalogs:
+#     lr_lakebase_catalog:
+#       name: lr-lakebase
+#       database_instance_name: ${resources.database_instances.lr_lakebase_instance.name}
+#       database_name: databricks_postgres
+#       create_database_if_not_exists: true

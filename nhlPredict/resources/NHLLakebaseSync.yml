@@ -1,6 +1,8 @@
 # Lakebase sync pipelines for NHL app tables
 # Syncs lr_nhl_demo.dev tables to Lakebase (lr-lakebase)
-# Target catalog lr-lakebase must be registered to your Lakebase instance
+# Target catalog lr-lakebase must exist - register your Lakebase in Catalog Explorer first:
+#   Autoscale: Catalog Explorer → Create → Lakebase Postgres (Autoscaling) → pick project lr-database-instance
+#   Provisioned: Use NHLLakebaseCatalog.yml in bundle include (creates instance + catalog)
 
 resources:
   synced_database_tables:

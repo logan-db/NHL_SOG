@@ -83,8 +83,9 @@ def aggregate_games_data():
     _ = dlt.read("bronze_games_historical_v2")
     _ = dlt.read("bronze_player_game_stats_v2")
 
-    # Prefer dlt.read() for DLT pipeline tables. Use spark.table() only for static tables.
-    # Catalog is source of truth for row counts; logs were misleading due to partial evaluations.
+    # Schedule: Read from bronze_schedule_expanded_for_gold (not silver_schedule). Root cause fix:
+    # dlt.read(silver_schedule) can return stale/empty when gold runs before silver commits.
+    # Bronze commits before silver; gold runs after both, so bronze is always visible to gold.
     def _read_silver(name):
         return dlt.read(name)
 
@@ -102,8 +103,8 @@ def aggregate_games_data():
         f"(max_data={_max_from_data}, yesterday={_yesterday}, today={date.today()})"
     )
 
-    base_schedule = _read_silver("silver_schedule_2023_v2")
-    print(f"🔢 GOLD: base_schedule (silver_schedule_2023_v2) = {base_schedule.count():,} rows")
+    base_schedule = dlt.read("bronze_schedule_expanded_for_gold")
+    print(f"🔢 GOLD: base_schedule (bronze_schedule_expanded_for_gold) = {base_schedule.count():,} rows")
     if base_schedule.isEmpty():
         # Build from bronze_schedule, or from games if schedule empty (e.g. ingest not run yet)
         for _src_name, _src_tbl in [

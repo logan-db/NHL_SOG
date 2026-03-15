@@ -10,7 +10,14 @@ variables:
     default: "2025-11-09"  # This will be calculated dynamically
 
 include:
-  - resources/*.yml
+  - resources/NHLPlayerIngestion.yml
+  - resources/NHLPlayerPropDaily.yml
+  - resources/NHLPlayerPropRetrain.yml
+  - resources/NHLApp.yml
+  # Lakebase sync - requires catalog lr-lakebase. For autoscale lr-database-instance:
+  # Register manually first: Catalog Explorer → Create → Lakebase Postgres (Autoscaling)
+  # → project lr-database-instance, database databricks_postgres, catalog name lr-lakebase
+  - resources/NHLLakebaseSync.yml
 
 targets:
   # The 'dev' target, for development purposes. This target is the default.

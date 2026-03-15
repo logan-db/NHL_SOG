@@ -8,3 +8,5 @@ resources:
       # Local path (relative to resources/). Bundle deploys to workspace .../files/app
       source_code_path: ../app
       description: NHL SOG predictions app with Lakebase backend
+      # Serverless usage policy for budget attribution (Settings > Compute > Serverless budget policies)
+      usage_policy_id: "2fd2c389-48a5-440d-bdc4-744a1fc67473"

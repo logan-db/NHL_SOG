@@ -1,5 +1,18 @@
 -- Create tables for favorites and picks. Run in Lakebase as a user with CREATE privileges.
--- Then grant permissions to the app role (PGUSER from app.yaml).
+-- Creates app OAuth role via databricks_auth extension if not exists, then grants.
+-- PGUSER (service principal client ID) must match app.yaml env.PGUSER.
+
+-- Enable Databricks auth extension and create OAuth role for app service principal
+CREATE EXTENSION IF NOT EXISTS databricks_auth;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '2e0ea180-83dc-4a75-b2d6-6972f90187b4') THEN
+    PERFORM databricks_create_role('2e0ea180-83dc-4a75-b2d6-6972f90187b4', 'SERVICE_PRINCIPAL');
+    RAISE NOTICE 'Created OAuth role for app service principal 2e0ea180-83dc-4a75-b2d6-6972f90187b4';
+  END IF;
+END $$;
+GRANT CONNECT ON DATABASE databricks_postgres TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
+GRANT CREATE, USAGE ON SCHEMA public TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
 
 -- User favorites: players the user has starred
 CREATE TABLE IF NOT EXISTS public.user_favorites (
@@ -46,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.user_picks (
 -- Index for fetching picks by user and date
 CREATE INDEX IF NOT EXISTS idx_user_picks_user_date ON public.user_picks (user_id, game_date DESC);
 
--- Grant to app role (replace with your PGUSER from app.yaml)
+-- Grant to app OAuth role (created above via databricks_create_role)
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorites TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_favorite_teams TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_picks TO "2e0ea180-83dc-4a75-b2d6-6972f90187b4";

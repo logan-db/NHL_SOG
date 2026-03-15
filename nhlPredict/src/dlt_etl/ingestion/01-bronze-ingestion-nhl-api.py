@@ -492,7 +492,9 @@ def _fetch_player_stats_from_api(_start_date: date, _end_date: date):
                     boxscore = fetch_with_retry(
                         nhl_client, nhl_client.game_center.boxscore, game_id=game_id
                     )
-                    if not pbp or not shifts or not boxscore:
+                    if not boxscore:
+                        continue
+                    if not pbp or not shifts:
                         continue
                     home_team_id = boxscore.get("homeTeam", {}).get("id")
                     away_team_id = boxscore.get("awayTeam", {}).get("id")
@@ -552,30 +554,45 @@ def _fetch_player_stats_from_api(_start_date: date, _end_date: date):
     return df.dropDuplicates(["playerId", "gameId", "situation"])
 
 
-# DBTITLE 1,bronze_player_game_stats_v2_staging - API Ingestion (Batch)
-@dlt.table(
+# DBTITLE 1,bronze_player_game_stats_v2_staging - Append-only (Stream sees new data)
+dlt.create_streaming_table(
     name="bronze_player_game_stats_v2_staging",
-    comment="Staging table for API ingestion - rebuilds quickly with incremental date logic",
+    comment="Staging table for API ingestion - APPEND only so stream processes new data",
     table_properties={
         "quality": "bronze",
         "source": "nhl-api-py",
         "layer": "staging",
-        "pipelines.reset.allowed": "false",  # Protect staging from accidental resets
-        "pipelines.autoOptimize.managed": "false",  # Force regular table (not materialized view)
+        "pipelines.reset.allowed": "false",
     },
 )
-def ingest_player_game_stats_staging():
-    """
-    Fetch player game-by-game statistics from NHL API (STAGING TABLE).
 
-    This table rebuilds on code changes, but is FAST due to incremental date logic:
-    - skip_staging_ingestion=true: Use existing staging data (no API calls!)
-    - use_manual_for_historical=true: Staging = staging_manual (historical) + API (incremental)
-    - one_time_load=true: Full historical (only on first run)
-    - one_time_load=false: Only recent dates (5-10 min API calls)
 
-    The final streaming table reads from this staging table and preserves all history.
-    """
+@dlt.append_flow(
+    target="bronze_player_game_stats_v2_staging",
+    once=True,
+    comment="Appends new player stats each run (no overwrite = stream sees data with skipChangeCommits)",
+)
+def append_player_stats_staging():
+    """Fetch from API and append only NEW rows (anti-join on existing). Avoids overwrite so stream works."""
+    df = _fetch_player_game_stats_staging()
+    if df.isEmpty():
+        return df
+    try:
+        existing = spark.table(f"{catalog}.{schema}.bronze_player_game_stats_v2_staging")
+        if existing.isEmpty():
+            return df
+        keys = existing.select("playerId", "gameId", "situation").distinct()
+        new_only = df.join(keys, ["playerId", "gameId", "situation"], "left_anti")
+        new_cnt = new_only.count()
+        skipped = df.count() - new_cnt
+        print(f"📥 Staging APPEND: {new_cnt} new rows (skipped {skipped} already in staging)")
+        return new_only
+    except Exception:
+        return df
+
+
+def _fetch_player_game_stats_staging():
+    """Fetch player stats from API (or manual/hybrid). Returns DataFrame for append_flow to filter and append."""
 
     # HYBRID MODE: staging_manual (historical) + API (incremental). Stream reads from staging.
     if use_manual_for_historical and not skip_staging_ingestion:
@@ -742,17 +759,17 @@ def ingest_player_game_stats_staging():
                         nhl_client, nhl_client.game_center.boxscore, game_id=game_id
                     )
 
-                    if not pbp or not shifts or not boxscore:
+                    if not boxscore:
+                        print(f"      ⚠️ Missing boxscore for game {game_id}, skipping")
+                        continue
+
+                    if not pbp or not shifts:
                         missing = []
                         if not pbp:
                             missing.append("play-by-play")
                         if not shifts:
                             missing.append("shifts")
-                        if not boxscore:
-                            missing.append("boxscore")
-                        print(
-                            f"      ⚠️ Missing data for game {game_id}: {', '.join(missing)}"
-                        )
+                        print(f"      ⚠️ Missing {', '.join(missing)} for game {game_id}, skipping")
                         continue
 
                     # Diagnostic: ensure we have plays so player stats (shots, assists, etc.) can be computed
@@ -977,17 +994,14 @@ def stream_player_stats_from_staging():
         "OffIce_A_shotAttempts", "OffIce_A_unblockedShotAttempts", "OffIce_A_goals",
     ]
     if skip_staging_ingestion:
-        # Skip mode: Read from _staging_manual table (like successful run last night)
+        # Skip mode: Read from _staging_manual table
         print("⏭️  STREAMING: Reading from _staging_manual table")
         stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
         )
     else:
-        # Normal mode: Read from DLT staging. Staging overwrites each run; Delta fails with
-        # DELTA_SOURCE_TABLE_IGNORE_CHANGES. Use skipChangeCommits to skip overwrite commits
-        # (per error) so the stream does not fail. Tradeoff: may skip new data on overwrite;
-        # run full refresh if bronze does not receive updates.
-        print("⏭️  STREAMING: Reading from DLT staging table (skipChangeCommits for overwrite)")
+        # Staging APPENDS now (no overwrite) — stream sees new data with skipChangeCommits
+        print("⏭️  STREAMING: Reading from DLT staging (append-only)")
         stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
         )
@@ -995,7 +1009,7 @@ def stream_player_stats_from_staging():
     for c in _numeric_player_cols:
         if c in stream_df.columns:
             stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0)))
-    # Dedupe by (playerId, gameId, situation) - ignoreChanges can emit duplicates on overwrite
+    # Dedupe by (playerId, gameId, situation)
     stream_df = stream_df.dropDuplicates(["playerId", "gameId", "situation"])
     return stream_df
 
@@ -1003,29 +1017,45 @@ def stream_player_stats_from_staging():
 # COMMAND ----------
 
 
-# DBTITLE 1,bronze_games_historical_v2_staging - API Ingestion (Batch)
-@dlt.table(
+# DBTITLE 1,bronze_games_historical_v2_staging - Append-only (Stream sees new data)
+dlt.create_streaming_table(
     name="bronze_games_historical_v2_staging",
-    comment="Staging table for team game stats - rebuilds quickly with incremental date logic",
+    comment="Staging table for team game stats - APPEND only so stream processes new data",
     table_properties={
         "quality": "bronze",
         "source": "nhl-api-py",
         "layer": "staging",
-        "pipelines.reset.allowed": "false",  # Protect staging from accidental resets
-        "pipelines.autoOptimize.managed": "false",  # Force regular table (not materialized view)
+        "pipelines.reset.allowed": "false",
     },
 )
-def ingest_games_historical_staging():
-    """
-    Fetch team-level game statistics from NHL API (STAGING TABLE).
 
-    This table rebuilds on code changes, but is FAST due to incremental date logic:
-    - skip_staging_ingestion=true: Use existing staging data (no API calls!)
-    - one_time_load=true: Full historical (only on first run)
-    - one_time_load=false: Only recent dates (5-10 min API calls)
 
-    The final streaming table reads from this staging table and preserves all history.
-    """
+@dlt.append_flow(
+    target="bronze_games_historical_v2_staging",
+    once=True,
+    comment="Appends new team game stats each run (no overwrite = stream sees data with skipChangeCommits)",
+)
+def append_games_historical_staging():
+    """Fetch from API and append only NEW rows (anti-join on existing). Avoids overwrite so stream works."""
+    df = _fetch_games_historical_staging()
+    if df.isEmpty():
+        return df
+    try:
+        existing = spark.table(f"{catalog}.{schema}.bronze_games_historical_v2_staging")
+        if existing.isEmpty():
+            return df
+        keys = existing.select("gameId", "team", "situation").distinct()
+        new_only = df.join(keys, ["gameId", "team", "situation"], "left_anti")
+        new_cnt = new_only.count()
+        skipped = df.count() - new_cnt
+        print(f"📥 Staging APPEND: {new_cnt} new rows (skipped {skipped} already in staging)")
+        return new_only
+    except Exception:
+        return df
+
+
+def _fetch_games_historical_staging():
+    """Fetch team game stats from API. Returns DataFrame for append_flow to filter and append."""
 
     # SKIP MODE: Return empty DataFrame (actual data read from _manual tables by streaming flows)
     if skip_staging_ingestion:
@@ -1230,7 +1260,7 @@ def stream_games_from_staging():
     - Staging can rebuild quickly (incremental API calls)
     - Final table accumulates all history (never drops)
     - Code changes only affect staging (5-10 min rebuild)
-    - skipChangeCommits: true so overwrites on staging (batch refresh) don't fail the stream
+    - skipChangeCommits: staging APPENDS so stream sees new data (no overwrites)
     - Coalesce numeric stats to 0 so silver/gold never see null (manual table or API gaps)
     """
     if skip_staging_ingestion:
@@ -1240,9 +1270,8 @@ def stream_games_from_staging():
             f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
         )
     else:
-        # Normal mode: Read from DLT staging. Use skipChangeCommits (same as player stats)
-        # so overwrites on staging do not fail the stream.
-        print("⏭️  STREAMING: Reading from DLT staging table (skipChangeCommits)")
+        # Staging APPENDS now (no overwrite) — stream sees new data with skipChangeCommits
+        print("⏭️  STREAMING: Reading from DLT staging (append-only)")
         stream_df = spark.readStream.option("skipChangeCommits", "true").table(
             f"{catalog}.{schema}.bronze_games_historical_v2_staging"
         )
@@ -1270,7 +1299,7 @@ def stream_games_from_staging():
     for c in _float_cols:
         if c in stream_df.columns:
             stream_df = stream_df.withColumn(c, coalesce(col(c), lit(0.0)))
-    # Dedupe by (gameId, team, situation) - ignoreChanges can emit duplicates on overwrite
+    # Dedupe by (gameId, team, situation)
     stream_df = stream_df.dropDuplicates(["gameId", "team", "situation"])
     return stream_df
 
@@ -1313,6 +1342,9 @@ def ingest_schedule_v2():
     print(f"📅 Fetching NHL schedule (historical + future games)")
 
     # PART 1: Get historical games from games_historical
+    # ROOT CAUSE FIX: dlt.read(bronze_games) can return stale data when ingest_schedule runs in the
+    # same pipeline update (stream may not have committed yet). Supplement with staging to capture
+    # the current run's batch and avoid schedule gaps (e.g. missing March 11-13).
     if skip_staging_ingestion:
         print(f"   📊 Historical: Reading from _staging_manual table")
         games_df = spark.table(
@@ -1332,6 +1364,21 @@ def ingest_schedule_v2():
                 pass
         if not games_df.isEmpty():
             print(f"   📊 Historical: Reading from streaming table")
+
+        # Supplement with staging to capture current run's batch (avoids schedule date gaps)
+        try:
+            staging_df = dlt.read("bronze_games_historical_v2_staging")
+            if not staging_df.isEmpty():
+                needed = ["gameId", "gameDate", "team", "opposingTeam", "home_or_away"]
+                staging_subset = staging_df.select([c for c in needed if c in staging_df.columns])
+                games_subset = games_df.select([c for c in needed if c in games_df.columns])
+                if set(staging_subset.columns) >= {"gameId", "gameDate", "team", "home_or_away"}:
+                    games_df = games_df.unionByName(
+                        staging_subset.select(games_subset.columns), allowMissingColumns=True
+                    ).dropDuplicates(["gameId", "gameDate", "team"])
+                    print(f"   📊 Historical: Supplemented with staging (avoids date gaps)")
+        except Exception as e:
+            print(f"   ⚠️  Staging supplement skipped: {e}")
 
     # Derive historical schedule
     # Use max() not first() — first() is order-dependent and can yield null HOME/AWAY
@@ -1443,6 +1490,37 @@ def ingest_schedule_v2():
     print(f"   ✅ Final schedule: {final_schedule.count()} unique games")
 
     return final_schedule
+
+
+# COMMAND ----------
+
+
+# DBTITLE 1,bronze_schedule_expanded_for_gold - Schedule in silver format for gold
+# Gold reads schedule from HERE (bronze) instead of silver_schedule. Root cause fix:
+# dlt.read() from silver can return stale/empty when gold runs before silver commits.
+# Bronze commits before silver; gold runs after both, so bronze is always visible.
+@dlt.table(
+    name="bronze_schedule_expanded_for_gold",
+    comment="Schedule in HOME/AWAY/TEAM_ABV format for gold. Bronze layer ensures visibility when gold runs.",
+    table_properties={
+        "quality": "bronze",
+        "source": "bronze_schedule_2023_v2 (derived)",
+        "pipelines.reset.allowed": "false",
+    },
+)
+def expand_schedule_for_gold():
+    """Same transform as silver_schedule: home/away union. Gold reads this so dlt.read sees committed data."""
+    from pyspark.sql.functions import col, to_date, date_format, regexp_replace
+
+    _bronze = dlt.read("bronze_schedule_2023_v2")
+    schedule = (
+        _bronze
+        .withColumn("DAY", regexp_replace(col("DAY"), "\\.", ""))
+        .withColumn("DATE", to_date(col("DATE")))
+    )
+    home = schedule.withColumn("TEAM_ABV", col("HOME"))
+    away = schedule.withColumn("TEAM_ABV", col("AWAY"))
+    return home.unionByName(away)
 
 
 # COMMAND ----------

@@ -46,9 +46,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 ENDPOINT_NAME = os.environ.get(
     "ENDPOINT_NAME",
-    "projects/adca98b0-c69f-4d8b-8ced-5e542178c3e3/branches/br-weathered-cloud-d1dvufkn/endpoints/primary",
+    "projects/lr-database-instance/branches/production/endpoints/primary",
 )
-PGHOST = os.environ.get("PGHOST", "ep-small-dawn-d147t6wz.database.us-west-2.cloud.databricks.com")
+PGHOST = os.environ.get("PGHOST", "ep-patient-credit-d1nz67uh.database.us-west-2.cloud.databricks.com")
 PGDATABASE = os.environ.get("PGDATABASE", "databricks_postgres")
 PGPORT = os.environ.get("PGPORT", "5432")
 PGSSLMODE = os.environ.get("PGSSLMODE", "require")
