@@ -17,12 +17,23 @@ resources:
           notebook_task:
             notebook_path: ../src/setup/01-Ingestion-createVols.sql
 
+        - task_key: pre_ingest_staging
+          depends_on:
+            - task_key: createVols
+          notebook_task:
+            notebook_path: ../src/dlt_etl/ingestion/00-pre-ingest-staging.py
+            source: WORKSPACE
+          environment_key: Default
+
         - task_key: ingest_transform_job
           depends_on:
-              - task_key: createVols
+              - task_key: pre_ingest_staging
           pipeline_task:
             pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
-            full_refresh: true
+            # Normal update (not full refresh) so bronze incremental ingestion works correctly.
+            # full_refresh clears tables; staging reads max_date from bronze to fetch new dates.
+            # With full_refresh=true, bronze may be empty at read time → only ~5 days fetched → date gap.
+            full_refresh: false
 
         - task_key: Write_out_Delta_Tables
           depends_on:

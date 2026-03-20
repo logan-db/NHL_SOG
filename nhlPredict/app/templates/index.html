@@ -125,6 +125,36 @@
       <p id="yesterday-shooters-empty" class="empty-hint" style="display:none;">No player stats from yesterday.</p>
     </div>
   </div>
+  <div class="yesterday-team-sog" id="yesterday-team-sog">
+    <h3 class="yesterday-card-title" style="grid-column: 1 / -1; margin-bottom: 0.5rem;">Top / Bottom Teams <span class="yesterday-label-badge">Season Avg</span></h3>
+    <div class="yesterday-team-sog-card" id="team-sog-shooting-card">
+      <h4 class="team-sog-subtitle">Top Shooting</h4>
+      <div id="team-sog-shooting" class="team-sog-list"></div>
+      <p id="team-sog-shooting-empty" class="empty-hint" style="display:none;">No team stats for this date.</p>
+    </div>
+    <div class="yesterday-team-sog-card" id="team-sog-allowed-card">
+      <h4 class="team-sog-subtitle">Most SOG Allowed</h4>
+      <div id="team-sog-allowed" class="team-sog-list"></div>
+      <p id="team-sog-allowed-empty" class="empty-hint" style="display:none;">No team stats for this date.</p>
+    </div>
+  </div>
+</section>
+<!-- Hit Rate Leaders -->
+<section id="hit-rate-board" class="section hit-rate-section">
+  <div class="hit-rate-header">
+    <div>
+      <h2 class="section-heading" style="margin-bottom:0.15rem">Today's Hit Rate Leaders</h2>
+      <p class="text-secondary" style="font-size:0.78rem;color:var(--text-muted);margin:0">Season 2+/3+ SOG hit rates for players in today's upcoming games.</p>
+    </div>
+    <div class="hit-rate-toggle-group">
+      <button type="button" class="btn-hit-toggle active" data-sort="2plus">Sort: 2+ SOG%</button>
+      <button type="button" class="btn-hit-toggle" data-sort="3plus">Sort: 3+ SOG%</button>
+    </div>
+  </div>
+  <div class="hit-rate-chart-wrap">
+    <canvas id="hit-rate-chart"></canvas>
+  </div>
+  <p id="hit-rate-empty" class="empty-hint" style="display:none;">No upcoming game predictions available yet.</p>
 </section>
 <section id="top-picks" class="section top-picks-section">
   <h2 class="section-heading">Top Picks to Watch</h2>
@@ -135,9 +165,29 @@
 </section>
 <section id="games" class="section">
   <h2 class="section-heading">Upcoming Games</h2>
-  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem; color: var(--text-muted);">
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.75rem; color: var(--text-muted);">
     Click a game to see all player predictions. Click a player for detailed stats.
   </p>
+  <div class="upcoming-filters-bar" id="upcoming-filters-bar">
+    <div class="filter-group">
+      <label>Sort by Date</label>
+      <select id="games-sort-date">
+        <option value="asc">Earliest first</option>
+        <option value="desc">Latest first</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Team</label>
+      <select id="games-filter-team">
+        <option value="">All teams</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Player</label>
+      <input type="text" id="games-filter-player" placeholder="Search player..." />
+    </div>
+    <button type="button" class="btn-clear" id="games-clear-filters">Clear</button>
+  </div>
   <div class="games-grid" id="games-grid">
     <div class="loading">Loading games...</div>
   </div>
@@ -200,6 +250,24 @@
         <tr><td colspan="8" class="loading">Loading...</td></tr>
       </tbody>
     </table>
+  </div>
+</section>
+</section>
+
+<!-- Ask tab - Genie natural language Q&A -->
+<section id="tab-ask" class="tab-panel">
+<section id="ask-genie" class="section ask-genie-section">
+  <h2 class="section-heading">Ask NHL Genie</h2>
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem; color: var(--text-muted);">
+    Ask questions about player analysis, historical stats, game scores, and predicted SOG. Try: &quot;Who has the highest predicted SOG?&quot; or &quot;Show me top shooters from last 10 games.&quot;
+  </p>
+  <div class="genie-chat-container">
+    <div id="genie-messages" class="genie-messages"></div>
+    <div class="genie-input-row">
+      <textarea id="genie-input" class="genie-input" rows="2" placeholder="Ask a question about NHL players, stats, games, or predictions..." maxlength="2000"></textarea>
+      <button type="button" class="btn-genie-send" id="genie-send" aria-label="Send">Send</button>
+    </div>
+    <p id="genie-error" class="genie-error" style="display:none;"></p>
   </div>
 </section>
 </section>

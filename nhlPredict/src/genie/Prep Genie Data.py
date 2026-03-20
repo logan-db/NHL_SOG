@@ -58,6 +58,7 @@ game_clean_cols = [
     "opposingTeam",
     "gameId",
     "sum_game_Total_shotsOnGoalFor",
+    "sum_game_Total_shotsOnGoalAgainst",
     "game_Total_missedShotsFor",
     "game_Total_blockedShotAttemptsFor",
     "sum_game_Total_shotAttemptsFor",
@@ -69,6 +70,13 @@ game_clean_cols = [
     "sum_game_Total_penaltiesAgainst",
     "game_Total_faceOffsWonAgainst",
     "game_Total_hitsAgainst",
+]
+# Pre-calculated rolling averages from gold (L7) - speeds up app game analysis
+game_clean_precalc_cols = [
+    "average_sum_game_Total_shotsOnGoalFor_last_7_games",
+    "average_sum_game_Total_goalsFor_last_7_games",
+    "opponent_average_sum_game_Total_shotsOnGoalFor_last_7_games",
+    "opponent_average_sum_game_Total_goalsFor_last_7_games",
 ]
 
 # COMMAND ----------
@@ -254,7 +262,14 @@ display(silver_games_rankings[[game_clean_cols]])
 
 # COMMAND ----------
 
-games_clean = silver_games_rankings[[game_clean_cols]]
+# Use gold_game_stats_v2 for pre-calc rolling averages (avg SOG, SOGA, goals L7)
+# Fall back to silver if gold precalc cols missing (e.g. pipeline not updated)
+# NOTE: gold_game_stats_v2 drops EASTERN/LOCAL (03-gold-agg); silver has them. Use only cols that exist.
+_has_precalc = set(game_clean_precalc_cols).issubset(gold_game_stats_v2.columns)
+_selected_cols = (game_clean_cols + game_clean_precalc_cols) if _has_precalc else game_clean_cols
+_src = gold_game_stats_v2 if _has_precalc else silver_games_rankings
+_cols_in_src = [c for c in _selected_cols if c in _src.columns]
+games_clean = _src[_cols_in_src]
 games_clean = games_clean.withColumn(
     "isWin",
     when(
@@ -312,8 +327,10 @@ games_clean = (
     )
     .select(
         *[
-            col("sum_game_Total_goalsFor") if c == "sum_game_Total_goalsFor" else col("sum_game_Total_goalsAgainst") if c == "sum_game_Total_goalsAgainst" else col(f"g.{c}")
-            for c in game_clean_cols
+            col("sum_game_Total_goalsFor") if c == "sum_game_Total_goalsFor"
+            else col("sum_game_Total_goalsAgainst") if c == "sum_game_Total_goalsAgainst"
+            else col(f"g.{c}")
+            for c in _cols_in_src
         ]
     )
 )
@@ -324,6 +341,10 @@ games_clean = games_clean.withColumn(
         col("sum_game_Total_goalsFor") > col("sum_game_Total_goalsAgainst"), "Yes"
     ).otherwise("No"),
 )
+# gold_game_stats_v2 drops EASTERN/LOCAL; add defaults for consistent schema (Lakebase/Genie)
+for add_col, default in [("EASTERN", "7:00 PM"), ("LOCAL", "7:00 PM")]:
+    if add_col not in games_clean.columns:
+        games_clean = games_clean.withColumn(add_col, lit(default))
 display(games_clean)
 
 # COMMAND ----------

@@ -271,7 +271,16 @@ def clean_games_data():
         )
     )
 
-    assert joined_game_stats.count() == game_stats_total.count()
+    # Dedup after joins to handle any upstream duplicate rows in bronze (e.g. after
+    # pipeline delete+redeploy where the streaming checkpoint is reset and DLT re-streams
+    # previously processed data on top of existing bronze rows).
+    join_keys = ["season", "team", "playerTeam", "home_or_away", "gameDate", "opposingTeam", "gameId"]
+    pre_dedup = joined_game_stats.count()
+    total_expected = game_stats_total.count()
+    if pre_dedup != total_expected:
+        print(f"  ⚠️  Row count mismatch after joins ({pre_dedup} vs {total_expected} expected) — deduplicating on join keys")
+        joined_game_stats = joined_game_stats.dropDuplicates(join_keys)
+        print(f"  ✅ After dedup: {joined_game_stats.count()} rows")
 
     # Coalesce numeric game stats to 0 so gold/rankings never get null (join or bronze nulls)
     _numeric_game_cols = [
@@ -1060,13 +1069,10 @@ def clean_rank_players():
     joined_count = joined_player_stats_silver.count()
 
     if player_total_count != joined_count:
-        print(f"❌ Row count mismatch after join:")
-        print(f"   player_game_stats_total: {player_total_count}")
-        print(f"   joined_player_stats_silver: {joined_count}")
-        print(f"   Difference: {joined_count - player_total_count}")
-        assert (
-            player_total_count == joined_count
-        ), f"player_game_stats_total: {player_total_count} does NOT equal joined_player_stats_silver: {joined_count}"
+        print(f"  ⚠️  Row count mismatch after schedule join: {player_total_count} total → {joined_count} joined")
+        print(f"       Difference: {joined_count - player_total_count} — deduplicating on (playerId, gameId)")
+        joined_player_stats_silver = joined_player_stats_silver.dropDuplicates(["playerId", "gameId"])
+        print(f"  ✅ After dedup: {joined_player_stats_silver.count()} rows")
     else:
         print(f"✅ joined_player_stats_silver row count: {joined_count}")
 

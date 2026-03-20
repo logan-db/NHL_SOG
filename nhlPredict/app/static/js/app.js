@@ -226,11 +226,17 @@ function dateStr(d) {
   return isNaN(x.getTime()) ? '' : x.toISOString().slice(0, 10);
 }
 
-/** Match prediction to schedule game: (playerTeam, opposingTeam) = (AWAY, HOME) or (HOME, AWAY) */
+/** Match prediction to schedule game: (playerTeam, opposingTeam) = (AWAY, HOME) or (HOME, AWAY).
+ * Allows ±1 day date tolerance to handle UTC vs Eastern pipeline date offset
+ * (pipeline stores gameDate as UTC midnight; 7 PM ET game on Mar 19 = Mar 20 UTC). */
 function predictionMatchesGame(p, home, away, gameDate) {
   const d = dateStr(p.game_date);
   const gd = dateStr(gameDate);
-  if (d !== gd) return false;
+  if (!d || !gd) return false;
+  if (d !== gd) {
+    const diffMs = Math.abs(new Date(d + 'T12:00:00').getTime() - new Date(gd + 'T12:00:00').getTime());
+    if (diffMs > 36 * 60 * 60 * 1000) return false; // more than 1.5 days apart → definitely wrong game
+  }
   return (
     (p.player_team === away && p.opposing_team === home) ||
     (p.player_team === home && p.opposing_team === away)
@@ -261,6 +267,14 @@ async function loadFilterOptions() {
     histTeamSelect.innerHTML = '<option value="">All teams</option>' +
       filterOptions.teams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
   }
+  // Populate upcoming games section team filter
+  const gamesTeamSelect = document.getElementById('games-filter-team');
+  if (gamesTeamSelect) {
+    gamesTeamSelect.innerHTML = '<option value="">All teams</option>' +
+      filterOptions.teams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  }
+  // Re-render favorite teams chips now that we have the full team list for the dropdown
+  renderFavoriteTeamsChips();
 }
 
 // ----- Favorites & Picks -----
@@ -390,11 +404,133 @@ async function toggleFavoriteTeam(team) {
   renderGames();
 }
 
+// ----- Hit Rate Leaderboard -----
+let hitRateChart = null;
+let hitRateData = [];
+let hitRateSortBy = '2plus';
+
+async function loadHitRateLeaderboard() {
+  const data = await fetchAPI('/hit-rate-leaderboard').catch(() => null);
+  hitRateData = data?.players || [];
+  renderHitRateLeaderboard();
+}
+
+function renderHitRateLeaderboard() {
+  const canvas = document.getElementById('hit-rate-chart');
+  const emptyEl = document.getElementById('hit-rate-empty');
+  if (!canvas) return;
+
+  if (!hitRateData.length) {
+    if (emptyEl) emptyEl.style.display = '';
+    canvas.style.display = 'none';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  canvas.style.display = '';
+
+  const sorted = [...hitRateData].sort((a, b) => {
+    const aVal = parseFloat(hitRateSortBy === '2plus' ? a.hit_rate_2plus : a.hit_rate_3plus) || 0;
+    const bVal = parseFloat(hitRateSortBy === '2plus' ? b.hit_rate_2plus : b.hit_rate_3plus) || 0;
+    return bVal - aVal;
+  }).slice(0, 20);
+
+  const labels = sorted.map(p => {
+    const name = p.shooter_name || '—';
+    const parts = name.trim().split(' ');
+    const shortName = parts.length > 1 ? `${parts[parts.length - 1]}, ${parts[0][0]}.` : name;
+    return `${shortName} (${p.player_team || ''})`;
+  });
+
+  const data2plus = sorted.map(p => parseFloat(p.hit_rate_2plus) || 0);
+  const data3plus = sorted.map(p => parseFloat(p.hit_rate_3plus) || 0);
+
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#6366f1';
+  const color3plus = '#10b981'; // emerald green — visually distinct from indigo 2+
+  const chartFont = { family: "'Inter', -apple-system, sans-serif", size: 11 };
+
+  if (hitRateChart) { hitRateChart.destroy(); hitRateChart = null; }
+
+  // Resize canvas container to fit all players
+  const rowHeight = 30;
+  canvas.parentElement.style.height = `${sorted.length * rowHeight + 70}px`;
+
+  const ctx = canvas.getContext('2d');
+  hitRateChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '2+ SOG %',
+          data: data2plus,
+          backgroundColor: `${accent}bb`,
+          borderColor: accent,
+          borderWidth: 1,
+          borderRadius: 3,
+        },
+        {
+          label: '3+ SOG %',
+          data: data3plus,
+          backgroundColor: `${color3plus}88`,
+          borderColor: color3plus,
+          borderWidth: 1,
+          borderRadius: 3,
+        },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { font: chartFont, boxWidth: 12, padding: 10 },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x.toFixed(1)}%`,
+            afterLabel: ctx => {
+              const p = sorted[ctx.dataIndex];
+              const lines = [`vs ${p.opposing_team || '—'}`, `Pred SOG: ${p.predicted_sog || '—'}`];
+              if (p.avg_sog_last7) lines.push(`Avg Last 7g: ${p.avg_sog_last7}`);
+              if (hitRateSortBy === '2plus' && p.hit_rate_2plus_30d != null)
+                lines.push(`2+ Last 30d: ${p.hit_rate_2plus_30d}%`);
+              if (hitRateSortBy === '3plus' && p.hit_rate_3plus_30d != null)
+                lines.push(`3+ Last 30d: ${p.hit_rate_3plus_30d}%`);
+              return lines;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          min: 0,
+          max: 100,
+          ticks: { callback: v => `${v}%`, font: { size: 10 } },
+          grid: { color: 'rgba(0,0,0,0.06)' },
+          title: { display: true, text: 'Season Hit Rate %', font: { size: 11 } },
+        },
+        y: {
+          ticks: { font: { ...chartFont, size: 10 } },
+          grid: { display: false },
+        },
+      },
+    },
+  });
+}
+
 async function loadData() {
-  // Fetch Latest Results separately so it's not affected by other fetches
-  fetchAPI('/yesterday-results', { client_date: getLocalDateString() })
-    .then(res => renderYesterdayResults(res))
-    .catch(e => { console.warn('yesterday-results failed:', e); renderYesterdayResults(null); });
+  // Fetch Latest Results and season team SOG in parallel
+  Promise.all([
+    fetchAPI('/yesterday-results', { client_date: getLocalDateString() }),
+    fetchAPI('/team-season-sog'),
+  ]).then(([res, seasonSog]) => {
+    renderYesterdayResults(res, seasonSog);
+  }).catch(e => { console.warn('yesterday-results failed:', e); renderYesterdayResults(null, null); });
+
+  // Load hit rate leaderboard independently (non-blocking)
+  loadHitRateLeaderboard();
 
   try {
     const [gamesRes, predRes, favRes] = await Promise.all([
@@ -469,7 +605,7 @@ function renderTopPicks() {
   });
 }
 
-function renderYesterdayResults(data) {
+function renderYesterdayResults(data, seasonSog) {
   const headingEl = document.getElementById('yesterday-heading');
   const subtitleEl = document.getElementById('yesterday-subtitle');
   const scoresEl = document.getElementById('yesterday-scores');
@@ -480,6 +616,10 @@ function renderYesterdayResults(data) {
 
   const scores = data?.scores || [];
   const shooters = data?.top_shooters || [];
+  // Use season averages for Top/Bottom Teams when available
+  const teamSog = (seasonSog && ((seasonSog.top_shooting?.length || 0) > 0 || (seasonSog.most_allowed?.length || 0) > 0))
+    ? seasonSog
+    : (data?.team_sog_rankings || { top_shooting: [], most_allowed: [] });
   const daysAgo = data?.days_ago;
   const isYesterday = data?.is_yesterday;
   const dataStale = data?.data_stale;
@@ -548,6 +688,91 @@ function renderYesterdayResults(data) {
         </div>`;
     }).join('');
   }
+
+  // Top / Bottom Teams (always visible under Yesterday's Results)
+  const shootingEl = document.getElementById('team-sog-shooting');
+  const allowedEl = document.getElementById('team-sog-allowed');
+  const shootingEmpty = document.getElementById('team-sog-shooting-empty');
+  const allowedEmpty = document.getElementById('team-sog-allowed-empty');
+  const teamSogContainer = document.getElementById('yesterday-team-sog');
+  if (teamSogContainer) {
+    const topShooting = teamSog.top_shooting || [];
+    const mostAllowed = teamSog.most_allowed || [];
+    const topErr = teamSog._top_error;
+    const allowedErr = teamSog._allowed_error;
+    // Detect whether data is season averages (has avg_sog) or single-game (has sog)
+    const isSeasonData = topShooting.length > 0
+      ? (topShooting[0].avg_sog != null)
+      : (mostAllowed.length > 0 && mostAllowed[0].avg_sog_allowed != null);
+    teamSogContainer.style.display = '';
+
+    // Update subtitles to reflect data type
+    const shootingSubtitleEl = document.getElementById('team-sog-shooting-card')?.querySelector('.team-sog-subtitle');
+    const allowedSubtitleEl = document.getElementById('team-sog-allowed-card')?.querySelector('.team-sog-subtitle');
+    if (shootingSubtitleEl) shootingSubtitleEl.textContent = isSeasonData ? 'Top Shooting (Season Avg SOG)' : 'Top Shooting';
+    if (allowedSubtitleEl) allowedSubtitleEl.textContent = isSeasonData ? 'Soft Defense (Season Avg SOGA)' : 'Most SOG Allowed';
+
+    if (shootingEl) {
+      if (topErr) {
+        shootingEl.innerHTML = `<p class="empty-hint" style="color:var(--warn);font-size:0.8rem;">Query error: ${escapeHtml(topErr)}</p>`;
+        if (shootingEmpty) shootingEmpty.style.display = 'none';
+      } else if (!topShooting.length) {
+        shootingEl.innerHTML = '';
+        if (shootingEmpty) shootingEmpty.style.display = '';
+      } else {
+        if (shootingEmpty) shootingEmpty.style.display = 'none';
+        const vals = topShooting.map(t => parseFloat(t.avg_sog ?? t.sog) || 0);
+        const maxVal = Math.max(...vals, 1);
+        shootingEl.innerHTML = topShooting.slice(0, 10).map((t, i) => {
+          const val = parseFloat(t.avg_sog ?? t.sog) || 0;
+          const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+          const display = t.avg_sog != null ? val.toFixed(1) : String(val | 0);
+          const titleText = t.avg_sog != null
+            ? `${display} avg SOG/game (${t.games ?? '?'} games)`
+            : `${display} SOG`;
+          return `<div class="team-sog-row">
+            <span class="team-sog-rank">${i + 1}</span>
+            <div class="team-sog-team-cell">
+              <img src="${nhlLogoUrl(t.team)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
+              <span class="team-sog-abbrev">${escapeHtml(t.team || '—')}</span>
+            </div>
+            <div class="team-sog-bar-wrap"><div class="team-sog-bar-shooting" style="width: ${pct}%;" title="${titleText}"></div></div>
+            <span class="team-sog-value">${display}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+    if (allowedEl) {
+      if (allowedErr) {
+        allowedEl.innerHTML = `<p class="empty-hint" style="color:var(--warn);font-size:0.8rem;">Query error: ${escapeHtml(allowedErr)}</p>`;
+        if (allowedEmpty) allowedEmpty.style.display = 'none';
+      } else if (!mostAllowed.length) {
+        allowedEl.innerHTML = '';
+        if (allowedEmpty) allowedEmpty.style.display = '';
+      } else {
+        if (allowedEmpty) allowedEmpty.style.display = 'none';
+        const vals = mostAllowed.map(t => parseFloat(t.avg_sog_allowed ?? t.sog_allowed) || 0);
+        const maxVal = Math.max(...vals, 1);
+        allowedEl.innerHTML = mostAllowed.slice(0, 10).map((t, i) => {
+          const val = parseFloat(t.avg_sog_allowed ?? t.sog_allowed) || 0;
+          const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+          const display = t.avg_sog_allowed != null ? val.toFixed(1) : String(val | 0);
+          const titleText = t.avg_sog_allowed != null
+            ? `${display} avg SOGA/game (${t.games ?? '?'} games)`
+            : `${display} SOG allowed`;
+          return `<div class="team-sog-row">
+            <span class="team-sog-rank">${i + 1}</span>
+            <div class="team-sog-team-cell">
+              <img src="${nhlLogoUrl(t.team)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
+              <span class="team-sog-abbrev">${escapeHtml(t.team || '—')}</span>
+            </div>
+            <div class="team-sog-bar-wrap"><div class="team-sog-bar-allowed" style="width: ${pct}%;" title="${titleText}"></div></div>
+            <span class="team-sog-value">${display}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+  }
 }
 
 function renderGames() {
@@ -576,15 +801,40 @@ function renderGames() {
       })
     : allGames;
 
-  if (favoriteTeamsSet.size > 0) {
-    gamesToShow = [...gamesToShow].sort((a, b) => {
+  // Section-specific upcoming games filters
+  const gamesFilterTeam = (document.getElementById('games-filter-team')?.value || '').toUpperCase();
+  const gamesFilterPlayer = (document.getElementById('games-filter-player')?.value || '').toLowerCase().trim();
+  const gamesSortDate = document.getElementById('games-sort-date')?.value || 'asc';
+
+  if (gamesFilterTeam) {
+    gamesToShow = gamesToShow.filter(g =>
+      (g.home || '').toUpperCase() === gamesFilterTeam ||
+      (g.away || '').toUpperCase() === gamesFilterTeam
+    );
+  }
+  if (gamesFilterPlayer) {
+    gamesToShow = gamesToShow.filter(g => {
+      const preds = allPredictions.filter(p => predictionMatchesGame(p, g.home, g.away, g.game_date));
+      return preds.some(p => (p.shooter_name || '').toLowerCase().includes(gamesFilterPlayer));
+    });
+  }
+
+  // Sort by date with favorites as tiebreaker
+  gamesToShow = [...gamesToShow].sort((a, b) => {
+    const aDate = a.game_date || '';
+    const bDate = b.game_date || '';
+    const dateCompare = gamesSortDate === 'desc'
+      ? (aDate > bDate ? -1 : aDate < bDate ? 1 : 0)
+      : (aDate < bDate ? -1 : aDate > bDate ? 1 : 0);
+    if (dateCompare !== 0) return dateCompare;
+    if (favoriteTeamsSet.size > 0) {
       const aHasFav = favoriteTeamsSet.has((a.home || '').toUpperCase()) || favoriteTeamsSet.has((a.away || '').toUpperCase());
       const bHasFav = favoriteTeamsSet.has((b.home || '').toUpperCase()) || favoriteTeamsSet.has((b.away || '').toUpperCase());
       if (aHasFav && !bHasFav) return -1;
       if (!aHasFav && bHasFav) return 1;
-      return 0;
-    });
-  }
+    }
+    return 0;
+  });
 
   if (!gamesToShow.length) {
     grid.innerHTML = '<div class="empty-state">No games match the current filters.</div>';
@@ -611,29 +861,70 @@ function renderGames() {
       : null;
 
     const isExpanded = key === expandedKey;
+    const gameSortKey = grid.dataset.gameSortKey || 'predicted_sog';
+    const gameSortDir = grid.dataset.gameSortDir || 'desc';
+    const sortKeys = {
+      player: 'shooter_name',
+      team: 'player_team',
+      predicted_sog: 'predicted_sog',
+      variance: 'abs_variance_avg_last7_sog',
+      avg7: 'player_avg_sog_last7',
+      hit2: 'player_2plus_season_hit_rate',
+      hit3: 'player_3plus_season_hit_rate',
+      opp: 'opp_sog_against_rank',
+    };
+    const getSortVal = (p, k) => {
+      if (k === 'hit2') return p.player_2plus_season_hit_rate ?? p.player_2plus_last30_hit_rate ?? 0;
+      if (k === 'hit3') return p.player_3plus_season_hit_rate ?? p.player_3plus_last30_hit_rate ?? 0;
+      const v = p[sortKeys[k] || k];
+      return k === 'player' || k === 'team' ? (v || '').toString().toLowerCase() : (parseFloat(v) || 0);
+    };
+    const sortedPreds = [...predsForGame].sort((a, b) => {
+      const va = getSortVal(a, gameSortKey);
+      const vb = getSortVal(b, gameSortKey);
+      if (gameSortDir === 'asc') return va > vb ? 1 : va < vb ? -1 : 0;
+      return va < vb ? 1 : va > vb ? -1 : 0;
+    });
 
     return `
-      <div class="game-card ${isExpanded ? 'expanded' : ''}" data-key="${escapeHtml(key)}">
+      <div class="game-card ${isExpanded ? 'expanded' : ''}" data-key="${escapeHtml(key)}" data-home="${escapeHtml(home)}" data-away="${escapeHtml(away)}" data-date="${escapeHtml(dateStr(gd))}">
         <div class="matchup">
-          <span class="away-team">${escapeHtml(away)}</span>
+          <div class="matchup-team away-team-block">
+            <img src="${nhlLogoUrl(away)}" alt="${escapeHtml(away)}" class="matchup-logo" onerror="this.style.display='none';">
+            <span class="away-team">${escapeHtml(away)}</span>
+          </div>
           <span class="vs">@</span>
-          <span class="home-team">${escapeHtml(home)}</span>
+          <div class="matchup-team home-team-block">
+            <img src="${nhlLogoUrl(home)}" alt="${escapeHtml(home)}" class="matchup-logo" onerror="this.style.display='none';">
+            <span class="home-team">${escapeHtml(home)}</span>
+          </div>
         </div>
         <div class="game-date">${formatGameDate(gd, g.game_time)}</div>
         <div class="top-stats">
           ${topSog ? `<div class="top-stat">🔥 Top SOG: <strong>${num(topSog.predicted_sog)}</strong> (${escapeHtml(topSog.shooter_name)})</div>` : ''}
           ${topVar ? `<div class="top-stat">Variance: <strong>${num(topVar.abs_variance_avg_last7_sog)}</strong> (${escapeHtml(topVar.shooter_name)})</div>` : ''}
         </div>
+        ${isExpanded ? `
+        <div class="game-analysis-section" data-game-key="${escapeHtml(key)}">
+          <h4 class="game-analysis-title">Game Analysis</h4>
+          <div class="game-analysis-content"><span class="loading-inline">Loading…</span></div>
+        </div>
+        ` : ''}
         <div class="game-predictions-table">
           ${predsForGame.length ? `
-            <table>
+            <table class="game-players-table">
               <thead><tr>
-                <th>Player</th><th>Team</th><th class="numeric">Pred SOG</th><th class="numeric">Variance</th>
-                <th class="numeric">Avg 7</th><th class="numeric">2+ %</th><th class="numeric">3+ %</th><th class="numeric">Opp %</th><th></th>
+                <th>Player</th><th>Team</th>
+                <th class="numeric sortable" data-sort="predicted_sog" title="Click to sort">Pred SOG ${gameSortKey === 'predicted_sog' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th class="numeric sortable" data-sort="variance" title="Click to sort">Variance ${gameSortKey === 'variance' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th class="numeric sortable" data-sort="avg7" title="Click to sort">Avg 7 ${gameSortKey === 'avg7' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th class="numeric sortable" data-sort="hit2" title="Click to sort">2+ % ${gameSortKey === 'hit2' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th class="numeric sortable" data-sort="hit3" title="Click to sort">3+ % ${gameSortKey === 'hit3' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th class="numeric sortable" data-sort="opp" title="Click to sort">Opp % ${gameSortKey === 'opp' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th></th>
               </tr></thead>
               <tbody>
-                ${predsForGame
-                  .sort((a, b) => (parseFloat(b.predicted_sog) || 0) - (parseFloat(a.predicted_sog) || 0))
+                ${sortedPreds
                   .map(p => {
                     const oppRank = rankClass(p.opp_sog_against_rank);
                     const fav = isFavorite(p.shooter_name, p.player_team);
@@ -665,6 +956,7 @@ function renderGames() {
     card.addEventListener('click', e => {
       if (e.target.closest('.player-row')) return;
       if (e.target.closest('.close-btn')) return;
+      if (e.target.closest('th.sortable')) return;
       const key = card.dataset.key;
       grid.dataset.expandedKey = grid.dataset.expandedKey === key ? '' : key;
       renderGames();
@@ -686,7 +978,181 @@ function renderGames() {
   grid.querySelectorAll('.btn-star').forEach(btn => {
     btn.addEventListener('click', e => { e.stopPropagation(); toggleFavorite(btn.dataset.player, btn.dataset.team); });
   });
-  // Pick buttons use event delegation (handled in games-grid click)
+
+  // Sortable headers
+  grid.addEventListener('click', (e) => {
+    const th = e.target.closest('th.sortable');
+    if (!th || !th.dataset.sort) return;
+    e.stopPropagation();
+    const key = th.dataset.sort;
+    const prevKey = grid.dataset.gameSortKey || 'predicted_sog';
+    const prevDir = grid.dataset.gameSortDir || 'desc';
+    grid.dataset.gameSortKey = key;
+    grid.dataset.gameSortDir = prevKey === key && prevDir === 'desc' ? 'asc' : 'desc';
+    renderGames();
+  });
+
+  // Load game analysis for expanded card
+  if (expandedKey) loadGameAnalysis(expandedKey);
+}
+
+const gameAnalysisCache = {};
+const gameAnalysisCharts = {};
+
+function nhlLogoUrl(abbrev) {
+  if (!abbrev) return '';
+  const a = String(abbrev).trim().toUpperCase();
+  const map = { 'NJ': 'NJD', 'SJ': 'SJS', 'TB': 'TBL', 'LA': 'LAK', 'VGK': 'VGK', 'WPG': 'WPG', 'ARI': 'ARI', 'UTA': 'UTA' };
+  const code = map[a] || a;
+  return `https://assets.nhle.com/logos/nhl/svg/${code}_light.svg`;
+}
+
+async function loadGameAnalysis(gameKey) {
+  const section = document.querySelector(`.game-analysis-section[data-game-key="${gameKey}"]`);
+  if (!section) return;
+  const content = section.querySelector('.game-analysis-content');
+  if (!content) return;
+  const parts = gameKey.split('|');
+  const [gameDate, home, away] = parts.length >= 3 ? parts : ['', '', ''];
+  if (!gameDate || !home || !away) {
+    content.innerHTML = '<span class="empty-state">Unable to load game analysis.</span>';
+    return;
+  }
+  let res;
+  if (gameAnalysisCache[gameKey]) {
+    res = gameAnalysisCache[gameKey];
+  } else {
+    res = await fetchAPI('/game-analysis', { home, away, game_date: gameDate });
+    if (res && res.error) {
+      content.innerHTML = `<span class="empty-state">${escapeHtml(res.error)}</span>`;
+      return;
+    }
+    gameAnalysisCache[gameKey] = res;
+  }
+  const h = res?.home || {};
+  const a = res?.away || {};
+  const fmt = (v, type) => {
+    if (v == null) return { text: '—', cls: '' };
+    if (type === 'rank') {
+      const n = parseFloat(v);
+      if (isNaN(n)) return { text: '—', cls: '' };
+      const pctVal = n > 1 && n <= 100 ? n : n * 100;
+      const r = rankClass(pctVal / 100);
+      return { text: r.text, cls: r.className };
+    }
+    if (type === 'decimal') {
+      const n = parseFloat(v);
+      return { text: isNaN(n) ? '—' : n.toFixed(1), cls: '' };
+    }
+    if (type === 'streak') {
+      const s = String(v).trim();
+      if (!s) return { text: '—', cls: '' };
+      const isWin = /^W\d*$/i.test(s);
+      return { text: s, cls: isWin ? 'streak-win' : 'streak-loss' };
+    }
+    return { text: String(v), cls: '' };
+  };
+  const row = (label, v1, v2, type = 'decimal') => {
+    const a2 = fmt(v1, type);
+    const b2 = fmt(v2, type);
+    return `<div class="game-analysis-row"><span class="label">${escapeHtml(label)}</span><span class="val away ${a2.cls}">${escapeHtml(a2.text)}</span><span class="val home ${b2.cls}">${escapeHtml(b2.text)}</span></div>`;
+  };
+
+  // Destroy previous charts for this game
+  if (gameAnalysisCharts[gameKey]) {
+    gameAnalysisCharts[gameKey].sog?.destroy();
+    gameAnalysisCharts[gameKey].goals?.destroy();
+    gameAnalysisCharts[gameKey] = {};
+  }
+
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#6366f1';
+  const accent2 = getComputedStyle(document.documentElement).getPropertyValue('--accent-secondary').trim() || '#8b5cf6';
+  const safeId = gameKey.replace(/[^a-zA-Z0-9-]/g, '_');
+
+  content.innerHTML = `
+    <div class="game-analysis-visual">
+      <div class="game-analysis-teams">
+        <div class="game-analysis-team away">
+          <img src="${nhlLogoUrl(away)}" alt="${escapeHtml(away)}" class="team-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+          <span class="team-abbrev-fallback" style="display:none;">${escapeHtml(away)}</span>
+          <span class="team-name">${escapeHtml(away)}</span>
+          ${a.streak ? `<span class="team-streak ${(a.streak || '').startsWith('W') ? 'win' : 'loss'}">${escapeHtml(a.streak)}</span>` : ''}
+        </div>
+        <span class="game-analysis-vs">vs</span>
+        <div class="game-analysis-team home">
+          <img src="${nhlLogoUrl(home)}" alt="${escapeHtml(home)}" class="team-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+          <span class="team-abbrev-fallback" style="display:none;">${escapeHtml(home)}</span>
+          <span class="team-name">${escapeHtml(home)}</span>
+          ${h.streak ? `<span class="team-streak ${(h.streak || '').startsWith('W') ? 'win' : 'loss'}">${escapeHtml(h.streak)}</span>` : ''}
+        </div>
+      </div>
+      <div class="game-analysis-stats-table">
+        <div class="game-analysis-header"><span class="label">Metric</span><span class="val away">${escapeHtml(away)}</span><span class="val home">${escapeHtml(home)}</span></div>
+        ${row('SOG rank', a.sog_rank, h.sog_rank, 'rank')}
+        ${row('SOG against rank', a.sog_against_rank, h.sog_against_rank, 'rank')}
+        ${row('Avg SOG (7g)', a.avg_sog, h.avg_sog)}
+        ${row('Avg SOGA (7g)', a.avg_sog_against, h.avg_sog_against)}
+        ${row('Streak', a.streak, h.streak, 'streak')}
+        ${row('Avg goals for', a.avg_goals_for, h.avg_goals_for)}
+        ${row('Avg goals against', a.avg_goals_against, h.avg_goals_against)}
+      </div>
+      <div class="game-analysis-charts">
+        <div class="game-analysis-chart-wrap"><canvas id="ga-sog-${safeId}" height="140"></canvas></div>
+        <div class="game-analysis-chart-wrap"><canvas id="ga-goals-${safeId}" height="120"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  gameAnalysisCharts[gameKey] = {};
+  const canvasSog = document.getElementById(`ga-sog-${safeId}`);
+  const canvasGoals = document.getElementById(`ga-goals-${safeId}`);
+
+  if (canvasSog && window.Chart) {
+    const awaySog = parseFloat(a.avg_sog) || 0;
+    const homeSog = parseFloat(h.avg_sog) || 0;
+    const awaySoga = parseFloat(a.avg_sog_against) || 0;
+    const homeSoga = parseFloat(h.avg_sog_against) || 0;
+    const maxVal = Math.max(awaySog, homeSog, awaySoga, homeSoga, 1);
+    gameAnalysisCharts[gameKey].sog = new Chart(canvasSog, {
+      type: 'bar',
+      data: {
+        labels: ['Avg SOG', 'Avg SOGA'],
+        datasets: [
+          { label: away, data: [awaySog, awaySoga], backgroundColor: accent, borderRadius: 4 },
+          { label: home, data: [homeSog, homeSoga], backgroundColor: accent2, borderRadius: 4 },
+        ],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' }, title: { display: true, text: 'Shots on Goal (7g avg)' } },
+        scales: { x: { beginAtZero: true, max: Math.ceil(maxVal * 1.1) } },
+      },
+    });
+  }
+  if (canvasGoals && window.Chart) {
+    const awayGf = parseFloat(a.avg_goals_for) || 0;
+    const homeGf = parseFloat(h.avg_goals_for) || 0;
+    const total = awayGf + homeGf;
+    const awayPct = total > 0 ? Math.round((awayGf / total) * 100) : 50;
+    gameAnalysisCharts[gameKey].goals = new Chart(canvasGoals, {
+      type: 'doughnut',
+      data: {
+        labels: [away, home],
+        datasets: [{ data: [awayGf, homeGf], backgroundColor: [accent, accent2], borderWidth: 2 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom' },
+          title: { display: true, text: 'Avg goals for (7g)' },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw} avg · ${total > 0 ? Math.round((ctx.raw / total) * 100) : 0}%` } },
+        },
+      },
+    });
+  }
 }
 
 function renderPredictionsTable() {
@@ -987,6 +1453,7 @@ async function loadAndRenderPlayerPage(params) {
   `;
 
   document.getElementById('player-page-stats').innerHTML = `
+    ${statRowWithRank('Player SOG % rank', p.player_sog_rank, true, 'Percentile rank of player SOG vs teammates. Higher = top shooter on team.')}
     ${statRowWithRank('PP SOG % (7g)', p.player_last7_pp_sog_pct, true, 'PP SOG %')}
     ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank)}
     ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank)}
@@ -1147,8 +1614,7 @@ async function openPlayerDetail(player, team, opp, date) {
       }).join('')
     : '<p class="empty-state" style="padding:0.5rem;font-size:0.8rem;">No chart data</p>';
 
-  // 2+ / 3+ SOG % (Season, Season vs Matchup, Last 30 days)
-  // Use pctHitRate for null-friendly display: "Insufficient data" when not enough games played
+  // 2+ / 3+ SOG % (Season, Season vs Matchup, Last 30 days) - from clean_prediction_summary
   const hitRateTip = 'Not enough games played yet to calculate. Common for rookies or players with limited ice time.';
   const sogRatesEl = document.getElementById('player-detail-sog-rates');
   if (sogRatesEl) {
@@ -1164,6 +1630,7 @@ async function openPlayerDetail(player, team, opp, date) {
 
   // Player stats (formatted like team/opponent rankings: stat-row with rank-style highlighting)
   document.getElementById('player-detail-stats').innerHTML = `
+    ${statRowWithRank('Player SOG % rank', p.player_sog_rank, true, 'Percentile rank of player SOG vs teammates. Higher = top shooter on team.')}
     ${statRowWithRank('PP SOG % (7g)', p.player_last7_pp_sog_pct, true, 'PP SOG %: % of their total shots that are Powerplay Shots on goal')}
     ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank, 'Player ice time rank among teammates in last game (1 = most ice time on team)')}
     ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank, 'Player powerplay ice time rank among teammates in last game (1 = most PP ice time on team)')}
@@ -1590,6 +2057,60 @@ function showTab(tabId) {
   if (tabId === 'historical') loadHistorical();
 }
 
+// ----- Ask Genie -----
+let genieConversationId = null;
+
+function appendGenieMessage(role, content, sql, columns, data) {
+  const el = document.getElementById('genie-messages');
+  if (!el) return;
+  const msg = document.createElement('div');
+  msg.className = `genie-msg genie-msg-${role}`;
+  let html = `<div class="genie-msg-content">${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+  if (role === 'assistant' && sql) {
+    html += `<details class="genie-sql-details"><summary>SQL</summary><pre class="genie-sql">${escapeHtml(sql)}</pre></details>`;
+  }
+  if (role === 'assistant' && columns?.length && data?.length) {
+    const rows = data.slice(0, 20).map(r => '<tr>' + r.map(c => `<td>${escapeHtml(String(c ?? ''))}</td>`).join('') + '</tr>').join('');
+    html += `<div class="genie-table-wrap"><table class="genie-result-table"><thead><tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  msg.innerHTML = html;
+  el.appendChild(msg);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendGenieMessage() {
+  const input = document.getElementById('genie-input');
+  const sendBtn = document.getElementById('genie-send');
+  const errEl = document.getElementById('genie-error');
+  if (!input || !sendBtn) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  sendBtn.disabled = true;
+  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+  appendGenieMessage('user', question);
+  input.value = '';
+
+  const body = { question };
+  if (genieConversationId) body.conversation_id = genieConversationId;
+
+  const res = await fetchAPI('/genie-chat', {}, { method: 'POST', body });
+  sendBtn.disabled = false;
+
+  if (!res) {
+    appendGenieMessage('assistant', 'Sorry, the request failed. Please try again.');
+    if (errEl) { errEl.textContent = 'Connection error'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (res.error) {
+    appendGenieMessage('assistant', `Error: ${res.error}`);
+    if (errEl) { errEl.textContent = res.error; errEl.style.display = 'block'; }
+    return;
+  }
+  genieConversationId = res.conversation_id;
+  appendGenieMessage('assistant', res.text || 'No response.', res.sql, res.columns, res.data);
+}
+
 // ----- Init -----
 document.addEventListener('DOMContentLoaded', async () => {
   // Load filter options in background — don't block games/predictions if it hangs
@@ -1606,17 +2127,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     applyFilters();
   });
 
+  // Upcoming Games section-specific filter/sort controls
+  document.getElementById('games-sort-date')?.addEventListener('change', () => renderGames());
+  document.getElementById('games-filter-team')?.addEventListener('change', () => renderGames());
+  document.getElementById('games-filter-player')?.addEventListener('input', debounce(() => renderGames(), 300));
+  document.getElementById('games-clear-filters')?.addEventListener('click', () => {
+    const sortEl = document.getElementById('games-sort-date');
+    const teamEl = document.getElementById('games-filter-team');
+    const playerEl = document.getElementById('games-filter-player');
+    if (sortEl) sortEl.value = 'asc';
+    if (teamEl) teamEl.value = '';
+    if (playerEl) playerEl.value = '';
+    renderGames();
+  });
+
   document.getElementById('close-player-detail')?.addEventListener('click', closePlayerDetail);
   document.getElementById('player-detail-overlay')?.addEventListener('click', e => {
     if (e.target === e.currentTarget) closePlayerDetail();
   });
 
-  // Tab navigation
+  // Tab navigation — clear player page hash first so Dashboard/nav reliably shows main app
   document.querySelectorAll('.nav-link[data-tab]').forEach(link => {
     link.addEventListener('click', e => {
       e.preventDefault();
+      if (window.location.hash && window.location.hash.startsWith('#player')) {
+        window.location.hash = '';
+      }
       showTab(link.dataset.tab);
     });
+  });
+
+  // Logo click → go to dashboard
+  document.querySelector('.logo')?.addEventListener('click', () => {
+    if (window.location.hash && window.location.hash.startsWith('#player')) {
+      window.location.hash = '';
+    }
+    showTab('dashboard');
   });
 
   // Event delegation for Pick button - open modal
@@ -1652,6 +2198,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('historical-apply')?.addEventListener('click', () => loadHistorical());
+
+  // Hit rate leaderboard sort toggle
+  document.querySelectorAll('.btn-hit-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-hit-toggle').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      hitRateSortBy = btn.dataset.sort;
+      renderHitRateLeaderboard();
+    });
+  });
+
+  // Ask Genie
+  document.getElementById('genie-send')?.addEventListener('click', sendGenieMessage);
+  document.getElementById('genie-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendGenieMessage(); }
+  });
 
   document.getElementById('player-page-back')?.addEventListener('click', (e) => {
     e.preventDefault();

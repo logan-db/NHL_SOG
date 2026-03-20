@@ -1,0 +1,16 @@
+# NHL SOG Analytics Genie Space (reference — not included in bundle yet)
+# genie_spaces resource type is not yet widely supported in Databricks CLI.
+# Create the Genie Space manually per GENIE_SETUP.md, then add as app resource.
+#
+# When CLI supports genie_spaces (see https://github.com/databricks/cli/pull/4191):
+# 1. Uncomment include in databricks.yml
+# 2. Add genie_warehouse_id to variables
+# 3. Deploy with DATABRICKS_BUNDLE_ENGINE=direct
+#
+# resources:
+#   genie_spaces:
+#     nhl_sog_analytics:
+#       title: NHL SOG Analytics
+#       description: Ask questions about NHL player analysis, historical stats, game scores, and predicted SOG.
+#       warehouse_id: ${var.genie_warehouse_id}
+#       parent_path: ${workspace.root_path}

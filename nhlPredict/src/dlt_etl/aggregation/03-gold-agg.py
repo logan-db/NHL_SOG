@@ -87,17 +87,37 @@ def aggregate_games_data():
     # dlt.read(silver_schedule) can return stale/empty when gold runs before silver commits.
     # Bronze commits before silver; gold runs after both, so bronze is always visible to gold.
     def _read_silver(name):
-        return dlt.read(name)
+        """Read a silver DLT table. Falls back to spark.table() (UC) if DLT returns empty.
 
-    # Future cutoff: games after this date are "upcoming" (no stats yet). Use max(data) but floor at
-    # yesterday so we never mark played games (before today) as upcoming when data is stale.
+        On the first pipeline run after a pipeline delete+recreate, DLT tables are freshly
+        created and dlt.read() returns the committed state at pipeline START (empty).
+        Silver writes rows during this same run, but gold's dlt.read() still sees the
+        empty pre-run snapshot. The spark.table() fallback reads the CURRENT UC state
+        (post-silver-commit) so gold always has data.
+        """
+        df = dlt.read(name)
+        if df.isEmpty():
+            try:
+                uc_df = spark.table(f"{_catalog}.{_schema}.{name}")
+                uc_cnt = uc_df.count()
+                if uc_cnt > 0:
+                    print(f"🔄 GOLD: {name} dlt.read() empty — falling back to UC table ({uc_cnt:,} rows)")
+                    return uc_df
+            except Exception as e:
+                print(f"⚠️  GOLD: {name} UC fallback failed ({e})")
+        return df
+
+    # Future cutoff: games AFTER this date are "upcoming". Always set to yesterday so that:
+    #   - today's games (not yet played) are always treated as upcoming, and
+    #   - played games (before today) are always treated as historical.
+    # Using max(silver_max_date, yesterday) caused a bug: if the DLT pipeline's intra-run
+    # read of silver_players_ranked returned today's date, the cutoff advanced to today,
+    # dropping today's upcoming games via the orphan filter (gameId IS NULL AND date <= cutoff).
     _players_for_cutoff = _read_silver("silver_players_ranked")
     _max_date_row = _players_for_cutoff.agg(max(to_date(col("gameDate"))).alias("max_d")).first()
     _max_from_data = _max_date_row[0] if _max_date_row and _max_date_row[0] is not None else None
     _yesterday = date.today() - timedelta(days=1)
-    future_cutoff_date = (
-        builtins.max(_max_from_data, _yesterday) if _max_from_data else _yesterday
-    )
+    future_cutoff_date = _yesterday  # Always cap at yesterday; today's games must remain upcoming
     print(
         f"📊 Future cutoff date: {future_cutoff_date} "
         f"(max_data={_max_from_data}, yesterday={_yesterday}, today={date.today()})"
@@ -660,9 +680,9 @@ def aggregate_games_data():
             "_index_season_str",
         )
     )
-    # Break lineage: coalesce(..., index_playerId) keeps a plan reference to dropped columns.
-    # localCheckpoint() materializes and returns a new plan so downstream no longer references index_*.
-    upcoming_with_roster = upcoming_with_roster.localCheckpoint(eager=False)
+    # Note: localCheckpoint() is NOT used here — it fails on serverless (executors are ephemeral,
+    # same class of issue as df.cache()). Lineage is naturally broken by the select() below
+    # (_final_cols) which drops all index_* columns from the plan.
 
     upcoming_count = upcoming_with_roster.count()
     print(f"📊 Upcoming games (with roster): {upcoming_count:,}")

@@ -89,18 +89,44 @@ def main():
         parser.error("Provide migration file(s) or use --all")
 
     try:
-        from databricks.sdk import WorkspaceClient
         import psycopg
     except ImportError:
-        print("Missing dependencies. Install: pip install databricks-sdk psycopg[binary]")
+        print("Missing dependencies. Install: pip install psycopg[binary]")
         sys.exit(1)
 
-    w = WorkspaceClient(profile=args.profile) if args.profile else WorkspaceClient()
-    cred = w.postgres.generate_database_credential(endpoint=ENDPOINT_NAME)
-    username = w.current_user.me().user_name
+    # Get OAuth token via Databricks CLI (avoids SDK postgres API differences)
+    cli_args = ["databricks", "postgres", "generate-database-credential", ENDPOINT_NAME]
+    if args.profile:
+        cli_args.extend(["--profile", args.profile])
+    cli_args.extend(["-o", "json"])
+    try:
+        result = __import__("subprocess").run(cli_args, capture_output=True, text=True, check=True)
+        cred_json = __import__("json").loads(result.stdout)
+        token = cred_json.get("token")
+    except Exception as e:
+        print(f"Failed to get credential via CLI: {e}")
+        print("Fallback: trying Python SDK...")
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient(profile=args.profile) if args.profile else WorkspaceClient()
+            cred = w.postgres.generate_database_credential(endpoint=ENDPOINT_NAME)
+            token = cred.token
+            username = w.current_user.me().user_name
+        except AttributeError:
+            w = WorkspaceClient(profile=args.profile) if args.profile else WorkspaceClient()
+            username = w.current_user.me().user_name
+            raise RuntimeError(
+                "SDK postgres.generate_database_credential not available. "
+                "Use: databricks postgres generate-database-credential " + ENDPOINT_NAME
+            ) from e
+    else:
+        # Get current user from SDK for username
+        from databricks.sdk import WorkspaceClient
+        w = WorkspaceClient(profile=args.profile) if args.profile else WorkspaceClient()
+        username = w.current_user.me().user_name
     conninfo = (
         f"dbname={PGDATABASE} user={username} host={PGHOST} port={PGPORT} "
-        f"password={cred.token} sslmode={PGSSLMODE}"
+        f"password={token} sslmode={PGSSLMODE}"
     )
 
     for path in migrations:

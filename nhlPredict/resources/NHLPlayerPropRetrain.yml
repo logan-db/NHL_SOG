@@ -33,9 +33,17 @@ resources:
                   create_table_flag: '{{input.create_table}}'
                   table_name: '{{input.table_name}}'
         
+        - task_key: pre_ingest_staging
+          depends_on:
+            - task_key: upload_player_stats
+          notebook_task:
+            notebook_path: ../src/dlt_etl/ingestion/00-pre-ingest-staging.py
+            source: WORKSPACE
+          environment_key: Default
+
         - task_key: ingest_transform_job
           depends_on:
-              - task_key: upload_player_stats
+              - task_key: pre_ingest_staging
           pipeline_task:
             pipeline_id: ${resources.pipelines.NHLPlayerIngestion.id}
             full_refresh: true

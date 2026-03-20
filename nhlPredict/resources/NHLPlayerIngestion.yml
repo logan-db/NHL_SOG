@@ -33,10 +33,12 @@ resources:
         # INCREMENTAL: one_time_load="false" — Daily updates from (bronze max - lookback_days) to today. ~5–10 min.
         # Use "false" now that bronze is loaded.
         one_time_load: "false"
-        # skip_staging_ingestion: "true" = use *_staging_manual only (no API). For manual backfill from CSV/parquet.
-        skip_staging_ingestion: "false"
+        # skip_staging_ingestion: "true" = use *_staging_manual only (no API calls in DLT).
+        # API fetching is now handled exclusively by the pre_ingest_staging job task,
+        # which writes to both _staging and _staging_manual before the pipeline runs.
+        skip_staging_ingestion: "true"
         use_manual_for_historical: "false"
-        lookback_days: "2"
+        lookback_days: "5"
         schedule_future_days: "4"
       notifications:
         - email_recipients:

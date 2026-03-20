@@ -97,7 +97,9 @@ else:
     else:
         start_date = today - timedelta(days=lookback_days)
         end_date = today
-        print(f"📅 INCREMENTAL: Date range will be computed inside staging (from bronze) to avoid duplicate work")
+        print(
+            f"📅 INCREMENTAL: Date range will be computed inside staging (from bronze) to avoid duplicate work"
+        )
 
 # COMMAND ----------
 
@@ -498,13 +500,19 @@ def _fetch_player_stats_from_api(_start_date: date, _end_date: date):
                         continue
                     home_team_id = boxscore.get("homeTeam", {}).get("id")
                     away_team_id = boxscore.get("awayTeam", {}).get("id")
-                    home_players = (
-                        boxscore.get("playerByGameStats", {}).get("homeTeam", {}).get("forwards", [])
-                        + boxscore.get("playerByGameStats", {}).get("homeTeam", {}).get("defense", [])
+                    home_players = boxscore.get("playerByGameStats", {}).get(
+                        "homeTeam", {}
+                    ).get("forwards", []) + boxscore.get("playerByGameStats", {}).get(
+                        "homeTeam", {}
+                    ).get(
+                        "defense", []
                     )
-                    away_players = (
-                        boxscore.get("playerByGameStats", {}).get("awayTeam", {}).get("forwards", [])
-                        + boxscore.get("playerByGameStats", {}).get("awayTeam", {}).get("defense", [])
+                    away_players = boxscore.get("playerByGameStats", {}).get(
+                        "awayTeam", {}
+                    ).get("forwards", []) + boxscore.get("playerByGameStats", {}).get(
+                        "awayTeam", {}
+                    ).get(
+                        "defense", []
                     )
                     player_names = {}
                     if "rosterSpots" in pbp:
@@ -512,34 +520,52 @@ def _fetch_player_stats_from_api(_start_date: date, _end_date: date):
                             pid = str(rp.get("playerId"))
                             fn = rp.get("firstName", {})
                             ln = rp.get("lastName", {})
-                            fn = fn.get("default", "") if isinstance(fn, dict) else (fn if isinstance(fn, str) else "")
-                            ln = ln.get("default", "") if isinstance(ln, dict) else (ln if isinstance(ln, str) else "")
+                            fn = (
+                                fn.get("default", "")
+                                if isinstance(fn, dict)
+                                else (fn if isinstance(fn, str) else "")
+                            )
+                            ln = (
+                                ln.get("default", "")
+                                if isinstance(ln, dict)
+                                else (ln if isinstance(ln, str) else "")
+                            )
                             n = f"{fn} {ln}".strip()
                             if n:
                                 player_names[pid] = n
                     for player in home_players:
                         pid = str(player.get("playerId"))
                         player_stats = aggregate_player_stats_by_situation(
-                            pbp_data=pbp, shift_data=shifts, player_id=pid,
-                            team_id=home_team_id, team_side="home",
+                            pbp_data=pbp,
+                            shift_data=shifts,
+                            player_id=pid,
+                            team_id=home_team_id,
+                            team_side="home",
                             player_name=player_names.get(pid, ""),
                             player_team=home_team.get("abbrev"),
                             opposing_team=away_team.get("abbrev"),
-                            position=player.get("position"), is_home=True,
-                            game_id=game_id, game_date=int(date_str.replace("-", "")),
+                            position=player.get("position"),
+                            is_home=True,
+                            game_id=game_id,
+                            game_date=int(date_str.replace("-", "")),
                             season=game.get("season"),
                         )
                         all_player_stats.extend(player_stats)
                     for player in away_players:
                         pid = str(player.get("playerId"))
                         player_stats = aggregate_player_stats_by_situation(
-                            pbp_data=pbp, shift_data=shifts, player_id=pid,
-                            team_id=away_team_id, team_side="away",
+                            pbp_data=pbp,
+                            shift_data=shifts,
+                            player_id=pid,
+                            team_id=away_team_id,
+                            team_side="away",
                             player_name=player_names.get(pid, ""),
                             player_team=away_team.get("abbrev"),
                             opposing_team=home_team.get("abbrev"),
-                            position=player.get("position"), is_home=False,
-                            game_id=game_id, game_date=int(date_str.replace("-", "")),
+                            position=player.get("position"),
+                            is_home=False,
+                            game_id=game_id,
+                            game_date=int(date_str.replace("-", "")),
                             season=game.get("season"),
                         )
                         all_player_stats.extend(player_stats)
@@ -566,29 +592,28 @@ dlt.create_streaming_table(
     },
 )
 
-
 @dlt.append_flow(
     target="bronze_player_game_stats_v2_staging",
-    once=True,
-    comment="Appends new player stats each run (no overwrite = stream sees data with skipChangeCommits)",
+    comment="Streams new rows from _staging_manual into _staging (DLT checkpoint = incremental).",
 )
 def append_player_stats_staging():
-    """Fetch from API and append only NEW rows (anti-join on existing). Avoids overwrite so stream works."""
-    df = _fetch_player_game_stats_staging()
-    if df.isEmpty():
-        return df
-    try:
-        existing = spark.table(f"{catalog}.{schema}.bronze_player_game_stats_v2_staging")
-        if existing.isEmpty():
-            return df
-        keys = existing.select("playerId", "gameId", "situation").distinct()
-        new_only = df.join(keys, ["playerId", "gameId", "situation"], "left_anti")
-        new_cnt = new_only.count()
-        skipped = df.count() - new_cnt
-        print(f"📥 Staging APPEND: {new_cnt} new rows (skipped {skipped} already in staging)")
-        return new_only
-    except Exception:
-        return df
+    """Stream _staging_manual → _staging.  DLT manages the checkpoint.
+
+    pre_ingest_staging appends new API rows to _staging_manual before each run.
+    DLT's streaming checkpoint ensures only rows added since the last run are forwarded
+    to _staging on normal runs.  On first run / post-pipeline-delete (fresh checkpoint)
+    all of _staging_manual is processed — this is correct because bronze was also dropped.
+
+    This approach has no direct writes and reads no DLT-managed tables outside
+    of a @dlt.table definition, avoiding both
+    CREATE_APPEND_ONCE_FLOW_FROM_BATCH_QUERY_NOT_ALLOWED and
+    REFERENCE_DLT_DATASET_OUTSIDE_QUERY_DEFINITION.
+    """
+    return (
+        spark.readStream
+        .option("skipChangeCommits", "true")
+        .table(f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual")
+    )
 
 
 def _fetch_player_game_stats_staging():
@@ -607,9 +632,7 @@ def _fetch_player_game_stats_staging():
                 ).first()
                 if max_row and max_row["m"] is not None:
                     max_date_int = int(max_row["m"])
-                    max_date = datetime.strptime(
-                        str(max_date_int), "%Y%m%d"
-                    ).date()
+                    max_date = datetime.strptime(str(max_date_int), "%Y%m%d").date()
                     api_start = max_date - timedelta(days=lookback_days)
                     api_end = today
                     if api_start <= api_end:
@@ -628,9 +651,7 @@ def _fetch_player_game_stats_staging():
                             # API first so late-arriving corrections override manual on overlap
                             combined = incremental_df.unionByName(
                                 manual_df
-                            ).dropDuplicates(
-                                ["playerId", "gameId", "situation"]
-                            )
+                            ).dropDuplicates(["playerId", "gameId", "situation"])
                             combined_count = combined.count()
                             overlap = manual_count + inc_count - combined_count
                             print(
@@ -647,18 +668,55 @@ def _fetch_player_game_stats_staging():
                 f"⚠️ HYBRID: staging_manual read failed ({e}), falling back to incremental API"
             )
 
-    # SKIP MODE: Return empty DataFrame (actual data read from _manual tables by streaming flows)
+    # SKIP MODE: pre_ingest_staging wrote new API data to _staging_manual.
+    # Direct-write the delta (rows not yet in bronze) to _staging, then return empty so
+    # @dlt.append_flow does not try to append a batch DataFrame (which DLT disallows on
+    # streaming tables: CREATE_APPEND_ONCE_FLOW_FROM_BATCH_QUERY_NOT_ALLOWED).
     if skip_staging_ingestion:
-        print("⏭️  SKIP MODE: Staging function bypassed (manual tables used directly)")
-        print("   Streaming flows will read from _staging_manual tables")
-        # Return empty DataFrame with correct schema (DLT requires a return value)
-        from pyspark.sql.types import StructType
+        print("⏭️  SKIP MODE: Direct-writing _staging_manual delta → _staging")
+        _staging_tbl = f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
+        _manual_tbl  = f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
+        _dedup_keys  = ["playerId", "gameId", "situation"]
+        try:
+            manual_df = spark.table(_manual_tbl)
+            manual_count = manual_df.count()
+            print(f"   📂 _staging_manual: {manual_count} rows")
 
+            # Anti-join against bronze first (prevents re-streaming history when
+            # the pipeline was redeployed and the streaming checkpoint is fresh).
+            delta_df = manual_df
+            try:
+                bronze_keys = (
+                    spark.table(f"{catalog}.{schema}.bronze_player_game_stats_v2")
+                    .select(*_dedup_keys).distinct()
+                )
+                delta_df = manual_df.join(bronze_keys, _dedup_keys, "left_anti")
+            except Exception:
+                pass  # bronze empty or missing on first-ever run — write everything
+
+            # Anti-join against current _staging to avoid duplicates within staging itself
+            try:
+                staging_keys = (
+                    spark.table(_staging_tbl).select(*_dedup_keys).distinct()
+                )
+                delta_df = delta_df.join(staging_keys, _dedup_keys, "left_anti")
+            except Exception:
+                pass  # _staging empty on first run — fine
+
+            delta_cnt = delta_df.count()
+            if delta_cnt > 0:
+                delta_df.write.mode("append").saveAsTable(_staging_tbl)
+                print(f"   ✅ Direct staging write: {delta_cnt} new rows")
+            else:
+                print(f"   ✅ Direct staging write: already up-to-date (0 new rows)")
+        except Exception as e:
+            print(f"   ⚠️  SKIP MODE direct write failed ({e})")
+
+        # Always return empty — @dlt.append_flow must not double-write
         return spark.createDataFrame([], schema=get_player_game_stats_schema())
 
-    # Compute date range: DLT blocks reads to pipeline tables (bronze, staging) due to circular deps.
-    # Use staging_manual first (NOT a pipeline table — regular UC table, DLT won't intercept).
-    # Fallback: today - lookback_days (avoids 3–4 hr full load).
+    # Compute date range: use ACTUAL pipeline tables (bronze, staging) so each run extends from
+    # previous runs. staging_manual is only a fallback when bronze/staging don't exist yet.
     if one_time_load:
         _start_date = start_date
         _end_date = end_date
@@ -668,37 +726,58 @@ def _fetch_player_game_stats_staging():
         _end_date = today
         _catalog = spark.conf.get("catalog", "lr_nhl_demo")
         _schema = spark.conf.get("schema", "dev")
-        _manual_qual = f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual"
-        print(f"📅 INCREMENTAL: Resolving date range (staging_manual or lookback)")
+        print(
+            f"📅 INCREMENTAL: Resolving date range from pipeline tables (leverage previous runs)"
+        )
 
-        # 1. staging_manual — NOT in pipeline, spark.table/spark.sql should work
-        try:
-            row = spark.sql(
-                f"SELECT CAST(MAX(gameDate) AS STRING) as m FROM {_manual_qual}"
-            ).first()
-            if row and row["m"]:
-                max_val = datetime.strptime(str(row["m"]), "%Y%m%d").date()
-                _start_date = max_val - timedelta(days=lookback_days)
-                _end_date = today
-                print(f"📅 INCREMENTAL (from staging_manual max {max_val}): {_start_date} to {_end_date}")
-        except Exception as e:
-            print(f"   ⚠️ staging_manual unavailable: {e}")
-
-        # 2. Fallback: fixed lookback (bronze/staging blocked by DLT)
+        # 1. Bronze (authoritative) — spark.table reads committed Delta, no circular dep
+        for _tbl in [
+            f"{_catalog}.{_schema}.bronze_player_game_stats_v2",
+            f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging",
+            f"{_catalog}.{_schema}.bronze_player_game_stats_v2_staging_manual",
+        ]:
+            try:
+                row = spark.sql(
+                    f"SELECT CAST(MAX(gameDate) AS STRING) as m FROM {_tbl}"
+                ).first()
+                if row and row["m"]:
+                    max_val = datetime.strptime(str(row["m"]), "%Y%m%d").date()
+                    _start_date = max_val - timedelta(days=lookback_days)
+                    _end_date = today
+                    print(
+                        f"   📅 Player stats: max_date={max_val} from {_tbl.split('.')[-1]} → fetch {_start_date} to {_end_date}"
+                    )
+                    break
+            except Exception as e:
+                continue
         if _start_date is None:
             _start_date = today - timedelta(days=lookback_days)
             _end_date = today
             print(
-                f"📅 INCREMENTAL (using today-{lookback_days}d): {_start_date} to {_end_date}"
+                f"   📅 Player stats: fallback today-{lookback_days}d → {_start_date} to {_end_date}"
             )
 
-    print(f"🏒 STAGING: NHL API ingestion: {_start_date} to {_end_date}")
+    # Ensure we always include yesterday (games often finalize overnight; use runtime date)
+    _runtime_today = date.today()
+    _yesterday = _runtime_today - timedelta(days=1)
+    _end_date = _end_date if _end_date >= _yesterday else _yesterday
+    if _start_date > _end_date:
+        _start_date = _yesterday - timedelta(days=lookback_days)
+    print(
+        f"🏒 STAGING: NHL API ingestion: {_start_date} to {_end_date} (yesterday={_yesterday})"
+    )
 
-    # Generate date range
+    # Generate date range; explicitly include yesterday so we never miss it
     date_list = generate_date_range(_start_date, _end_date)
+    _yesterday_str = _yesterday.strftime("%Y-%m-%d")
+    if _yesterday_str not in date_list:
+        date_list.append(_yesterday_str)
+        date_list.sort()
     print(f"📅 Processing {len(date_list)} dates ({_start_date} to {_end_date})")
     if not date_list:
-        print("⚠️ Date list is empty (_start_date > _end_date?). Returning empty staging.")
+        print(
+            "⚠️ Date list is empty (_start_date > _end_date?). Returning empty staging."
+        )
         return spark.createDataFrame([], schema=get_player_game_stats_schema())
 
     all_player_stats = []
@@ -722,7 +801,9 @@ def _fetch_player_game_stats_staging():
             games = [g for g in all_games if g.get("gameType", 2) in (2, 3)]
             skipped = len(all_games) - len(games)
             if skipped:
-                print(f"  ⚠️ Skipped {skipped} non-NHL game(s) on {date_str} (gameType not 2/3)")
+                print(
+                    f"  ⚠️ Skipped {skipped} non-NHL game(s) on {date_str} (gameType not 2/3)"
+                )
             print(f"  🎮 Found {len(games)} NHL games on {date_str}")
 
             for game in games:
@@ -769,7 +850,9 @@ def _fetch_player_game_stats_staging():
                             missing.append("play-by-play")
                         if not shifts:
                             missing.append("shifts")
-                        print(f"      ⚠️ Missing {', '.join(missing)} for game {game_id}, skipping")
+                        print(
+                            f"      ⚠️ Missing {', '.join(missing)} for game {game_id}, skipping"
+                        )
                         continue
 
                     # Diagnostic: ensure we have plays so player stats (shots, assists, etc.) can be computed
@@ -920,6 +1003,32 @@ def _fetch_player_game_stats_staging():
     else:
         print(f"✅ No duplicates found - all {final_count} records are unique")
 
+    # Direct write to staging: bypasses DLT append_flow checkpoint state which blocks re-runs.
+    # Anti-join against _staging_manual (regular Delta table, not DLT-managed) to find new rows,
+    # then write directly to the DLT staging Delta table so the streaming flow picks them up.
+    # Returns empty df on success so @dlt.append_flow does not double-write the same rows.
+    try:
+        _staging_tbl = f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
+        _manual_tbl = f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
+        _existing = spark.table(_manual_tbl)
+        if not _existing.isEmpty():
+            _existing_keys = _existing.select("playerId", "gameId", "situation").distinct()
+            _direct_new = df_deduped.join(
+                _existing_keys, ["playerId", "gameId", "situation"], "left_anti"
+            )
+        else:
+            _direct_new = df_deduped
+        _direct_cnt = _direct_new.count()
+        if _direct_cnt > 0:
+            _direct_new.write.mode("append").saveAsTable(_staging_tbl)
+            print(f"✅ Direct staging write: {_direct_cnt} new player rows appended")
+        else:
+            print(f"📥 Direct staging write: staging already up-to-date (0 new rows)")
+        # Return empty df — direct write handled the append; @dlt.append_flow must not double-write.
+        return spark.createDataFrame([], schema=get_player_game_stats_schema())
+    except Exception as _e:
+        print(f"⚠️ Direct staging write failed (falling back to @dlt.append_flow): {_e}")
+
     return df_deduped
 
 
@@ -962,49 +1071,107 @@ def stream_player_stats_from_staging():
     """
     # Numeric columns to coalesce to 0 (stats that flow to silver/gold)
     _numeric_player_cols = [
-        "icetime", "iceTimeRank", "shifts",
-        "I_F_shotsOnGoal", "I_F_missedShots", "I_F_blockedShotAttempts", "I_F_shotAttempts",
-        "I_F_unblockedShotAttempts", "I_F_goals", "I_F_primaryAssists", "I_F_secondaryAssists",
-        "I_F_points", "I_F_rebounds", "I_F_reboundGoals", "I_F_savedShotsOnGoal",
-        "I_F_savedUnblockedShotAttempts", "I_F_hits", "I_F_takeaways", "I_F_giveaways",
-        "I_F_lowDangerShots", "I_F_mediumDangerShots", "I_F_highDangerShots",
-        "I_F_lowDangerGoals", "I_F_mediumDangerGoals", "I_F_highDangerGoals",
-        "shotsOnGoalFor", "missedShotsFor", "blockedShotAttemptsFor", "shotAttemptsFor",
-        "unblockedShotAttemptsFor", "goalsFor", "reboundsFor", "reboundGoalsFor",
-        "savedShotsOnGoalFor", "savedUnblockedShotAttemptsFor",
-        "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
-        "lowDangerGoalsFor", "mediumDangerGoalsFor", "highDangerGoalsFor",
-        "shotsOnGoalAgainst", "missedShotsAgainst", "blockedShotAttemptsAgainst",
-        "shotAttemptsAgainst", "unblockedShotAttemptsAgainst", "goalsAgainst",
-        "reboundsAgainst", "reboundGoalsAgainst", "savedShotsOnGoalAgainst",
+        "icetime",
+        "iceTimeRank",
+        "shifts",
+        "I_F_shotsOnGoal",
+        "I_F_missedShots",
+        "I_F_blockedShotAttempts",
+        "I_F_shotAttempts",
+        "I_F_unblockedShotAttempts",
+        "I_F_goals",
+        "I_F_primaryAssists",
+        "I_F_secondaryAssists",
+        "I_F_points",
+        "I_F_rebounds",
+        "I_F_reboundGoals",
+        "I_F_savedShotsOnGoal",
+        "I_F_savedUnblockedShotAttempts",
+        "I_F_hits",
+        "I_F_takeaways",
+        "I_F_giveaways",
+        "I_F_lowDangerShots",
+        "I_F_mediumDangerShots",
+        "I_F_highDangerShots",
+        "I_F_lowDangerGoals",
+        "I_F_mediumDangerGoals",
+        "I_F_highDangerGoals",
+        "shotsOnGoalFor",
+        "missedShotsFor",
+        "blockedShotAttemptsFor",
+        "shotAttemptsFor",
+        "unblockedShotAttemptsFor",
+        "goalsFor",
+        "reboundsFor",
+        "reboundGoalsFor",
+        "savedShotsOnGoalFor",
+        "savedUnblockedShotAttemptsFor",
+        "lowDangerShotsFor",
+        "mediumDangerShotsFor",
+        "highDangerShotsFor",
+        "lowDangerGoalsFor",
+        "mediumDangerGoalsFor",
+        "highDangerGoalsFor",
+        "shotsOnGoalAgainst",
+        "missedShotsAgainst",
+        "blockedShotAttemptsAgainst",
+        "shotAttemptsAgainst",
+        "unblockedShotAttemptsAgainst",
+        "goalsAgainst",
+        "reboundsAgainst",
+        "reboundGoalsAgainst",
+        "savedShotsOnGoalAgainst",
         "savedUnblockedShotAttemptsAgainst",
-        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
-        "lowDangerGoalsAgainst", "mediumDangerGoalsAgainst", "highDangerGoalsAgainst",
-        "OnIce_F_shotsOnGoal", "OnIce_F_missedShots", "OnIce_F_blockedShotAttempts",
-        "OnIce_F_shotAttempts", "OnIce_F_unblockedShotAttempts", "OnIce_F_goals",
-        "OnIce_F_lowDangerShots", "OnIce_F_mediumDangerShots", "OnIce_F_highDangerShots",
-        "OnIce_F_lowDangerGoals", "OnIce_F_mediumDangerGoals", "OnIce_F_highDangerGoals",
-        "OnIce_A_shotsOnGoal", "OnIce_A_missedShots", "OnIce_A_blockedShotAttempts",
-        "OnIce_A_shotAttempts", "OnIce_A_unblockedShotAttempts", "OnIce_A_goals",
-        "OnIce_A_lowDangerShots", "OnIce_A_mediumDangerShots", "OnIce_A_highDangerShots",
-        "OnIce_A_lowDangerGoals", "OnIce_A_mediumDangerGoals", "OnIce_A_highDangerGoals",
-        "OffIce_F_shotsOnGoal", "OffIce_F_missedShots", "OffIce_F_blockedShotAttempts",
-        "OffIce_F_shotAttempts", "OffIce_F_unblockedShotAttempts", "OffIce_F_goals",
-        "OffIce_A_shotsOnGoal", "OffIce_A_missedShots", "OffIce_A_blockedShotAttempts",
-        "OffIce_A_shotAttempts", "OffIce_A_unblockedShotAttempts", "OffIce_A_goals",
+        "lowDangerShotsAgainst",
+        "mediumDangerShotsAgainst",
+        "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst",
+        "mediumDangerGoalsAgainst",
+        "highDangerGoalsAgainst",
+        "OnIce_F_shotsOnGoal",
+        "OnIce_F_missedShots",
+        "OnIce_F_blockedShotAttempts",
+        "OnIce_F_shotAttempts",
+        "OnIce_F_unblockedShotAttempts",
+        "OnIce_F_goals",
+        "OnIce_F_lowDangerShots",
+        "OnIce_F_mediumDangerShots",
+        "OnIce_F_highDangerShots",
+        "OnIce_F_lowDangerGoals",
+        "OnIce_F_mediumDangerGoals",
+        "OnIce_F_highDangerGoals",
+        "OnIce_A_shotsOnGoal",
+        "OnIce_A_missedShots",
+        "OnIce_A_blockedShotAttempts",
+        "OnIce_A_shotAttempts",
+        "OnIce_A_unblockedShotAttempts",
+        "OnIce_A_goals",
+        "OnIce_A_lowDangerShots",
+        "OnIce_A_mediumDangerShots",
+        "OnIce_A_highDangerShots",
+        "OnIce_A_lowDangerGoals",
+        "OnIce_A_mediumDangerGoals",
+        "OnIce_A_highDangerGoals",
+        "OffIce_F_shotsOnGoal",
+        "OffIce_F_missedShots",
+        "OffIce_F_blockedShotAttempts",
+        "OffIce_F_shotAttempts",
+        "OffIce_F_unblockedShotAttempts",
+        "OffIce_F_goals",
+        "OffIce_A_shotsOnGoal",
+        "OffIce_A_missedShots",
+        "OffIce_A_blockedShotAttempts",
+        "OffIce_A_shotAttempts",
+        "OffIce_A_unblockedShotAttempts",
+        "OffIce_A_goals",
     ]
-    if skip_staging_ingestion:
-        # Skip mode: Read from _staging_manual table
-        print("⏭️  STREAMING: Reading from _staging_manual table")
-        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
-            f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
-        )
-    else:
-        # Staging APPENDS now (no overwrite) — stream sees new data with skipChangeCommits
-        print("⏭️  STREAMING: Reading from DLT staging (append-only)")
-        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
-            f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
-        )
+    # Always stream from _staging regardless of skip_staging_ingestion.
+    # pre_ingest_staging writes to _staging before DLT runs, so new data is always present.
+    # Switching tables based on mode would change the Delta table ID and corrupt the checkpoint.
+    print("⏭️  STREAMING: Reading from DLT staging (append-only)")
+    stream_df = spark.readStream.option("skipChangeCommits", "true").table(
+        f"{catalog}.{schema}.bronze_player_game_stats_v2_staging"
+    )
     # Coalesce numeric stats to 0 so silver/gold never see null
     for c in _numeric_player_cols:
         if c in stream_df.columns:
@@ -1029,64 +1196,127 @@ dlt.create_streaming_table(
     },
 )
 
-
 @dlt.append_flow(
     target="bronze_games_historical_v2_staging",
-    once=True,
-    comment="Appends new team game stats each run (no overwrite = stream sees data with skipChangeCommits)",
+    comment="Streams new rows from _staging_manual into _staging (DLT checkpoint = incremental).",
 )
 def append_games_historical_staging():
-    """Fetch from API and append only NEW rows (anti-join on existing). Avoids overwrite so stream works."""
-    df = _fetch_games_historical_staging()
-    if df.isEmpty():
-        return df
-    try:
-        existing = spark.table(f"{catalog}.{schema}.bronze_games_historical_v2_staging")
-        if existing.isEmpty():
-            return df
-        keys = existing.select("gameId", "team", "situation").distinct()
-        new_only = df.join(keys, ["gameId", "team", "situation"], "left_anti")
-        new_cnt = new_only.count()
-        skipped = df.count() - new_cnt
-        print(f"📥 Staging APPEND: {new_cnt} new rows (skipped {skipped} already in staging)")
-        return new_only
-    except Exception:
-        return df
+    """Stream _staging_manual → _staging.  DLT manages the checkpoint.
+
+    Same pattern as append_player_stats_staging — see that function for full rationale.
+    """
+    return (
+        spark.readStream
+        .option("skipChangeCommits", "true")
+        .table(f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual")
+    )
 
 
 def _fetch_games_historical_staging():
     """Fetch team game stats from API. Returns DataFrame for append_flow to filter and append."""
 
-    # SKIP MODE: Return empty DataFrame (actual data read from _manual tables by streaming flows)
+    # SKIP MODE: pre_ingest_staging wrote new API data to _staging_manual.
+    # Direct-write the delta (rows not yet in bronze) to _staging, then return empty so
+    # @dlt.append_flow does not try to append a batch DataFrame (which DLT disallows on
+    # streaming tables: CREATE_APPEND_ONCE_FLOW_FROM_BATCH_QUERY_NOT_ALLOWED).
     if skip_staging_ingestion:
-        print("⏭️  SKIP MODE: Staging function bypassed (manual tables used directly)")
-        print("   Streaming flows will read from _staging_manual tables")
-        # Return empty DataFrame with correct schema (DLT requires a return value)
+        print("⏭️  SKIP MODE: Direct-writing _staging_manual delta → _staging")
+        _staging_tbl = f"{catalog}.{schema}.bronze_games_historical_v2_staging"
+        _manual_tbl  = f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
+        _dedup_keys  = ["gameId", "team", "situation"]
+        try:
+            manual_df = spark.table(_manual_tbl)
+            manual_count = manual_df.count()
+            print(f"   📂 _staging_manual: {manual_count} rows")
+
+            # Anti-join against bronze first (prevents re-streaming history when
+            # the pipeline was redeployed and the streaming checkpoint is fresh).
+            delta_df = manual_df
+            try:
+                bronze_keys = (
+                    spark.table(f"{catalog}.{schema}.bronze_games_historical_v2")
+                    .select(*_dedup_keys).distinct()
+                )
+                delta_df = manual_df.join(bronze_keys, _dedup_keys, "left_anti")
+            except Exception:
+                pass  # bronze empty or missing on first-ever run — write everything
+
+            # Anti-join against current _staging to avoid duplicates within staging itself
+            try:
+                staging_keys = (
+                    spark.table(_staging_tbl).select(*_dedup_keys).distinct()
+                )
+                delta_df = delta_df.join(staging_keys, _dedup_keys, "left_anti")
+            except Exception:
+                pass  # _staging empty on first run — fine
+
+            delta_cnt = delta_df.count()
+            if delta_cnt > 0:
+                delta_df.write.mode("append").saveAsTable(_staging_tbl)
+                print(f"   ✅ Direct staging write: {delta_cnt} new rows")
+            else:
+                print(f"   ✅ Direct staging write: already up-to-date (0 new rows)")
+        except Exception as e:
+            print(f"   ⚠️  SKIP MODE direct write failed ({e})")
+
+        # Always return empty — @dlt.append_flow must not double-write
         return spark.createDataFrame([], schema=get_games_historical_schema())
 
-    # Compute date range (staging_manual first — not in pipeline; fallback lookback)
+    # Compute date range: use ACTUAL pipeline tables (bronze, staging) so each run extends from
+    # previous runs. Use max of games + players so we never miss dates when one is ahead.
     if one_time_load:
         _start_date = start_date
         _end_date = end_date
     else:
         _start_date = None
         _end_date = today
-        _manual_qual = f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
-        try:
-            row = spark.sql(f"SELECT CAST(MAX(gameDate) AS STRING) as m FROM {_manual_qual}").first()
-            if row and row["m"]:
-                max_date = datetime.strptime(str(row["m"]), "%Y%m%d").date()
-                _start_date = max_date - timedelta(days=lookback_days)
-                _end_date = today
-        except Exception as e:
-            print(f"   ⚠️ staging_manual for games: {e}")
+        max_date = None
+        for _tbl in [
+            f"{catalog}.{schema}.bronze_games_historical_v2",
+            f"{catalog}.{schema}.bronze_games_historical_v2_staging",
+            f"{catalog}.{schema}.bronze_player_game_stats_v2",
+            f"{catalog}.{schema}.bronze_player_game_stats_v2_staging",
+            f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual",
+            f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual",
+        ]:
+            try:
+                row = spark.sql(
+                    f"SELECT CAST(MAX(gameDate) AS STRING) as m FROM {_tbl}"
+                ).first()
+                if row and row["m"]:
+                    d = datetime.strptime(str(row["m"]), "%Y%m%d").date()
+                    max_date = d if (max_date is None or d > max_date) else max_date
+            except Exception:
+                pass
+        if max_date is not None:
+            _start_date = max_date - timedelta(days=lookback_days)
+            _end_date = today
+            print(
+                f"   📅 Games: max_date={max_date} (from pipeline tables) → fetch {_start_date} to {_end_date}"
+            )
         if _start_date is None:
             _start_date = today - timedelta(days=lookback_days)
             _end_date = today
+            print(
+                f"   📅 Games: fallback today-{lookback_days}d → {_start_date} to {_end_date}"
+            )
 
-    print(f"🏒 STAGING: Team game stats ingestion: {_start_date} to {_end_date}")
+    # Ensure we always include yesterday (games often finalize overnight; use runtime date)
+    _runtime_today = date.today()
+    _yesterday = _runtime_today - timedelta(days=1)
+    _end_date = _end_date if _end_date >= _yesterday else _yesterday
+    if _start_date > _end_date:
+        _start_date = _yesterday - timedelta(days=lookback_days)
+    print(
+        f"🏒 STAGING: Team game stats ingestion: {_start_date} to {_end_date} (yesterday={_yesterday})"
+    )
 
+    # Generate date range; explicitly include yesterday so we never miss it
     date_list = generate_date_range(_start_date, _end_date)
+    _yesterday_str = _yesterday.strftime("%Y-%m-%d")
+    if _yesterday_str not in date_list:
+        date_list.append(_yesterday_str)
+        date_list.sort()
     all_team_stats = []
 
     for date_str in date_list:
@@ -1098,6 +1328,9 @@ def _fetch_games_historical_staging():
             )
 
             if not schedule or "games" not in schedule:
+                print(
+                    f"  ⚠️ Games historical: No schedule/games for {date_str} (API may have delay or no games)"
+                )
                 continue
 
             games = schedule["games"]
@@ -1122,6 +1355,14 @@ def _fetch_games_historical_staging():
                     )
 
                     if not pbp or not boxscore:
+                        missing = []
+                        if not pbp:
+                            missing.append("play-by-play")
+                        if not boxscore:
+                            missing.append("boxscore")
+                        print(
+                            f"      ⚠️ Game {game_id}: Missing {', '.join(missing)}, skipping"
+                        )
                         continue
 
                     # Get team IDs from boxscore
@@ -1190,20 +1431,59 @@ def _fetch_games_historical_staging():
 
     # Coalesce numeric columns to 0 so silver/gold never see null (API gaps or sparse manual data)
     _numeric_int_cols = [
-        "shotsOnGoalFor", "shotsOnGoalAgainst", "goalsFor", "goalsAgainst",
-        "missedShotsFor", "missedShotsAgainst", "blockedShotAttemptsFor", "blockedShotAttemptsAgainst",
-        "shotAttemptsFor", "shotAttemptsAgainst", "unblockedShotAttemptsFor", "unblockedShotAttemptsAgainst",
-        "savedShotsOnGoalFor", "savedShotsOnGoalAgainst", "savedUnblockedShotAttemptsFor", "savedUnblockedShotAttemptsAgainst",
-        "reboundsFor", "reboundGoalsFor", "reboundsAgainst", "reboundGoalsAgainst",
-        "playContinuedInZoneFor", "playContinuedOutsideZoneFor", "playContinuedInZoneAgainst", "playContinuedOutsideZoneAgainst",
-        "penaltiesFor", "penaltiesAgainst", "faceOffsWonFor", "faceOffsWonAgainst",
-        "hitsFor", "hitsAgainst", "takeawaysFor", "takeawaysAgainst", "giveawaysFor", "giveawaysAgainst",
-        "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
-        "lowDangerGoalsFor", "mediumDangerGoalsFor", "highDangerGoalsFor",
-        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
-        "lowDangerGoalsAgainst", "mediumDangerGoalsAgainst", "highDangerGoalsAgainst",
+        "shotsOnGoalFor",
+        "shotsOnGoalAgainst",
+        "goalsFor",
+        "goalsAgainst",
+        "missedShotsFor",
+        "missedShotsAgainst",
+        "blockedShotAttemptsFor",
+        "blockedShotAttemptsAgainst",
+        "shotAttemptsFor",
+        "shotAttemptsAgainst",
+        "unblockedShotAttemptsFor",
+        "unblockedShotAttemptsAgainst",
+        "savedShotsOnGoalFor",
+        "savedShotsOnGoalAgainst",
+        "savedUnblockedShotAttemptsFor",
+        "savedUnblockedShotAttemptsAgainst",
+        "reboundsFor",
+        "reboundGoalsFor",
+        "reboundsAgainst",
+        "reboundGoalsAgainst",
+        "playContinuedInZoneFor",
+        "playContinuedOutsideZoneFor",
+        "playContinuedInZoneAgainst",
+        "playContinuedOutsideZoneAgainst",
+        "penaltiesFor",
+        "penaltiesAgainst",
+        "faceOffsWonFor",
+        "faceOffsWonAgainst",
+        "hitsFor",
+        "hitsAgainst",
+        "takeawaysFor",
+        "takeawaysAgainst",
+        "giveawaysFor",
+        "giveawaysAgainst",
+        "lowDangerShotsFor",
+        "mediumDangerShotsFor",
+        "highDangerShotsFor",
+        "lowDangerGoalsFor",
+        "mediumDangerGoalsFor",
+        "highDangerGoalsFor",
+        "lowDangerShotsAgainst",
+        "mediumDangerShotsAgainst",
+        "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst",
+        "mediumDangerGoalsAgainst",
+        "highDangerGoalsAgainst",
     ]
-    _numeric_float_cols = ["corsiPercentage", "fenwickPercentage", "xGoalsFor", "xGoalsAgainst"]
+    _numeric_float_cols = [
+        "corsiPercentage",
+        "fenwickPercentage",
+        "xGoalsFor",
+        "xGoalsAgainst",
+    ]
     for c in _numeric_int_cols:
         if c in df.columns:
             df = df.withColumn(c, coalesce(col(c), lit(0)))
@@ -1224,6 +1504,32 @@ def _fetch_games_historical_staging():
         print(f"   Final count: {final_count} unique records")
     else:
         print(f"✅ No duplicates found - all {final_count} records are unique")
+
+    # Direct write to staging: bypasses DLT append_flow checkpoint state which blocks re-runs.
+    # Anti-join against _staging_manual (regular Delta table, not DLT-managed) to find new rows,
+    # then write directly to the DLT staging Delta table so the streaming flow picks them up.
+    # Returns empty df on success so @dlt.append_flow does not double-write the same rows.
+    try:
+        _games_staging_tbl = f"{catalog}.{schema}.bronze_games_historical_v2_staging"
+        _games_manual_tbl = f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
+        _existing_games = spark.table(_games_manual_tbl)
+        if not _existing_games.isEmpty():
+            _existing_game_keys = _existing_games.select("gameId", "team", "situation").distinct()
+            _direct_new_games = df_deduped.join(
+                _existing_game_keys, ["gameId", "team", "situation"], "left_anti"
+            )
+        else:
+            _direct_new_games = df_deduped
+        _direct_games_cnt = _direct_new_games.count()
+        if _direct_games_cnt > 0:
+            _direct_new_games.write.mode("append").saveAsTable(_games_staging_tbl)
+            print(f"✅ Direct staging write: {_direct_games_cnt} new game rows appended")
+        else:
+            print(f"📥 Direct staging write: games staging already up-to-date (0 new rows)")
+        # Return empty df — direct write handled the append; @dlt.append_flow must not double-write.
+        return spark.createDataFrame([], schema=get_games_historical_schema())
+    except Exception as _e:
+        print(f"⚠️ Direct games staging write failed (falling back to @dlt.append_flow): {_e}")
 
     return df_deduped
 
@@ -1263,34 +1569,63 @@ def stream_games_from_staging():
     - skipChangeCommits: staging APPENDS so stream sees new data (no overwrites)
     - Coalesce numeric stats to 0 so silver/gold never see null (manual table or API gaps)
     """
-    if skip_staging_ingestion:
-        # Skip mode: Read from _staging_manual table
-        print("⏭️  STREAMING: Reading from _staging_manual table")
-        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
-            f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
-        )
-    else:
-        # Staging APPENDS now (no overwrite) — stream sees new data with skipChangeCommits
-        print("⏭️  STREAMING: Reading from DLT staging (append-only)")
-        stream_df = spark.readStream.option("skipChangeCommits", "true").table(
-            f"{catalog}.{schema}.bronze_games_historical_v2_staging"
-        )
+    # Always stream from _staging regardless of skip_staging_ingestion.
+    # pre_ingest_staging writes to _staging before DLT runs, so new data is always present.
+    # Switching tables based on mode would change the Delta table ID and corrupt the checkpoint.
+    print("⏭️  STREAMING: Reading from DLT staging (append-only)")
+    stream_df = spark.readStream.option("skipChangeCommits", "true").table(
+        f"{catalog}.{schema}.bronze_games_historical_v2_staging"
+    )
 
     # Coalesce all numeric game stats to 0 so silver/gold never see null
     # (_staging_manual may have nulls if created from older source)
     _numeric_game_cols = [
-        "shotsOnGoalFor", "shotsOnGoalAgainst", "goalsFor", "goalsAgainst",
-        "missedShotsFor", "missedShotsAgainst", "blockedShotAttemptsFor", "blockedShotAttemptsAgainst",
-        "shotAttemptsFor", "shotAttemptsAgainst", "unblockedShotAttemptsFor", "unblockedShotAttemptsAgainst",
-        "savedShotsOnGoalFor", "savedShotsOnGoalAgainst", "savedUnblockedShotAttemptsFor", "savedUnblockedShotAttemptsAgainst",
-        "reboundsFor", "reboundGoalsFor", "reboundsAgainst", "reboundGoalsAgainst",
-        "playContinuedInZoneFor", "playContinuedOutsideZoneFor", "playContinuedInZoneAgainst", "playContinuedOutsideZoneAgainst",
-        "penaltiesFor", "penaltiesAgainst", "faceOffsWonFor", "faceOffsWonAgainst",
-        "hitsFor", "hitsAgainst", "takeawaysFor", "takeawaysAgainst", "giveawaysFor", "giveawaysAgainst",
-        "lowDangerShotsFor", "mediumDangerShotsFor", "highDangerShotsFor",
-        "lowDangerGoalsFor", "mediumDangerGoalsFor", "highDangerGoalsFor",
-        "lowDangerShotsAgainst", "mediumDangerShotsAgainst", "highDangerShotsAgainst",
-        "lowDangerGoalsAgainst", "mediumDangerGoalsAgainst", "highDangerGoalsAgainst",
+        "shotsOnGoalFor",
+        "shotsOnGoalAgainst",
+        "goalsFor",
+        "goalsAgainst",
+        "missedShotsFor",
+        "missedShotsAgainst",
+        "blockedShotAttemptsFor",
+        "blockedShotAttemptsAgainst",
+        "shotAttemptsFor",
+        "shotAttemptsAgainst",
+        "unblockedShotAttemptsFor",
+        "unblockedShotAttemptsAgainst",
+        "savedShotsOnGoalFor",
+        "savedShotsOnGoalAgainst",
+        "savedUnblockedShotAttemptsFor",
+        "savedUnblockedShotAttemptsAgainst",
+        "reboundsFor",
+        "reboundGoalsFor",
+        "reboundsAgainst",
+        "reboundGoalsAgainst",
+        "playContinuedInZoneFor",
+        "playContinuedOutsideZoneFor",
+        "playContinuedInZoneAgainst",
+        "playContinuedOutsideZoneAgainst",
+        "penaltiesFor",
+        "penaltiesAgainst",
+        "faceOffsWonFor",
+        "faceOffsWonAgainst",
+        "hitsFor",
+        "hitsAgainst",
+        "takeawaysFor",
+        "takeawaysAgainst",
+        "giveawaysFor",
+        "giveawaysAgainst",
+        "lowDangerShotsFor",
+        "mediumDangerShotsFor",
+        "highDangerShotsFor",
+        "lowDangerGoalsFor",
+        "mediumDangerGoalsFor",
+        "highDangerGoalsFor",
+        "lowDangerShotsAgainst",
+        "mediumDangerShotsAgainst",
+        "highDangerShotsAgainst",
+        "lowDangerGoalsAgainst",
+        "mediumDangerGoalsAgainst",
+        "highDangerGoalsAgainst",
     ]
     _float_cols = ["corsiPercentage", "fenwickPercentage", "xGoalsFor", "xGoalsAgainst"]
     for c in _numeric_game_cols:
@@ -1342,9 +1677,6 @@ def ingest_schedule_v2():
     print(f"📅 Fetching NHL schedule (historical + future games)")
 
     # PART 1: Get historical games from games_historical
-    # ROOT CAUSE FIX: dlt.read(bronze_games) can return stale data when ingest_schedule runs in the
-    # same pipeline update (stream may not have committed yet). Supplement with staging to capture
-    # the current run's batch and avoid schedule gaps (e.g. missing March 11-13).
     if skip_staging_ingestion:
         print(f"   📊 Historical: Reading from _staging_manual table")
         games_df = spark.table(
@@ -1359,26 +1691,44 @@ def ingest_schedule_v2():
                     games_df = spark.table(
                         f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
                     )
-                print(f"   📊 Historical: Fallback to spark.table (stream not committed yet)")
+                print(f"   📊 Historical: Fallback to spark.table")
             except Exception:
                 pass
         if not games_df.isEmpty():
-            print(f"   📊 Historical: Reading from streaming table")
+            print(f"   📊 Historical: Reading from bronze_games_historical_v2")
 
-        # Supplement with staging to capture current run's batch (avoids schedule date gaps)
+        # Supplement with staging_manual to capture games not yet promoted to bronze.
+        # Using spark.table(_staging_manual) instead of dlt.read(_staging) avoids the
+        # streaming-checkpoint race: dlt.read returns 0 rows once the streaming flow
+        # has consumed the batch, whereas staging_manual is a plain Delta table that
+        # always holds the complete, up-to-date dataset.
         try:
-            staging_df = dlt.read("bronze_games_historical_v2_staging")
-            if not staging_df.isEmpty():
+            manual_df = spark.table(
+                f"{catalog}.{schema}.bronze_games_historical_v2_staging_manual"
+            )
+            if not manual_df.isEmpty():
                 needed = ["gameId", "gameDate", "team", "opposingTeam", "home_or_away"]
-                staging_subset = staging_df.select([c for c in needed if c in staging_df.columns])
-                games_subset = games_df.select([c for c in needed if c in games_df.columns])
-                if set(staging_subset.columns) >= {"gameId", "gameDate", "team", "home_or_away"}:
+                manual_subset = manual_df.select(
+                    [c for c in needed if c in manual_df.columns]
+                )
+                games_subset = games_df.select(
+                    [c for c in needed if c in games_df.columns]
+                )
+                if set(manual_subset.columns) >= {
+                    "gameId",
+                    "gameDate",
+                    "team",
+                    "home_or_away",
+                }:
                     games_df = games_df.unionByName(
-                        staging_subset.select(games_subset.columns), allowMissingColumns=True
+                        manual_subset.select(games_subset.columns),
+                        allowMissingColumns=True,
                     ).dropDuplicates(["gameId", "gameDate", "team"])
-                    print(f"   📊 Historical: Supplemented with staging (avoids date gaps)")
+                    print(
+                        f"   📊 Historical: Supplemented with staging_manual (no date gaps)"
+                    )
         except Exception as e:
-            print(f"   ⚠️  Staging supplement skipped: {e}")
+            print(f"   ⚠️  Staging_manual supplement skipped: {e}")
 
     # Derive historical schedule
     # Use max() not first() — first() is order-dependent and can yield null HOME/AWAY
@@ -1404,7 +1754,9 @@ def ingest_schedule_v2():
     # when the pipeline runs across the UTC date boundary (e.g. early Feb 26 UTC = still Feb 25 in Eastern;
     # NHL games are North American). Fetches: today-1, today, today+1, ..., today+(schedule_future_days-2).
     schedule_future_days = int(spark.conf.get("schedule_future_days", "8"))
-    print(f"   📅 Fetching future schedule from NHL API (yesterday + next {schedule_future_days} days)...")
+    print(
+        f"   📅 Fetching future schedule from NHL API (yesterday + next {schedule_future_days} days)..."
+    )
 
     future_games = []
     for i in range(-1, schedule_future_days - 1):
@@ -1513,11 +1865,9 @@ def expand_schedule_for_gold():
     from pyspark.sql.functions import col, to_date, date_format, regexp_replace
 
     _bronze = dlt.read("bronze_schedule_2023_v2")
-    schedule = (
-        _bronze
-        .withColumn("DAY", regexp_replace(col("DAY"), "\\.", ""))
-        .withColumn("DATE", to_date(col("DATE")))
-    )
+    schedule = _bronze.withColumn(
+        "DAY", regexp_replace(col("DAY"), "\\.", "")
+    ).withColumn("DATE", to_date(col("DATE")))
     home = schedule.withColumn("TEAM_ABV", col("HOME"))
     away = schedule.withColumn("TEAM_ABV", col("AWAY"))
     return home.unionByName(away)
@@ -1557,7 +1907,9 @@ def ingest_skaters_v2():
         player_stats = dlt.read("bronze_player_game_stats_v2")
         if player_stats.isEmpty():
             try:
-                player_stats = spark.table(f"{catalog}.{schema}.bronze_player_game_stats_v2")
+                player_stats = spark.table(
+                    f"{catalog}.{schema}.bronze_player_game_stats_v2"
+                )
                 if player_stats.isEmpty():
                     player_stats = spark.table(
                         f"{catalog}.{schema}.bronze_player_game_stats_v2_staging_manual"
