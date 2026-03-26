@@ -161,15 +161,57 @@ function rankClass(v) {
   return { text: pct, className: 'rank-low' };
 }
 
-/** Ice time rank (int): lower = better, 1 = most ice time. Returns { text, className }. */
+/**
+ * Percentile rank 0–1 displayed as ordinal "X of Y".
+ *
+ * Default (inverted=false): rank 1 = best (highest perc_rank).
+ *   perc_rank formula: perc = (total - rank) / (total - 1)
+ *   → rank = total - perc * (total - 1)
+ *   Color: high perc_rank = green.
+ *
+ * Inverted (inverted=true): rank 1 = best (lowest perc_rank), e.g. SOG Against
+ *   where fewest shots allowed = strongest defense = rank 1.
+ *   → rank = 1 + (total - 1) * perc_rank
+ *   Color: low perc_rank = green (rank 1 = strong defense).
+ */
+function rankClassOrdinal(v, total, inverted = false) {
+  if (v == null) return { text: '—', className: '' };
+  const n = parseFloat(v);
+  const t = parseInt(total, 10);
+  if (isNaN(n) || isNaN(t) || t <= 0) return { text: '—', className: '' };
+  const rank = inverted
+    ? Math.round(1 + (t - 1) * n)
+    : Math.round(t - (t - 1) * n);
+  const colorN = inverted ? 1 - n : n;
+  const text = `${rank} of ${t}`;
+  if (colorN >= 0.9) return { text, className: 'rank-best' };
+  if (colorN >= 0.7) return { text, className: 'rank-good' };
+  if (colorN >= 0.5) return { text, className: 'rank-ok' };
+  return { text, className: 'rank-low' };
+}
+
+/** Ice time rank (int): lower = better, 1 = most ice time. Returns { text, className }.
+ *  Assumes ~18-20 skaters per team: top 3 = elite, top 6 = above average, top 12 = average. */
 function iceTimeRankClass(v) {
   if (v == null) return { text: '—', className: '' };
   const n = parseInt(v, 10);
   if (isNaN(n)) return { text: '—', className: '' };
-  if (n <= 1) return { text: String(n), className: 'rank-best' };
-  if (n <= 2) return { text: String(n), className: 'rank-good' };
-  if (n <= 4) return { text: String(n), className: 'rank-ok' };
+  if (n <= 3) return { text: String(n), className: 'rank-best' };
+  if (n <= 6) return { text: String(n), className: 'rank-good' };
+  if (n <= 12) return { text: String(n), className: 'rank-ok' };
   return { text: String(n), className: 'rank-low' };
+}
+
+/** PP SOG % (raw decimal, e.g. 0.33 = 33%): higher = better. Returns { text, className }. */
+function ppSOGPctClass(v) {
+  if (v == null) return { text: '—', className: '' };
+  const n = parseFloat(v);
+  if (isNaN(n)) return { text: '—', className: '' };
+  const pct = (n * 100).toFixed(1) + '%';
+  if (n >= 0.25) return { text: pct, className: 'rank-best' };
+  if (n >= 0.12) return { text: pct, className: 'rank-good' };
+  if (n >= 0.05) return { text: pct, className: 'rank-ok' };
+  return { text: pct, className: 'rank-low' };
 }
 
 function escapeHtml(s) {
@@ -366,6 +408,7 @@ async function addPick(gameDate, home, away, playerName, playerTeam, opposingTea
 // ----- Games + predictions combined -----
 let allGames = [];
 let allPredictions = [];
+let gamesView = 'today'; // 'today' | 'tomorrow'
 
 function renderFavoriteTeamsChips() {
   const chipsEl = document.getElementById('favorite-teams-chips');
@@ -410,7 +453,7 @@ let hitRateData = [];
 let hitRateSortBy = '2plus';
 
 async function loadHitRateLeaderboard() {
-  const data = await fetchAPI('/hit-rate-leaderboard').catch(() => null);
+  const data = await fetchAPI('/hit-rate-leaderboard', { client_date: getLocalDateString() }).catch(() => null);
   hitRateData = data?.players || [];
   renderHitRateLeaderboard();
 }
@@ -482,6 +525,14 @@ function renderHitRateLeaderboard() {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (event, elements) => {
+        if (!elements.length) return;
+        const p = sorted[elements[0].index];
+        if (p) navigateToPlayerPage(p.shooter_name, p.player_team, p.opposing_team, p.game_date);
+      },
+      onHover: (event, elements) => {
+        event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+      },
       plugins: {
         legend: {
           position: 'top',
@@ -498,6 +549,7 @@ function renderHitRateLeaderboard() {
                 lines.push(`2+ Last 30d: ${p.hit_rate_2plus_30d}%`);
               if (hitRateSortBy === '3plus' && p.hit_rate_3plus_30d != null)
                 lines.push(`3+ Last 30d: ${p.hit_rate_3plus_30d}%`);
+              lines.push('Click to view player analysis →');
               return lines;
             },
           },
@@ -521,21 +573,23 @@ function renderHitRateLeaderboard() {
 }
 
 async function loadData() {
-  // Fetch Latest Results and season team SOG in parallel
-  Promise.all([
-    fetchAPI('/yesterday-results', { client_date: getLocalDateString() }),
-    fetchAPI('/team-season-sog'),
-  ]).then(([res, seasonSog]) => {
-    renderYesterdayResults(res, seasonSog);
-  }).catch(e => { console.warn('yesterday-results failed:', e); renderYesterdayResults(null, null); });
+  // Fetch Latest Results (independent from team season SOG)
+  fetchAPI('/yesterday-results', { client_date: getLocalDateString() })
+    .then(res => renderYesterdayResults(res))
+    .catch(e => { console.warn('yesterday-results failed:', e); renderYesterdayResults(null); });
+
+  // Season team SOG rankings load separately into their own section
+  loadTeamSeasonSog();
 
   // Load hit rate leaderboard independently (non-blocking)
   loadHitRateLeaderboard();
 
   try {
     const [gamesRes, predRes, favRes] = await Promise.all([
-      fetchAPI('/upcoming-games'),
-      fetchAPI('/upcoming-predictions', getFilterParams()),
+      fetchAPI('/upcoming-games', { view: gamesView, client_date: getLocalDateString() }),
+      gamesView === 'today'
+        ? fetchAPI('/upcoming-predictions', { ...getFilterParams(), by_date: 'true', game_date: getLocalDateString() })
+        : fetchAPI('/upcoming-predictions', getFilterParams()),
       fetchAPI('/favorites').then(d => { if (d?.favorites) favoriteSet = new Set(d.favorites.map(f => `${f.player_name}|${f.player_team}`)); return d; }),
       fetchAPI('/favorite-teams').then(d => { if (d?.teams) favoriteTeamsSet = new Set((d.teams || []).map(t => (t.team || '').toUpperCase())); return d; }).catch(() => null),
     ]);
@@ -579,9 +633,9 @@ function renderTopPicks() {
   }
   const maxPred = Math.max(...topN.map(p => parseFloat(p.predicted_sog) || 0), 1);
   const SOG_TOOLTIP = 'Predicted shots on goal for this game';
-  const OPP_TOOLTIP = "Opponent's SOG-against rank (percentile). Lower = opponent allows more shots = better for this player.";
+  const OPP_TOOLTIP = "Opponent's SOG-against rank (1 of 32 = fewest shots allowed = strongest defense; 32 of 32 = softest defense).";
   grid.innerHTML = topN.map(p => {
-    const oppRank = rankClass(p.opp_sog_against_rank);
+    const oppRank = rankClassOrdinal(p.opp_sog_against_rank, 32, true);
     const predVal = parseFloat(p.predicted_sog) || 0;
     const barPct = maxPred > 0 ? (predVal / maxPred) * 100 : 0;
     return `
@@ -605,7 +659,7 @@ function renderTopPicks() {
   });
 }
 
-function renderYesterdayResults(data, seasonSog) {
+function renderYesterdayResults(data) {
   const headingEl = document.getElementById('yesterday-heading');
   const subtitleEl = document.getElementById('yesterday-subtitle');
   const scoresEl = document.getElementById('yesterday-scores');
@@ -616,10 +670,6 @@ function renderYesterdayResults(data, seasonSog) {
 
   const scores = data?.scores || [];
   const shooters = data?.top_shooters || [];
-  // Use season averages for Top/Bottom Teams when available
-  const teamSog = (seasonSog && ((seasonSog.top_shooting?.length || 0) > 0 || (seasonSog.most_allowed?.length || 0) > 0))
-    ? seasonSog
-    : (data?.team_sog_rankings || { top_shooting: [], most_allowed: [] });
   const daysAgo = data?.days_ago;
   const isYesterday = data?.is_yesterday;
   const dataStale = data?.data_stale;
@@ -689,88 +739,90 @@ function renderYesterdayResults(data, seasonSog) {
     }).join('');
   }
 
-  // Top / Bottom Teams (always visible under Yesterday's Results)
+}
+
+// ----- Season Team SOG Rankings (standalone section) -----
+let teamSeasonSogData = null;
+let teamSeasonShowAll = false;
+
+async function loadTeamSeasonSog() {
+  const data = await fetchAPI('/team-season-sog').catch(() => null);
+  teamSeasonSogData = data;
+  renderTeamSeasonSog(data, teamSeasonShowAll);
+}
+
+function renderTeamSeasonSog(data, showAll) {
   const shootingEl = document.getElementById('team-sog-shooting');
   const allowedEl = document.getElementById('team-sog-allowed');
   const shootingEmpty = document.getElementById('team-sog-shooting-empty');
   const allowedEmpty = document.getElementById('team-sog-allowed-empty');
-  const teamSogContainer = document.getElementById('yesterday-team-sog');
-  if (teamSogContainer) {
-    const topShooting = teamSog.top_shooting || [];
-    const mostAllowed = teamSog.most_allowed || [];
-    const topErr = teamSog._top_error;
-    const allowedErr = teamSog._allowed_error;
-    // Detect whether data is season averages (has avg_sog) or single-game (has sog)
-    const isSeasonData = topShooting.length > 0
-      ? (topShooting[0].avg_sog != null)
-      : (mostAllowed.length > 0 && mostAllowed[0].avg_sog_allowed != null);
-    teamSogContainer.style.display = '';
+  if (!shootingEl || !allowedEl) return;
 
-    // Update subtitles to reflect data type
-    const shootingSubtitleEl = document.getElementById('team-sog-shooting-card')?.querySelector('.team-sog-subtitle');
-    const allowedSubtitleEl = document.getElementById('team-sog-allowed-card')?.querySelector('.team-sog-subtitle');
-    if (shootingSubtitleEl) shootingSubtitleEl.textContent = isSeasonData ? 'Top Shooting (Season Avg SOG)' : 'Top Shooting';
-    if (allowedSubtitleEl) allowedSubtitleEl.textContent = isSeasonData ? 'Soft Defense (Season Avg SOGA)' : 'Most SOG Allowed';
+  const topShooting = data?.top_shooting || [];
+  const mostAllowed = data?.most_allowed || [];
+  const topErr = data?._top_error;
+  const allowedErr = data?._allowed_error;
+  const limit = showAll ? 32 : 10;
 
-    if (shootingEl) {
-      if (topErr) {
-        shootingEl.innerHTML = `<p class="empty-hint" style="color:var(--warn);font-size:0.8rem;">Query error: ${escapeHtml(topErr)}</p>`;
-        if (shootingEmpty) shootingEmpty.style.display = 'none';
-      } else if (!topShooting.length) {
-        shootingEl.innerHTML = '';
-        if (shootingEmpty) shootingEmpty.style.display = '';
-      } else {
-        if (shootingEmpty) shootingEmpty.style.display = 'none';
-        const vals = topShooting.map(t => parseFloat(t.avg_sog ?? t.sog) || 0);
-        const maxVal = Math.max(...vals, 1);
-        shootingEl.innerHTML = topShooting.slice(0, 10).map((t, i) => {
-          const val = parseFloat(t.avg_sog ?? t.sog) || 0;
-          const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
-          const display = t.avg_sog != null ? val.toFixed(1) : String(val | 0);
-          const titleText = t.avg_sog != null
-            ? `${display} avg SOG/game (${t.games ?? '?'} games)`
-            : `${display} SOG`;
-          return `<div class="team-sog-row">
-            <span class="team-sog-rank">${i + 1}</span>
-            <div class="team-sog-team-cell">
-              <img src="${nhlLogoUrl(t.team)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
-              <span class="team-sog-abbrev">${escapeHtml(t.team || '—')}</span>
-            </div>
-            <div class="team-sog-bar-wrap"><div class="team-sog-bar-shooting" style="width: ${pct}%;" title="${titleText}"></div></div>
-            <span class="team-sog-value">${display}</span>
-          </div>`;
-        }).join('');
-      }
+  if (shootingEl) {
+    if (topErr) {
+      shootingEl.innerHTML = `<p class="empty-hint" style="color:var(--warn);font-size:0.8rem;">Query error: ${escapeHtml(topErr)}</p>`;
+      if (shootingEmpty) shootingEmpty.style.display = 'none';
+    } else if (!topShooting.length) {
+      shootingEl.innerHTML = '';
+      if (shootingEmpty) shootingEmpty.style.display = '';
+    } else {
+      if (shootingEmpty) shootingEmpty.style.display = 'none';
+      const slice = topShooting.slice(0, limit);
+      const vals = slice.map(t => parseFloat(t.avg_sog ?? t.sog) || 0);
+      const maxVal = Math.max(...vals, 1);
+      shootingEl.innerHTML = slice.map((t, i) => {
+        const val = parseFloat(t.avg_sog ?? t.sog) || 0;
+        const barPct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+        const display = t.avg_sog != null ? val.toFixed(1) : String(val | 0);
+        const titleText = `${display} avg SOG/game (${t.games ?? '?'} games)`;
+        return `<div class="team-sog-row">
+          <span class="team-sog-rank">${i + 1}</span>
+          <div class="team-sog-team-cell">
+            <img src="${nhlLogoUrl(t.team)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
+            <span class="team-sog-abbrev">${escapeHtml(t.team || '—')}</span>
+          </div>
+          <div class="team-sog-bar-wrap"><div class="team-sog-bar-shooting" style="width: ${barPct}%;" title="${titleText}"></div></div>
+          <span class="team-sog-value">${display}</span>
+        </div>`;
+      }).join('');
     }
-    if (allowedEl) {
-      if (allowedErr) {
-        allowedEl.innerHTML = `<p class="empty-hint" style="color:var(--warn);font-size:0.8rem;">Query error: ${escapeHtml(allowedErr)}</p>`;
-        if (allowedEmpty) allowedEmpty.style.display = 'none';
-      } else if (!mostAllowed.length) {
-        allowedEl.innerHTML = '';
-        if (allowedEmpty) allowedEmpty.style.display = '';
-      } else {
-        if (allowedEmpty) allowedEmpty.style.display = 'none';
-        const vals = mostAllowed.map(t => parseFloat(t.avg_sog_allowed ?? t.sog_allowed) || 0);
-        const maxVal = Math.max(...vals, 1);
-        allowedEl.innerHTML = mostAllowed.slice(0, 10).map((t, i) => {
-          const val = parseFloat(t.avg_sog_allowed ?? t.sog_allowed) || 0;
-          const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
-          const display = t.avg_sog_allowed != null ? val.toFixed(1) : String(val | 0);
-          const titleText = t.avg_sog_allowed != null
-            ? `${display} avg SOGA/game (${t.games ?? '?'} games)`
-            : `${display} SOG allowed`;
-          return `<div class="team-sog-row">
-            <span class="team-sog-rank">${i + 1}</span>
-            <div class="team-sog-team-cell">
-              <img src="${nhlLogoUrl(t.team)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
-              <span class="team-sog-abbrev">${escapeHtml(t.team || '—')}</span>
-            </div>
-            <div class="team-sog-bar-wrap"><div class="team-sog-bar-allowed" style="width: ${pct}%;" title="${titleText}"></div></div>
-            <span class="team-sog-value">${display}</span>
-          </div>`;
-        }).join('');
-      }
+  }
+
+  if (allowedEl) {
+    if (allowedErr) {
+      allowedEl.innerHTML = `<p class="empty-hint" style="color:var(--warn);font-size:0.8rem;">Query error: ${escapeHtml(allowedErr)}</p>`;
+      if (allowedEmpty) allowedEmpty.style.display = 'none';
+    } else if (!mostAllowed.length) {
+      allowedEl.innerHTML = '';
+      if (allowedEmpty) allowedEmpty.style.display = '';
+    } else {
+      if (allowedEmpty) allowedEmpty.style.display = 'none';
+      const slice = mostAllowed.slice(0, limit);
+      const totalTeams = mostAllowed.length || 32;
+      const vals = slice.map(t => parseFloat(t.avg_sog_allowed ?? t.sog_allowed) || 0);
+      const maxVal = Math.max(...vals, 1);
+      allowedEl.innerHTML = slice.map((t, i) => {
+        const val = parseFloat(t.avg_sog_allowed ?? t.sog_allowed) || 0;
+        const barPct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+        const display = t.avg_sog_allowed != null ? val.toFixed(1) : String(val | 0);
+        const defRank = totalTeams - i;
+        const titleText = `${display} avg SOGA/game (${t.games ?? '?'} games) — defense rank ${defRank} of ${totalTeams}`;
+        return `<div class="team-sog-row">
+          <span class="team-sog-rank">${defRank}</span>
+          <div class="team-sog-team-cell">
+            <img src="${nhlLogoUrl(t.team)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
+            <span class="team-sog-abbrev">${escapeHtml(t.team || '—')}</span>
+          </div>
+          <div class="team-sog-bar-wrap"><div class="team-sog-bar-allowed" style="width: ${barPct}%;" title="${titleText}"></div></div>
+          <span class="team-sog-value">${display}</span>
+        </div>`;
+      }).join('');
     }
   }
 }
@@ -781,7 +833,26 @@ function renderGames() {
 
   if (!allGames.length) {
     grid.innerHTML = '<div class="empty-state">No upcoming games found.</div>';
+    const badge = document.getElementById('games-date-badge');
+    if (badge) badge.style.display = 'none';
     return;
+  }
+
+  // Show game date badge (today vs tomorrow etc.)
+  const badgeEl = document.getElementById('games-date-badge');
+  if (badgeEl && allGames.length) {
+    const today = getLocalDateString();
+    const gameDates = [...new Set(allGames.map(g => g.game_date).filter(Boolean))].sort();
+    const firstDate = gameDates[0];
+    if (firstDate) {
+      const isToday = firstDate === today;
+      const isTomorrow = firstDate === (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+      const dateLabel = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : formatDate(firstDate);
+      const multiDay = gameDates.length > 1 ? ` + ${gameDates.length - 1} more day${gameDates.length > 2 ? 's' : ''}` : '';
+      badgeEl.textContent = `${dateLabel}${multiDay}`;
+      badgeEl.className = `games-date-badge ${isToday ? 'badge-today' : 'badge-future'}`;
+      badgeEl.style.display = '';
+    }
   }
 
   const expandedKey = grid.dataset.expandedKey || '';
@@ -892,13 +963,16 @@ function renderGames() {
           <div class="matchup-team away-team-block">
             <img src="${nhlLogoUrl(away)}" alt="${escapeHtml(away)}" class="matchup-logo" onerror="this.style.display='none';">
             <span class="away-team">${escapeHtml(away)}</span>
+            <button type="button" class="btn-last-game" data-team="${escapeHtml(away)}" title="View ${escapeHtml(away)} last game" aria-label="Last game for ${escapeHtml(away)}">Last game ↗</button>
           </div>
           <span class="vs">@</span>
           <div class="matchup-team home-team-block">
             <img src="${nhlLogoUrl(home)}" alt="${escapeHtml(home)}" class="matchup-logo" onerror="this.style.display='none';">
             <span class="home-team">${escapeHtml(home)}</span>
+            <button type="button" class="btn-last-game" data-team="${escapeHtml(home)}" title="View ${escapeHtml(home)} last game" aria-label="Last game for ${escapeHtml(home)}">Last game ↗</button>
           </div>
         </div>
+        <div id="last-game-panel-${escapeHtml(key)}" class="last-game-panel" style="display:none;"></div>
         <div class="game-date">${formatGameDate(gd, g.game_time)}</div>
         <div class="top-stats">
           ${topSog ? `<div class="top-stat">🔥 Top SOG: <strong>${num(topSog.predicted_sog)}</strong> (${escapeHtml(topSog.shooter_name)})</div>` : ''}
@@ -920,13 +994,13 @@ function renderGames() {
                 <th class="numeric sortable" data-sort="avg7" title="Click to sort">Avg 7 ${gameSortKey === 'avg7' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
                 <th class="numeric sortable" data-sort="hit2" title="Click to sort">2+ % ${gameSortKey === 'hit2' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
                 <th class="numeric sortable" data-sort="hit3" title="Click to sort">3+ % ${gameSortKey === 'hit3' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
-                <th class="numeric sortable" data-sort="opp" title="Click to sort">Opp % ${gameSortKey === 'opp' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
+                <th class="numeric sortable" data-sort="opp" title="Click to sort">Opp Rank ${gameSortKey === 'opp' ? (gameSortDir === 'desc' ? '▼' : '▲') : ''}</th>
                 <th></th>
               </tr></thead>
               <tbody>
                 ${sortedPreds
                   .map(p => {
-                    const oppRank = rankClass(p.opp_sog_against_rank);
+                    const oppRank = rankClassOrdinal(p.opp_sog_against_rank, 32, true);
                     const fav = isFavorite(p.shooter_name, p.player_team);
                     return `<tr class="player-row" data-player="${escapeHtml(p.shooter_name)}" data-team="${escapeHtml(p.player_team)}" data-opp="${escapeHtml(p.opposing_team)}" data-date="${dateStr(p.game_date)}" data-pred="${p.predicted_sog}" data-home="${escapeHtml(home)}" data-away="${escapeHtml(away)}" data-gd="${dateStr(gd)}" data-player-id="${escapeHtml((p.player_id || '').toString())}">
                         <td><button type="button" class="btn-star ${fav ? 'active' : ''}" aria-label="Favorite" title="Favorite" data-player="${escapeHtml(p.shooter_name)}" data-team="${escapeHtml(p.player_team)}">${fav ? '★' : '☆'}</button> ${escapeHtml(p.shooter_name)}</td>
@@ -957,9 +1031,65 @@ function renderGames() {
       if (e.target.closest('.player-row')) return;
       if (e.target.closest('.close-btn')) return;
       if (e.target.closest('th.sortable')) return;
+      if (e.target.closest('.btn-last-game')) return;
+      if (e.target.closest('.last-game-panel')) return;
       const key = card.dataset.key;
       grid.dataset.expandedKey = grid.dataset.expandedKey === key ? '' : key;
       renderGames();
+    });
+  });
+
+  // Last-game button handlers
+  grid.querySelectorAll('.btn-last-game').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const team = btn.dataset.team;
+      const card = btn.closest('.game-card');
+      const key = card?.dataset.key;
+      const panel = document.getElementById(`last-game-panel-${key}`);
+      if (!panel) return;
+      // Toggle: if already showing this team's data, close
+      if (panel.style.display !== 'none' && panel.dataset.team === team) {
+        panel.style.display = 'none';
+        panel.dataset.team = '';
+        btn.classList.remove('active');
+        return;
+      }
+      // Mark all last-game buttons in this card inactive first
+      card.querySelectorAll('.btn-last-game').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      panel.dataset.team = team;
+      panel.style.display = '';
+      panel.innerHTML = '<div class="last-game-loading">Loading last game…</div>';
+      const data = await fetchAPI('/team-last-game', { team });
+      const game = data?.game;
+      if (!game) {
+        panel.innerHTML = '<p class="empty-hint">No recent game found for this team.</p>';
+        return;
+      }
+      const gameDate = game.game_date || '';
+      const home = (game.home || '').toUpperCase();
+      const away = (game.away || '').toUpperCase();
+      const homeGoals = parseInt(game.goals_for) || 0;
+      const awayGoals = parseInt(game.goals_against) || 0;
+      const isWin = (game.is_win || '').toLowerCase() === 'yes';
+      const gameId = game.game_id || '';
+      // Now fetch player stats for this last game
+      const params2 = gameId ? { game_id: gameId } : { game_date: gameDate, home, away };
+      const statsData = await fetchAPI('/historical-game-stats', params2);
+      panel.innerHTML = `<div class="last-game-panel-inner">
+        <div class="last-game-panel-header">
+          <span class="last-game-panel-title">Last Game — ${escapeHtml(team)}</span>
+          <button type="button" class="last-game-panel-close" aria-label="Close">×</button>
+        </div>
+        ${renderGameBreakdownHtml(statsData || {}, home, away, homeGoals, awayGoals, isWin, gameDate)}
+      </div>`;
+      panel.querySelector('.last-game-panel-close')?.addEventListener('click', e2 => {
+        e2.stopPropagation();
+        panel.style.display = 'none';
+        panel.dataset.team = '';
+        card.querySelectorAll('.btn-last-game').forEach(b => b.classList.remove('active'));
+      });
     });
   });
 
@@ -1033,11 +1163,11 @@ async function loadGameAnalysis(gameKey) {
   const a = res?.away || {};
   const fmt = (v, type) => {
     if (v == null) return { text: '—', cls: '' };
-    if (type === 'rank') {
+    if (type === 'rank' || type === 'rank-inv') {
       const n = parseFloat(v);
       if (isNaN(n)) return { text: '—', cls: '' };
-      const pctVal = n > 1 && n <= 100 ? n : n * 100;
-      const r = rankClass(pctVal / 100);
+      const pctVal = n > 1 && n <= 100 ? n / 100 : n;
+      const r = rankClassOrdinal(pctVal, 32, type === 'rank-inv');
       return { text: r.text, cls: r.className };
     }
     if (type === 'decimal') {
@@ -1065,8 +1195,9 @@ async function loadGameAnalysis(gameKey) {
     gameAnalysisCharts[gameKey] = {};
   }
 
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#6366f1';
-  const accent2 = getComputedStyle(document.documentElement).getPropertyValue('--accent-secondary').trim() || '#8b5cf6';
+  // Use distinct away (orange) vs home (blue) colors — more visually separable than both-purple
+  const accent = '#f97316';   // away team: orange
+  const accent2 = '#3b82f6';  // home team: blue
   const safeId = gameKey.replace(/[^a-zA-Z0-9-]/g, '_');
 
   content.innerHTML = `
@@ -1088,13 +1219,17 @@ async function loadGameAnalysis(gameKey) {
       </div>
       <div class="game-analysis-stats-table">
         <div class="game-analysis-header"><span class="label">Metric</span><span class="val away">${escapeHtml(away)}</span><span class="val home">${escapeHtml(home)}</span></div>
-        ${row('SOG rank', a.sog_rank, h.sog_rank, 'rank')}
-        ${row('SOG against rank', a.sog_against_rank, h.sog_against_rank, 'rank')}
+        ${row('SOG Rank', a.sog_rank, h.sog_rank, 'rank')}
+        ${row('SOG Against Rank', a.sog_against_rank, h.sog_against_rank, 'rank-inv')}
         ${row('Avg SOG (7g)', a.avg_sog, h.avg_sog)}
         ${row('Avg SOGA (7g)', a.avg_sog_against, h.avg_sog_against)}
         ${row('Streak', a.streak, h.streak, 'streak')}
-        ${row('Avg goals for', a.avg_goals_for, h.avg_goals_for)}
-        ${row('Avg goals against', a.avg_goals_against, h.avg_goals_against)}
+        ${row('Avg Goals For', a.avg_goals_for, h.avg_goals_for)}
+        ${row('Avg Goals Against', a.avg_goals_against, h.avg_goals_against)}
+      </div>
+      <div class="game-analysis-legend">
+        <span class="ga-legend-item" title="SOG Rank: rank 1 of 32 = best shooting team (generates the most shots per game).">SOG Rank: 1 of 32 = best offense</span>
+        <span class="ga-legend-item" title="SOG Against Rank: rank 1 of 32 = strongest defense (fewest shots allowed); rank 32 of 32 = softest defense (most shots allowed).">SOG Against Rank: 1 of 32 = strongest defense</span>
       </div>
       <div class="game-analysis-charts">
         <div class="game-analysis-chart-wrap"><canvas id="ga-sog-${safeId}" height="140"></canvas></div>
@@ -1166,7 +1301,7 @@ function renderPredictionsTable() {
 
   tbody.innerHTML = allPredictions.map(p => {
     const date = dateStr(p.game_date);
-    const oppRank = rankClass(p.opp_sog_against_rank);
+    const oppRank = rankClassOrdinal(p.opp_sog_against_rank, 32, true);
     const fav = isFavorite(p.shooter_name, p.player_team);
     return `
     <tr class="player-row" data-player="${escapeHtml(p.shooter_name)}" data-team="${escapeHtml(p.player_team)}" data-opp="${escapeHtml(p.opposing_team)}" data-date="${date}">
@@ -1393,7 +1528,7 @@ async function loadAndRenderPlayerPage(params) {
 
   const [detailRes, chartRes, hitRatesRes] = await Promise.all([
     fetchAPI('/player-detail', apiParams),
-    fetchAPI('/player-sog-chart', { player: params.player }),
+    fetchAPI('/player-sog-chart', { player: params.player, ...(params.game_date ? { game_date: params.game_date } : {}) }),
     fetchAPI('/player-hit-rates-history', { player: params.player, player_team: params.player_team }),
   ]);
   const data = detailRes;
@@ -1453,25 +1588,25 @@ async function loadAndRenderPlayerPage(params) {
   `;
 
   document.getElementById('player-page-stats').innerHTML = `
-    ${statRowWithRank('Player SOG % rank', p.player_sog_rank, true, 'Percentile rank of player SOG vs teammates. Higher = top shooter on team.')}
-    ${statRowWithRank('PP SOG % (7g)', p.player_last7_pp_sog_pct, true, 'PP SOG %')}
-    ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank)}
-    ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank)}
+    ${statRowWithRank('Player SOG rank', p.player_sog_rank, true, 'Rank among teammates by SOG (1 = top shooter on team).', p.team_skater_count)}
+    ${(() => { const r = ppSOGPctClass(p.player_last7_pp_sog_pct); return `<div class="stat-row" title="% of shots taken on the powerplay over last 7 games"><span>PP SOG % (7g)</span><span class="${r.className}">${r.text}</span></div>`; })()}
+    ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank, 'Ice time rank among teammates in last game (1 = most ice time)')}
+    ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank, 'Powerplay ice time rank among teammates in last game (1 = most PP ice time)')}
     ${statRowMatchup('Matchup last SOG', p.matchup_last_sog)}
     ${statRowMatchup('Matchup avg SOG (7g)', p.matchup_avg_sog_last7)}
   `;
 
   document.getElementById('player-page-team').innerHTML = `
-    ${statRowWithRank('SOG % rank', p.team_sog_for_rank)}
-    ${statRowWithRank('Goals % rank', p.team_goals_for_rank)}
-    ${statRowWithRank('PP SOG rank', p.team_pp_sog_rank)}
+    ${statRowWithRank('SOG rank', p.team_sog_for_rank, true, '', 32)}
+    ${statRowWithRank('Goals rank', p.team_goals_for_rank, true, '', 32)}
+    ${statRowWithRank('PP SOG rank', p.team_pp_sog_rank, true, '', 32)}
   `;
 
   document.getElementById('player-page-opponent').innerHTML = `
-    ${statRowWithRank('Goals against rank', p.opp_goals_against_rank)}
-    ${statRowWithRank('SOG against rank', p.opp_sog_against_rank)}
-    ${statRowWithRank('PK SOG rank', p.opp_pk_sog_rank)}
-    ${statRowWithRank('Penalties rank', p.opp_penalties_rank)}
+    ${statRowWithRank('Goals against rank', p.opp_goals_against_rank, true, '', 32, true)}
+    ${statRowWithRank('SOG against rank', p.opp_sog_against_rank, true, '', 32, true)}
+    ${statRowWithRank('PK SOG rank', p.opp_pk_sog_rank, true, '', 32, true)}
+    ${statRowWithRank('Penalties rank', p.opp_penalties_rank, true, '', 32, false)}
   `;
 
   const explEl = document.getElementById('player-page-explanation');
@@ -1515,8 +1650,13 @@ function handleRoute() {
 }
 
 // ----- Player detail (legacy overlay - now redirects to full page) -----
-function statRowWithRank(label, value, isRank = true, title = '') {
-  const r = isRank ? rankClass(value) : { text: num(value), className: '' };
+function statRowWithRank(label, value, isRank = true, title = '', total = null, inverted = false) {
+  let r;
+  if (isRank) {
+    r = total != null ? rankClassOrdinal(value, total, inverted) : rankClass(value);
+  } else {
+    r = { text: num(value), className: '' };
+  }
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
   return `<div class="stat-row"${titleAttr}><span>${label}</span><span class="${r.className}">${r.text}</span></div>`;
 }
@@ -1630,10 +1770,10 @@ async function openPlayerDetail(player, team, opp, date) {
 
   // Player stats (formatted like team/opponent rankings: stat-row with rank-style highlighting)
   document.getElementById('player-detail-stats').innerHTML = `
-    ${statRowWithRank('Player SOG % rank', p.player_sog_rank, true, 'Percentile rank of player SOG vs teammates. Higher = top shooter on team.')}
-    ${statRowWithRank('PP SOG % (7g)', p.player_last7_pp_sog_pct, true, 'PP SOG %: % of their total shots that are Powerplay Shots on goal')}
-    ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank, 'Player ice time rank among teammates in last game (1 = most ice time on team)')}
-    ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank, 'Player powerplay ice time rank among teammates in last game (1 = most PP ice time on team)')}
+    ${statRowWithRank('Player SOG rank', p.player_sog_rank, true, 'Rank among teammates by SOG (1 = top shooter on team).', p.team_skater_count)}
+    ${(() => { const r = ppSOGPctClass(p.player_last7_pp_sog_pct); return `<div class="stat-row" title="% of shots taken on the powerplay over last 7 games"><span>PP SOG % (7g)</span><span class="${r.className}">${r.text}</span></div>`; })()}
+    ${statRowIceTimeRank('Ice time rank', p.player_ice_time_rank, 'Ice time rank among teammates in last game (1 = most ice time on team)')}
+    ${statRowIceTimeRank('PP ice time rank', p.player_pp_ice_time_rank, 'Powerplay ice time rank among teammates in last game (1 = most PP ice time on team)')}
     ${statRowWithRank('Avg SOG (3g)', p.player_avg_sog_last3, false)}
     ${statRowMatchup('Matchup last SOG', p.matchup_last_sog)}
     ${statRowMatchup('Matchup avg SOG (7g)', p.matchup_avg_sog_last7)}
@@ -1641,17 +1781,17 @@ async function openPlayerDetail(player, team, opp, date) {
 
   // Team rankings with highlight
   document.getElementById('player-detail-team').innerHTML = `
-    ${statRowWithRank('SOG % rank', p.team_sog_for_rank)}
-    ${statRowWithRank('Goals % rank', p.team_goals_for_rank)}
-    ${statRowWithRank('PP SOG rank', p.team_pp_sog_rank, true, 'Powerplay Shots on Goal Percentile Rank on their team')}
+    ${statRowWithRank('SOG rank', p.team_sog_for_rank, true, '', 32)}
+    ${statRowWithRank('Goals rank', p.team_goals_for_rank, true, '', 32)}
+    ${statRowWithRank('PP SOG rank', p.team_pp_sog_rank, true, 'Powerplay Shots on Goal rank (1 = best PP shooting team)', 32)}
   `;
 
   // Opponent rankings: SOG/Goals/PK against = lower rank = opponent allows more = better for player; Penalties = higher = more PP opportunities
   document.getElementById('player-detail-opponent').innerHTML = `
-    ${statRowWithRank('Goals against rank', p.opp_goals_against_rank)}
-    ${statRowWithRank('SOG against rank', p.opp_sog_against_rank)}
-    ${statRowWithRank('PK SOG rank', p.opp_pk_sog_rank)}
-    ${statRowWithRank('Penalties rank', p.opp_penalties_rank)}
+    ${statRowWithRank('Goals against rank', p.opp_goals_against_rank, true, '', 32, true)}
+    ${statRowWithRank('SOG against rank', p.opp_sog_against_rank, true, '', 32, true)}
+    ${statRowWithRank('PK SOG rank', p.opp_pk_sog_rank, true, '', 32, true)}
+    ${statRowWithRank('Penalties rank', p.opp_penalties_rank, true, '', 32, false)}
   `;
 
   // AI Analysis: pre-computed explanation + on-demand generate
@@ -2005,36 +2145,135 @@ async function toggleHistoricalExpand(row) {
   loadingRow.remove();
 
   if (!data) {
-    data = { players: [], error: 'Failed to load (network or server error)' };
+    data = { players: [], team_totals: [], error: 'Failed to load (network or server error)' };
   }
-  const players = data?.players || [];
 
-  const statsHtml = players.length
-    ? `<td colspan="7" class="player-stats-cell">
-        <div class="player-stats-inner">
-          <table class="player-stats-table">
-            <thead><tr><th>Player</th><th>Team</th><th class="numeric">SOG</th><th class="numeric">G</th><th class="numeric">A</th><th class="numeric">Pts</th></tr></thead>
-            <tbody>
-              ${players.map(p => `
-                <tr>
-                  <td>${escapeHtml(p.player_name || '—')}</td>
-                  <td>${escapeHtml(p.team || '—')}</td>
-                  <td class="numeric">${num(p.sog, 0)}</td>
-                  <td class="numeric">${num(p.goals, 0)}</td>
-                  <td class="numeric">${num(p.assists, 0)}</td>
-                  <td class="numeric">${num(p.points, 0)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </td>`
-    : `<td colspan="7" class="empty-state">${data?.error || 'Player stats for this game are not yet available. gold_player_stats_clean may still be syncing.'}</td>`;
+  // Derive score from the parent row data attributes
+  const goalsFor = parseInt(row.cells[4]?.textContent) || 0;
+  const goalsAgainst = parseInt(row.cells[5]?.textContent) || 0;
+  const isWin = row.cells[6]?.querySelector('.win') != null;
 
   const expandRow = document.createElement('tr');
   expandRow.className = 'historical-player-stats-row';
-  expandRow.innerHTML = statsHtml;
+  const td = document.createElement('td');
+  td.colSpan = 7;
+  td.className = 'player-stats-cell';
+  td.innerHTML = renderGameBreakdownHtml(data, home, away, goalsFor, goalsAgainst, isWin, gameDate);
+  expandRow.appendChild(td);
   row.after(expandRow);
+}
+
+/** Render rich game breakdown HTML (scoreboard + SOG bars + player stats table). */
+function renderGameBreakdownHtml(data, home, away, homeGoals, awayGoals, homeWon, gameDate) {
+  const players = data?.players || [];
+  const teamTotals = data?.team_totals || [];
+  const err = data?.error;
+
+  // Build team totals lookup: {TEAM -> {sog, goals}}
+  const totalsMap = {};
+  for (const t of teamTotals) {
+    totalsMap[(t.team || '').toUpperCase()] = t;
+  }
+  // Fallback: aggregate from players when team_totals is missing or all-zero
+  const totalSogFromMap = Object.values(totalsMap).reduce((s, t) => s + (t.sog || 0), 0);
+  if ((!totalsMap[home] || totalSogFromMap === 0) && players.length) {
+    const homePlayers = players.filter(p => (p.team || '').toUpperCase() === home);
+    const awayPlayers = players.filter(p => (p.team || '').toUpperCase() === away);
+    if (homePlayers.length) totalsMap[home] = { team: home, sog: homePlayers.reduce((s, p) => s + (parseInt(p.sog) || 0), 0), goals: homeGoals };
+    if (awayPlayers.length) totalsMap[away] = { team: away, sog: awayPlayers.reduce((s, p) => s + (parseInt(p.sog) || 0), 0), goals: awayGoals };
+  }
+
+  const homeSog = totalsMap[home]?.sog ?? null;
+  const awaySog = totalsMap[away]?.sog ?? null;
+  const maxSog = Math.max(homeSog || 0, awaySog || 0, 1);
+
+  // Players split by team, sorted by SOG desc
+  const homePlayers = players.filter(p => (p.team || '').toUpperCase() === home);
+  const awayPlayers = players.filter(p => (p.team || '').toUpperCase() === away);
+  const allSorted = [...players].sort((a, b) => (parseInt(b.sog) || 0) - (parseInt(a.sog) || 0));
+  const useTeamSplit = homePlayers.length > 0 && awayPlayers.length > 0;
+
+  function playerRow(p) {
+    const sogVal = parseInt(p.sog) || 0;
+    const sogBarPct = homeSog || awaySog ? (sogVal / Math.max(homeSog || 0, awaySog || 0, 1)) * 100 : (sogVal / 8) * 100;
+    return `<tr class="hist-player-row">
+      <td>${escapeHtml(p.player_name || '—')}</td>
+      <td class="hist-sog-bar-cell">
+        <div class="hist-sog-bar-track">
+          <div class="hist-sog-bar-fill" style="width:${Math.min(sogBarPct, 100)}%" title="${sogVal} SOG"></div>
+        </div>
+      </td>
+      <td class="numeric sog-val">${sogVal}</td>
+      <td class="numeric">${parseInt(p.goals) || 0}G</td>
+      <td class="numeric">${parseInt(p.assists) || 0}A</td>
+    </tr>`;
+  }
+
+  const teamSogSection = (homeSog !== null || awaySog !== null) ? `
+    <div class="hist-team-sog">
+      <div class="hist-sog-label">Shots on Goal</div>
+      ${[{ team: away, sog: awaySog, cls: 'away' }, { team: home, sog: homeSog, cls: 'home' }].map(({ team, sog, cls }) => {
+        if (sog === null) return '';
+        const pct = maxSog > 0 ? (sog / maxSog) * 100 : 0;
+        return `<div class="hist-sog-row">
+          <div class="hist-sog-team">
+            <img src="${nhlLogoUrl(team)}" alt="${escapeHtml(team)}" class="team-sog-logo" onerror="this.style.display='none';">
+            <span class="hist-sog-abbrev">${escapeHtml(team)}</span>
+          </div>
+          <div class="hist-sog-bar-outer">
+            <div class="hist-sog-bar-main ${cls}" style="width:${pct}%;"></div>
+          </div>
+          <span class="hist-sog-val">${sog}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+  const playerSection = players.length ? `
+    <div class="hist-players">
+      ${useTeamSplit ? `
+        <div class="hist-team-col">
+          <div class="hist-team-header">
+            <img src="${nhlLogoUrl(away)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
+            <span>${escapeHtml(away)}</span>
+          </div>
+          <table class="hist-player-table"><tbody>${awayPlayers.map(playerRow).join('')}</tbody></table>
+        </div>
+        <div class="hist-team-col">
+          <div class="hist-team-header">
+            <img src="${nhlLogoUrl(home)}" alt="" class="team-sog-logo" onerror="this.style.display='none';">
+            <span>${escapeHtml(home)}</span>
+          </div>
+          <table class="hist-player-table"><tbody>${homePlayers.map(playerRow).join('')}</tbody></table>
+        </div>
+      ` : `<div class="hist-team-col-full">
+        <table class="hist-player-table">
+          <thead><tr><th>Player</th><th class="hist-sog-bar-cell">SOG</th><th class="numeric"></th><th class="numeric">G</th><th class="numeric">A</th></tr></thead>
+          <tbody>${allSorted.map(playerRow).join('')}</tbody>
+        </table>
+      </div>`}
+    </div>` : (err ? `<p class="empty-hint" style="padding:0.5rem;">${escapeHtml(err)}</p>` : '<p class="empty-hint" style="padding:0.5rem;">Player stats not yet available.</p>');
+
+  return `<div class="hist-game-breakdown">
+    <div class="hist-scoreboard">
+      <div class="hist-score-team away">
+        <img src="${nhlLogoUrl(away)}" alt="${escapeHtml(away)}" class="hist-score-logo" onerror="this.style.display='none';">
+        <span class="hist-score-abbrev">${escapeHtml(away)}</span>
+        <span class="hist-score-val ${!homeWon ? 'winner' : ''}">${awayGoals}</span>
+      </div>
+      <div class="hist-score-divider">
+        <span class="hist-score-dash">–</span>
+        <span class="hist-score-date">${gameDate ? formatDate(gameDate) : ''}</span>
+        <span class="hist-score-final">Final</span>
+      </div>
+      <div class="hist-score-team home">
+        <span class="hist-score-val ${homeWon ? 'winner' : ''}">${homeGoals}</span>
+        <span class="hist-score-abbrev">${escapeHtml(home)}</span>
+        <img src="${nhlLogoUrl(home)}" alt="${escapeHtml(home)}" class="hist-score-logo" onerror="this.style.display='none';">
+      </div>
+    </div>
+    ${teamSogSection}
+    ${playerSection}
+  </div>`;
 }
 
 // ----- Filters -----
@@ -2127,6 +2366,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     applyFilters();
   });
 
+  // Today / Tomorrow toggle for upcoming games
+  document.getElementById('games-view-toggle')?.addEventListener('click', async e => {
+    const btn = e.target.closest('.btn-games-view');
+    if (!btn) return;
+    const view = btn.dataset.view;
+    if (view === gamesView) return;
+    gamesView = view;
+    document.querySelectorAll('#games-view-toggle .btn-games-view').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    const grid = document.getElementById('games-grid');
+    if (grid) grid.innerHTML = '<div class="empty-state">Loading…</div>';
+    try {
+      const predParams = gamesView === 'today'
+        ? { ...getFilterParams(), by_date: 'true', game_date: getLocalDateString() }
+        : getFilterParams();
+      const [gRes, pRes] = await Promise.all([
+        fetchAPI('/upcoming-games', { view: gamesView, client_date: getLocalDateString() }),
+        fetchAPI('/upcoming-predictions', predParams),
+      ]);
+      allGames = gRes?.games || [];
+      allPredictions = pRes?.predictions || [];
+      // Clear analysis cache so switching views always fetches fresh streak/SOG data
+      Object.keys(gameAnalysisCache).forEach(k => delete gameAnalysisCache[k]);
+    } catch (e) {
+      console.warn('games view reload failed:', e);
+      allGames = [];
+    }
+    renderGames();
+  });
+
   // Upcoming Games section-specific filter/sort controls
   document.getElementById('games-sort-date')?.addEventListener('change', () => renderGames());
   document.getElementById('games-filter-team')?.addEventListener('change', () => renderGames());
@@ -2206,6 +2474,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       btn.classList.add('active');
       hitRateSortBy = btn.dataset.sort;
       renderHitRateLeaderboard();
+    });
+  });
+
+  // Season team SOG show top10 / all toggle
+  document.querySelectorAll('.btn-team-show-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-team-show-toggle').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      teamSeasonShowAll = btn.dataset.show === 'all';
+      renderTeamSeasonSog(teamSeasonSogData, teamSeasonShowAll);
     });
   });
 

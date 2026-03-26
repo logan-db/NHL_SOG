@@ -303,110 +303,145 @@ def api_team_season_sog():
     return jsonify(**result)
 
 
+_CURRENT_SEASON_START = "2025-10-01"  # 2025-26 NHL season
+
+
+def _season_sog_rank_map():
+    """Compute full-season SOG and SOGA percentile ranks for all teams from gold_game_stats_clean.
+    Returns {TEAM: {"sog": pct, "soga": pct}} where pct=1.0 means best in league.
+    For SOG: pct=1.0 = most shots (best offense). For SOGA: pct=1.0 = most shots allowed (weakest defense).
+    Returns empty dict on failure (e.g. Lakebase connection terminated during sync).
+    """
+    if not pool:
+        return {}
+    try:
+        rows = _query_one(
+            f"""
+            SELECT team, avg_sog, avg_soga FROM (
+                SELECT team,
+                       AVG(sog) AS avg_sog, AVG(soga) AS avg_soga,
+                       COUNT(*) AS gp
+                FROM (
+                    SELECT "playerTeam" AS team, "gameId",
+                           MAX(COALESCE("sum_game_Total_shotsOnGoalFor"::numeric, 0)) AS sog,
+                           MAX(COALESCE("sum_game_Total_shotsOnGoalAgainst"::numeric, 0)) AS soga
+                    FROM public.gold_game_stats_clean
+                    WHERE "gameId" IS NOT NULL
+                      AND "gameDate"::date >= '{_CURRENT_SEASON_START}'
+                    GROUP BY "playerTeam", "gameId"
+                ) g
+                GROUP BY team
+            ) t WHERE gp >= 5
+            ORDER BY avg_sog DESC
+            """,
+        )
+        if not rows or not any((r.get("avg_sog") or 0) > 0 for r in rows):
+            return {}
+        n = len(rows)
+
+        def _ordinal_to_pct(rank_0indexed, total):
+            if total <= 1:
+                return 0.5
+            return round((total - 1 - rank_0indexed) / (total - 1), 4)
+
+        sog_pct_map = {r["team"]: _ordinal_to_pct(i, n) for i, r in enumerate(rows)}
+        soga_sorted = sorted(rows, key=lambda r: -(r.get("avg_soga") or 0))
+        soga_pct_map = {r["team"]: _ordinal_to_pct(i, n) for i, r in enumerate(soga_sorted)}
+        return {
+            team: {"sog": sog_pct_map.get(team, 0.5), "soga": soga_pct_map.get(team, 0.5),
+                   "avg_sog": next((r["avg_sog"] for r in rows if r["team"] == team), None),
+                   "avg_soga": next((r["avg_soga"] for r in soga_sorted if r["team"] == team), None)}
+            for team in sog_pct_map
+        }
+    except Exception as e:
+        print(f"_season_sog_rank_map failed: {e}")
+        return {}
+
+
 def _team_season_sog_averages():
-    """Return season average SOG (shots for) and SOGA (shots allowed) per team.
-    Uses gold_game_stats_clean aggregated across all games this season.
-    Falls back to gold_player_stats_clean if needed.
+    """Return current-season average SOG (shots for) and SOGA (shots allowed) per team.
+    Restricted to the current season (>= _CURRENT_SEASON_START) so relocated/defunct teams
+    (e.g. ARI → UTE) don't appear.  Uses _season_sog_rank_map() for consistent rankings
+    across the top/bottom section, game analysis, and player analysis sections.
     """
     result = {"top_shooting": [], "most_allowed": []}
     if not pool:
         return result
 
-    # Top shooting: avg SOG per game, season
+    # Use shared rank map (same source as game analysis and player detail overrides)
+    rank_map = _season_sog_rank_map()
+    if rank_map:
+        # Sort by avg_sog descending for top shooting
+        top_entries = sorted(
+            [(team, info) for team, info in rank_map.items() if (info.get("avg_sog") or 0) > 0],
+            key=lambda x: -(x[1].get("avg_sog") or 0),
+        )
+        result["top_shooting"] = [
+            {"team": team, "avg_sog": round(float(info["avg_sog"]), 1)}
+            for team, info in top_entries
+        ]
+        # Sort by avg_soga descending for most allowed
+        allowed_entries = sorted(
+            [(team, info) for team, info in rank_map.items() if (info.get("avg_soga") or 0) > 0],
+            key=lambda x: -(x[1].get("avg_soga") or 0),
+        )
+        result["most_allowed"] = [
+            {"team": team, "avg_sog_allowed": round(float(info["avg_soga"]), 1)}
+            for team, info in allowed_entries
+        ]
+        return result
+
+    # Fallback to gold_player_stats_clean when gold_game_stats_clean unavailable
+    season_filter = f'"gameDate"::date >= \'{_CURRENT_SEASON_START}\''
     try:
         top = _query_one(
-            """
+            f"""
             SELECT "playerTeam" AS team,
-                   ROUND(AVG(COALESCE("sum_game_Total_shotsOnGoalFor"::float, 0)), 1) AS avg_sog,
+                   ROUND(AVG(daily_sog)::numeric, 1) AS avg_sog,
                    COUNT(*) AS games
-            FROM public.gold_game_stats_clean
-            WHERE "gameId" IS NOT NULL
+            FROM (
+                SELECT "playerTeam", "gameDate"::date AS gd,
+                       SUM(COALESCE("player_Total_shotsOnGoal"::numeric, 0)) AS daily_sog
+                FROM public.gold_player_stats_clean
+                WHERE "gameId" IS NOT NULL AND {season_filter}
+                GROUP BY "playerTeam", "gameDate"::date
+            ) t
             GROUP BY "playerTeam"
             HAVING COUNT(*) >= 5
             ORDER BY avg_sog DESC
-            LIMIT 10
+            LIMIT 32
             """,
         )
         if top and any((r.get("avg_sog") or 0) > 0 for r in top):
             result["top_shooting"] = [dict(r) for r in top]
     except Exception as e:
-        print(f"Team season SOG (top shooting) query failed: {e}")
+        print(f"Team season SOG fallback failed: {e}")
         result["_top_error"] = str(e)
 
-    # Fallback to player stats if game stats unavailable
-    if not result["top_shooting"]:
-        try:
-            top = _query_one(
-                """
-                SELECT "playerTeam" AS team,
-                       ROUND(AVG(daily_sog), 1) AS avg_sog,
-                       COUNT(*) AS games
-                FROM (
-                    SELECT "playerTeam", "gameDate"::date AS gd,
-                           SUM(COALESCE("player_Total_shotsOnGoal"::float, 0)) AS daily_sog
-                    FROM public.gold_player_stats_clean
-                    WHERE "gameId" IS NOT NULL
-                    GROUP BY "playerTeam", "gameDate"::date
-                ) t
-                GROUP BY team
-                HAVING COUNT(*) >= 5
-                ORDER BY avg_sog DESC
-                LIMIT 10
-                """,
-            )
-            if top:
-                result["top_shooting"] = [dict(r) for r in top]
-        except Exception as e:
-            print(f"Team season SOG fallback failed: {e}")
-
-    # Most SOG allowed: avg opponent SOG per game, season
     try:
         allowed = _query_one(
-            """
-            SELECT a."playerTeam" AS team,
-                   ROUND(AVG(COALESCE(b."sum_game_Total_shotsOnGoalFor"::float, 0)), 1) AS avg_sog_allowed,
+            f"""
+            SELECT team,
+                   ROUND(AVG(daily_sog)::numeric, 1) AS avg_sog_allowed,
                    COUNT(*) AS games
-            FROM public.gold_game_stats_clean a
-            JOIN public.gold_game_stats_clean b
-              ON a."gameId" = b."gameId" AND a."opposingTeam" = b."playerTeam"
-            WHERE a."gameId" IS NOT NULL
-            GROUP BY a."playerTeam"
+            FROM (
+                SELECT "opposingTeam" AS team, "gameDate"::date AS gd,
+                       SUM(COALESCE("player_Total_shotsOnGoal"::numeric, 0)) AS daily_sog
+                FROM public.gold_player_stats_clean
+                WHERE "gameId" IS NOT NULL AND {season_filter}
+                GROUP BY "opposingTeam", "gameDate"::date
+            ) t
+            GROUP BY team
             HAVING COUNT(*) >= 5
             ORDER BY avg_sog_allowed DESC
-            LIMIT 10
+            LIMIT 32
             """,
         )
         if allowed and any((r.get("avg_sog_allowed") or 0) > 0 for r in allowed):
             result["most_allowed"] = [dict(r) for r in allowed]
     except Exception as e:
-        print(f"Team season SOGA query failed: {e}")
+        print(f"Team season SOGA fallback failed: {e}")
         result["_allowed_error"] = str(e)
-
-    # Fallback for SOGA
-    if not result["most_allowed"]:
-        try:
-            allowed = _query_one(
-                """
-                SELECT team,
-                       ROUND(AVG(daily_sog), 1) AS avg_sog_allowed,
-                       COUNT(*) AS games
-                FROM (
-                    SELECT "opposingTeam" AS team, "gameDate"::date AS gd,
-                           SUM(COALESCE("player_Total_shotsOnGoal"::float, 0)) AS daily_sog
-                    FROM public.gold_player_stats_clean
-                    WHERE "gameId" IS NOT NULL
-                    GROUP BY "opposingTeam", "gameDate"::date
-                ) t
-                GROUP BY team
-                HAVING COUNT(*) >= 5
-                ORDER BY avg_sog_allowed DESC
-                LIMIT 10
-                """,
-            )
-            if allowed:
-                result["most_allowed"] = [dict(r) for r in allowed]
-        except Exception as e:
-            print(f"Team season SOGA fallback failed: {e}")
 
     return result
 
@@ -414,25 +449,46 @@ def _team_season_sog_averages():
 @app.route("/api/hit-rate-leaderboard")
 def api_hit_rate_leaderboard():
     """Players in upcoming games ranked by 2+/3+ season hit rates for the leaderboard chart."""
+    client_date_str = request.args.get("client_date", "").strip()
+    parsed_cd = _parse_client_date(client_date_str)
+
+    if parsed_cd:
+        y, m, d = parsed_cd
+        today_expr = f"LEAST('{y:04d}-{m:02d}-{d:02d}'::date, {_eastern_date()})"
+    else:
+        today_expr = _eastern_date()
+
+    _base = """
+        SELECT DISTINCT ON (ps."shooterName", ps."playerTeam")
+            ps."shooterName"                                                    AS shooter_name,
+            ps."playerTeam"                                                     AS player_team,
+            ps."opposingTeam"                                                   AS opposing_team,
+            ps."gameDate"::text                                                 AS game_date,
+            ROUND(ps."predictedSOG"::numeric, 2)                               AS predicted_sog,
+            ROUND(COALESCE(ps."playerAvgSOGLast7"::numeric, 0), 2)             AS avg_sog_last7,
+            ROUND(COALESCE(ps."player_2+_SeasonHitRate"::numeric, 0) * 100, 1) AS hit_rate_2plus,
+            ROUND(COALESCE(ps."player_3+_SeasonHitRate"::numeric, 0) * 100, 1) AS hit_rate_3plus,
+            ROUND(COALESCE(ps."player_2+_Last30HitRate"::numeric, 0) * 100, 1) AS hit_rate_2plus_30d,
+            ROUND(COALESCE(ps."player_3+_Last30HitRate"::numeric, 0) * 100, 1) AS hit_rate_3plus_30d
+        FROM public.clean_prediction_summary ps
+        WHERE {where_clause}
+          AND ps."playerId" IS NOT NULL
+          AND ps."player_2+_SeasonHitRate" IS NOT NULL
+          AND ps."player_2+_SeasonHitRate" > 0
+          AND ps."playerAvgSOGLast7" IS NOT NULL
+          AND ps."playerAvgSOGLast7" > 0
+        ORDER BY ps."shooterName", ps."playerTeam", ps."predictedSOG" DESC
+    """
+
     rows = _query(
-        """
-        SELECT DISTINCT ON ("shooterName", "playerTeam")
-            "shooterName"                                                   AS shooter_name,
-            "playerTeam"                                                    AS player_team,
-            "opposingTeam"                                                  AS opposing_team,
-            "gameDate"::text                                                AS game_date,
-            ROUND("predictedSOG"::numeric, 2)                              AS predicted_sog,
-            ROUND(COALESCE("playerAvgSOGLast7"::numeric, 0), 2)            AS avg_sog_last7,
-            ROUND(COALESCE("player_2+_SeasonHitRate"::numeric, 0) * 100, 1) AS hit_rate_2plus,
-            ROUND(COALESCE("player_3+_SeasonHitRate"::numeric, 0) * 100, 1) AS hit_rate_3plus,
-            ROUND(COALESCE("player_2+_Last30HitRate"::numeric, 0) * 100, 1) AS hit_rate_2plus_30d,
-            ROUND(COALESCE("player_3+_Last30HitRate"::numeric, 0) * 100, 1) AS hit_rate_3plus_30d
-        FROM public.clean_prediction_summary
-        WHERE "gameId" IS NULL
-          AND "player_2+_SeasonHitRate" IS NOT NULL
-          AND "player_2+_SeasonHitRate" > 0
-        ORDER BY "shooterName", "playerTeam", "predictedSOG" DESC
-        """,
+        # Primary: gameId IS NULL — pipeline has not yet assigned gameIds (e.g. morning before
+        # same-day pipeline run).
+        _base.format(where_clause='ps."gameId" IS NULL'),
+        # Fallback: date-based — after the daily pipeline assigns gameIds to same-day predictions,
+        # gameId IS NULL returns nothing; query by today's gameDate instead (±1 day for UTC offset).
+        _base.format(
+            where_clause=f'ps."gameDate"::date BETWEEN {today_expr} AND {today_expr} + INTERVAL \'1 day\''
+        ),
     )
     if not rows:
         return jsonify(players=[])
@@ -560,7 +616,7 @@ def api_player_ai_analysis():
         "exact_player": True,
     }
     filters = {k: v for k, v in filters.items() if v is not None}
-    rows = _predictions_query(filters, limit=1)
+    rows = _predictions_query(filters, limit=1, by_date=bool(game_date))
     if not rows:
         return jsonify(analysis=None, error="Player not found for this matchup")
     p = dict(rows[0])
@@ -846,58 +902,160 @@ def api_yesterday_results():
 
 @app.route("/api/upcoming-games")
 def api_upcoming_games():
-    """Upcoming games: only games with predictions (playerId populated), at most 1 per team.
-    Uses nhl_schedule_by_day (from official CSV) as date source when available; pipeline dates
-    can differ from NHL API UTC, so we prefer schedule to avoid Feb 25 vs Feb 26 mismatches.
+    """Upcoming games with two views:
+    - view=today (default): games scheduled for today that have null-gameId predictions.
+    - view=tomorrow: games on the earliest date AFTER today that has null-gameId predictions.
+    Both views use the client's local date (client_date param) or the server's Eastern date.
     """
-    ed = _eastern_date()
-    # Query 1: Schedule-first — use schedule date (source of truth) when we have predictions.
-    # Joins on team match only; no date equality (avoids pipeline/API vs CSV date mismatch).
-    rows = _query(
-        f"""
-        SELECT DISTINCT to_date(s."DATE", 'FMMM/FMDD/YYYY') AS game_date, s."HOME" AS home, s."AWAY" AS away,
-               s."EASTERN" AS game_time
-        FROM public.nhl_schedule_by_day s
-        WHERE to_date(s."DATE", 'FMMM/FMDD/YYYY') >= {ed}
-          AND s."DATE" NOT IN ('DATE', 'date')
-          AND EXISTS (
-            SELECT 1 FROM public.clean_prediction_summary p
-            WHERE p."gameId" IS NULL AND p."playerId" IS NOT NULL
+    view = request.args.get("view", "today").strip().lower()
+    client_date_str = request.args.get("client_date", "").strip()
+    parsed_cd = _parse_client_date(client_date_str)
+
+    # Shared today expression used by both today and tomorrow branches.
+    # Uses the earlier of client date and server Eastern date to cover both sides of midnight.
+    if parsed_cd:
+        y, m, d = parsed_cd
+        today_expr = f"LEAST('{y:04d}-{m:02d}-{d:02d}'::date, {_eastern_date()})"
+    else:
+        today_expr = _eastern_date()
+
+    if view == "today":
+
+        # Primary: today's schedule games that already have matching null-gameId predictions.
+        # This works when the pipeline generates same-day predictions (e.g. morning run).
+        rows = _query(
+            f"""
+            SELECT DISTINCT to_date(s."DATE", 'FMMM/FMDD/YYYY') AS game_date,
+                   s."HOME" AS home, s."AWAY" AS away, s."EASTERN" AS game_time
+            FROM public.nhl_schedule_by_day s
+            WHERE to_date(s."DATE", 'FMMM/FMDD/YYYY') = {today_expr}
+              AND s."DATE" NOT IN ('DATE', 'date')
+              AND EXISTS (
+                SELECT 1 FROM public.clean_prediction_summary p
+                WHERE p."gameId" IS NULL AND p."playerId" IS NOT NULL
+                  AND ((p."playerTeam" = s."HOME" AND p."opposingTeam" = s."AWAY")
+                       OR (p."playerTeam" = s."AWAY" AND p."opposingTeam" = s."HOME"))
+              )
+            ORDER BY s."EASTERN" ASC NULLS LAST, s."HOME" ASC
+            LIMIT 50
+            """,
+        )
+
+        # Fallback: if no today games have predictions (pipeline ran for tomorrow), use the
+        # earliest null-gameId prediction date — same logic as view=tomorrow.
+        if not rows:
+            rows = _query(
+                f"""
+                WITH next_game_date AS (
+                    SELECT MIN("gameDate"::date) AS gd
+                    FROM public.clean_prediction_summary
+                    WHERE "gameId" IS NULL AND "playerId" IS NOT NULL
+                )
+                SELECT DISTINCT to_date(s."DATE", 'FMMM/FMDD/YYYY') AS game_date,
+                       s."HOME" AS home, s."AWAY" AS away, s."EASTERN" AS game_time
+                FROM public.nhl_schedule_by_day s
+                CROSS JOIN next_game_date
+                WHERE to_date(s."DATE", 'FMMM/FMDD/YYYY') = next_game_date.gd
+                  AND s."DATE" NOT IN ('DATE', 'date')
+                  AND EXISTS (
+                    SELECT 1 FROM public.clean_prediction_summary p
+                    WHERE p."gameId" IS NULL AND p."playerId" IS NOT NULL
+                      AND ((p."playerTeam" = s."HOME" AND p."opposingTeam" = s."AWAY")
+                           OR (p."playerTeam" = s."AWAY" AND p."opposingTeam" = s."HOME"))
+                  )
+                ORDER BY game_date ASC
+                LIMIT 100
+                """,
+                f"""
+                WITH next_game_date AS (
+                    SELECT MIN("gameDate"::date) AS gd
+                    FROM public.clean_prediction_summary
+                    WHERE "gameId" IS NULL AND "playerId" IS NOT NULL
+                )
+                SELECT DISTINCT
+                       p."gameDate"::date AS game_date,
+                       LEAST(p."playerTeam", p."opposingTeam") AS away,
+                       GREATEST(p."playerTeam", p."opposingTeam") AS home,
+                       NULL::text AS game_time
+                FROM public.clean_prediction_summary p
+                CROSS JOIN next_game_date
+                WHERE p."gameId" IS NULL
+                  AND p."playerId" IS NOT NULL
+                  AND p."gameDate"::date = next_game_date.gd
+                ORDER BY game_date ASC
+                LIMIT 100
+                """,
+            )
+    else:
+        # view=tomorrow: earliest game date with null-gameId predictions that is AFTER today.
+        # Using > today_expr (not MIN overall) ensures this always shows tomorrow even after
+        # the pipeline generates same-day (today) predictions with gameId IS NULL.
+        rows = _query(
+            f"""
+            WITH next_game_date AS (
+                SELECT MIN("gameDate"::date) AS gd
+                FROM public.clean_prediction_summary
+                WHERE "gameId" IS NULL AND "playerId" IS NOT NULL
+                  AND "gameDate"::date > {today_expr}
+            )
+            SELECT DISTINCT to_date(s."DATE", 'FMMM/FMDD/YYYY') AS game_date,
+                   s."HOME" AS home, s."AWAY" AS away, s."EASTERN" AS game_time
+            FROM public.nhl_schedule_by_day s
+            CROSS JOIN next_game_date
+            WHERE to_date(s."DATE", 'FMMM/FMDD/YYYY') = next_game_date.gd
+              AND s."DATE" NOT IN ('DATE', 'date')
+              AND EXISTS (
+                SELECT 1 FROM public.clean_prediction_summary p
+                WHERE p."gameId" IS NULL AND p."playerId" IS NOT NULL
+                  AND ((p."playerTeam" = s."HOME" AND p."opposingTeam" = s."AWAY")
+                       OR (p."playerTeam" = s."AWAY" AND p."opposingTeam" = s."HOME"))
+              )
+            ORDER BY game_date ASC
+            LIMIT 100
+            """,
+            f"""
+            WITH next_game_date AS (
+                SELECT MIN("gameDate"::date) AS gd
+                FROM public.clean_prediction_summary
+                WHERE "gameId" IS NULL AND "playerId" IS NOT NULL
+                  AND "gameDate"::date > {today_expr}
+            )
+            SELECT DISTINCT to_date(s."DATE", 'FMMM/FMDD/YYYY') AS game_date,
+                   s."HOME" AS home, s."AWAY" AS away, s."EASTERN" AS game_time
+            FROM public.nhl_schedule_by_day s
+            JOIN public.clean_prediction_summary p
+              ON to_date(s."DATE", 'FMMM/FMDD/YYYY') = p."gameDate"::date
+              AND s."DATE" NOT IN ('DATE', 'date')
               AND ((p."playerTeam" = s."HOME" AND p."opposingTeam" = s."AWAY")
                    OR (p."playerTeam" = s."AWAY" AND p."opposingTeam" = s."HOME"))
-          )
-        ORDER BY game_date ASC
-        LIMIT 100
-        """,
-        f"""
-        SELECT DISTINCT to_date(s."DATE", 'FMMM/FMDD/YYYY') AS game_date, s."HOME" AS home, s."AWAY" AS away,
-               s."EASTERN" AS game_time
-        FROM public.nhl_schedule_by_day s
-        JOIN public.clean_prediction_summary p
-          ON to_date(s."DATE", 'FMMM/FMDD/YYYY') = p."gameDate"::date
-          AND s."DATE" NOT IN ('DATE', 'date')
-          AND ((p."playerTeam" = s."HOME" AND p."opposingTeam" = s."AWAY")
-               OR (p."playerTeam" = s."AWAY" AND p."opposingTeam" = s."HOME"))
-        WHERE p."gameId" IS NULL
-          AND p."playerId" IS NOT NULL
-          AND to_date(s."DATE", 'FMMM/FMDD/YYYY') >= {ed}
-        ORDER BY game_date ASC
-        LIMIT 100
-        """,
-        f"""
-        SELECT DISTINCT
-               (p."gameDate"::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date AS game_date,
-               LEAST(p."playerTeam", p."opposingTeam") AS away,
-               GREATEST(p."playerTeam", p."opposingTeam") AS home,
-               NULL::text AS game_time
-        FROM public.clean_prediction_summary p
-        WHERE p."gameId" IS NULL
-          AND p."playerId" IS NOT NULL
-          AND (p."gameDate"::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date >= {ed}
-        ORDER BY game_date ASC
-        LIMIT 100
-        """,
-    )
+            CROSS JOIN next_game_date
+            WHERE p."gameId" IS NULL
+              AND p."playerId" IS NOT NULL
+              AND to_date(s."DATE", 'FMMM/FMDD/YYYY') = next_game_date.gd
+            ORDER BY game_date ASC
+            LIMIT 100
+            """,
+            f"""
+            WITH next_game_date AS (
+                SELECT MIN("gameDate"::date) AS gd
+                FROM public.clean_prediction_summary
+                WHERE "gameId" IS NULL AND "playerId" IS NOT NULL
+                  AND "gameDate"::date > {today_expr}
+            )
+            SELECT DISTINCT
+                   p."gameDate"::date AS game_date,
+                   LEAST(p."playerTeam", p."opposingTeam") AS away,
+                   GREATEST(p."playerTeam", p."opposingTeam") AS home,
+                   NULL::text AS game_time
+            FROM public.clean_prediction_summary p
+            CROSS JOIN next_game_date
+            WHERE p."gameId" IS NULL
+              AND p."playerId" IS NOT NULL
+              AND p."gameDate"::date = next_game_date.gd
+            ORDER BY game_date ASC
+            LIMIT 100
+            """,
+        )
     # Limit to at most 1 game per team (each team's soonest upcoming game)
     seen_teams = set()
     games = []
@@ -932,14 +1090,27 @@ def _predictions_base_where():
     return 'p."gameId" IS NULL'
 
 
-def _predictions_query(filters=None, limit=200):
-    """Build and run predictions query with optional filters."""
+def _predictions_query(filters=None, limit=200, by_date=False):
+    """Build and run predictions query with optional filters.
+    by_date=True: match by game_date regardless of gameId (used for Today view).
+    Default: gameId IS NULL upcoming predictions only.
+    """
     filters = filters or {}
-    conditions = [_predictions_base_where()]
-    params = []
-    if filters.get("game_date"):
-        conditions.append('p."gameDate"::date = %s')
-        params.append(filters["game_date"])
+    if by_date and filters.get("game_date"):
+        # Date-specific mode: return all predictions for the requested Eastern game date.
+        # gameDate is stored as UTC midnight of the ET game date, so ::date cast gives the
+        # correct Eastern calendar date directly — no offset window needed.
+        conditions = [
+            'p."gameDate"::date = %s::date'
+        ]
+        params = [filters["game_date"]]
+        filters = {k: v for k, v in filters.items() if k != "game_date"}
+    else:
+        conditions = [_predictions_base_where()]
+        params = []
+        if filters.get("game_date"):
+            conditions.append('p."gameDate"::date = %s')
+            params.append(filters["game_date"])
     if filters.get("player"):
         if filters.get("exact_player"):
             conditions.append('p."shooterName" = %s')
@@ -993,7 +1164,8 @@ def _predictions_query(filters=None, limit=200):
             p."player_2+_SeasonMatchupHitRate" AS player_2plus_season_matchup_hit_rate,
             p."player_3+_SeasonMatchupHitRate" AS player_3plus_season_matchup_hit_rate,
             p."player_2+_Last30HitRate" AS player_2plus_last30_hit_rate,
-            p."player_3+_Last30HitRate" AS player_3plus_last30_hit_rate
+            p."player_3+_Last30HitRate" AS player_3plus_last30_hit_rate,
+            COUNT(*) OVER (PARTITION BY p."playerTeam", p."gameDate") AS team_skater_count
         FROM public.clean_prediction_summary p
         LEFT JOIN public.llm_summary s ON p."shooterName" = s."shooterName"
             AND p."gameDate" = s."gameDate" AND p."playerTeam" = s."playerTeam"
@@ -1033,7 +1205,8 @@ def _predictions_query(filters=None, limit=200):
             p."player_2+_SeasonMatchupHitRate" AS player_2plus_season_matchup_hit_rate,
             p."player_3+_SeasonMatchupHitRate" AS player_3plus_season_matchup_hit_rate,
             p."player_2+_Last30HitRate" AS player_2plus_last30_hit_rate,
-            p."player_3+_Last30HitRate" AS player_3plus_last30_hit_rate
+            p."player_3+_Last30HitRate" AS player_3plus_last30_hit_rate,
+            COUNT(*) OVER (PARTITION BY p."playerTeam", p."gameDate") AS team_skater_count
         FROM public.clean_prediction_summary p
         LEFT JOIN public.llm_summary s ON p."shooterName" = s."shooterName"
             AND p."gameDate" = s."gameDate" AND p."playerTeam" = s."playerTeam"
@@ -1074,7 +1247,8 @@ def _predictions_query(filters=None, limit=200):
             NULL::double precision AS player_2plus_season_matchup_hit_rate,
             NULL::double precision AS player_3plus_season_matchup_hit_rate,
             NULL::double precision AS player_2plus_last30_hit_rate,
-            NULL::double precision AS player_3plus_last30_hit_rate
+            NULL::double precision AS player_3plus_last30_hit_rate,
+            COUNT(*) OVER (PARTITION BY p."playerTeam", p."gameDate") AS team_skater_count
         FROM public.clean_prediction_summary p
         LEFT JOIN public.llm_summary s ON p."shooterName" = s."shooterName"
             AND p."gameDate" = s."gameDate" AND p."playerTeam" = s."playerTeam"
@@ -1098,34 +1272,21 @@ def _predictions_query(filters=None, limit=200):
 
 
 def _normalize_prediction_date(row):
-    """Shift game_date from UTC midnight to Eastern calendar date.
-    The pipeline calls the NHL API which returns UTC timestamps; a 7 PM ET game on March 19
-    is stored as gameDate = 2026-03-20 (UTC midnight). We convert back to the Eastern date.
-    Handles both datetime objects (timestamp columns) and date objects (date columns).
+    """Return game_date as YYYY-MM-DD string.
+    gameDate in clean_prediction_summary is stored as a TIMESTAMP at UTC midnight of the
+    Eastern calendar game date (e.g. March 25 ET game → 2026-03-25 00:00:00 UTC).
+    The YYYY-MM-DD portion is the correct Eastern game date; no timezone conversion is needed.
     """
-    from datetime import timezone, timedelta, datetime as _dt
     row = dict(row)
     gd = row.get("game_date")
     if gd is None:
         return row
     try:
-        if hasattr(gd, "hour"):
-            # datetime object — treat as naive UTC
-            dt_utc = _dt(gd.year, gd.month, gd.day, gd.hour, gd.minute, gd.second, tzinfo=timezone.utc)
-        elif hasattr(gd, "year"):
-            # plain date object — treat as UTC midnight
-            dt_utc = _dt(gd.year, gd.month, gd.day, 0, 0, 0, tzinfo=timezone.utc)
+        # For datetime/date objects, strftime or str both give YYYY-MM-DD prefix
+        if hasattr(gd, "strftime"):
+            row["game_date"] = gd.strftime("%Y-%m-%d")
         else:
-            # string — parse YYYY-MM-DD
-            s = str(gd)[:10]
-            parts = s.split("-")
-            dt_utc = _dt(int(parts[0]), int(parts[1]), int(parts[2]), 0, 0, 0, tzinfo=timezone.utc)
-        try:
-            from zoneinfo import ZoneInfo
-            dt_et = dt_utc.astimezone(ZoneInfo("America/New_York"))
-        except Exception:
-            dt_et = dt_utc - timedelta(hours=4)  # EDT fallback (UTC-4 March–November)
-        row["game_date"] = dt_et.strftime("%Y-%m-%d")
+            row["game_date"] = str(gd)[:10]
     except Exception:
         row["game_date"] = str(gd)[:10] if gd else None
     return row
@@ -1133,7 +1294,11 @@ def _normalize_prediction_date(row):
 
 @app.route("/api/upcoming-predictions")
 def api_upcoming_predictions():
-    """Upcoming predictions with optional filters: player, player_team, opposing_team, game_date."""
+    """Upcoming predictions with optional filters.
+    by_date=true: query by game_date regardless of gameId status (used for Today view where
+                  games may already have gameIds assigned after the daily pipeline runs).
+    Default (by_date omitted): gameId IS NULL upcoming predictions only.
+    """
     filters = {
         k: v.strip()
         for k, v in request.args.items()
@@ -1141,8 +1306,21 @@ def api_upcoming_predictions():
         and v
         and v.strip()
     }
-    rows = _predictions_query(filters)
-    return jsonify(predictions=[_normalize_prediction_date(dict(r)) for r in rows])
+    by_date = request.args.get("by_date", "").strip().lower() in ("1", "true", "yes")
+    rows = _predictions_query(filters, by_date=by_date)
+    preds = [_normalize_prediction_date(dict(r)) for r in rows]
+    # Override team_sog_for_rank and opp_sog_against_rank with season-computed values so
+    # the Opp Rank column in the game card table matches the game analysis and player detail.
+    season_ranks = _season_sog_rank_map()
+    if season_ranks:
+        for p in preds:
+            pt = (p.get("player_team") or "").upper()
+            ot = (p.get("opposing_team") or "").upper()
+            if pt and pt in season_ranks:
+                p["team_sog_for_rank"] = season_ranks[pt]["sog"]
+            if ot and ot in season_ranks:
+                p["opp_sog_against_rank"] = season_ranks[ot]["soga"]
+    return jsonify(predictions=preds)
 
 
 @app.route("/api/game-predictions")
@@ -1155,82 +1333,92 @@ def api_game_predictions():
         return jsonify(predictions=[], error="home, away, and game_date required")
     filters = {"home": home, "away": away, "game_date": game_date}
     rows = _predictions_query(filters, limit=100)
-    return jsonify(predictions=[dict(r) for r in rows])
+    preds = [dict(r) for r in rows]
+    season_ranks = _season_sog_rank_map()
+    if season_ranks:
+        for p in preds:
+            pt = (p.get("player_team") or "").upper()
+            ot = (p.get("opposing_team") or "").upper()
+            if pt and pt in season_ranks:
+                p["team_sog_for_rank"] = season_ranks[pt]["sog"]
+            if ot and ot in season_ranks:
+                p["opp_sog_against_rank"] = season_ranks[ot]["soga"]
+    return jsonify(predictions=preds)
 
 
 def _game_analysis_for_teams(home, away, game_date):
-    """Fetch game analysis: team SOG ranks, streaks, avg goals for home and away.
+    """Fetch game analysis: team SOG ranks, streaks, avg goals/SOG for home and away.
+    All metrics sourced from Lakebase (gold_game_stats_clean + clean_prediction_summary).
+
+    SOG Rank / SOG Against Rank:
+      Always derived from full-season avg SOG / SOGA from gold_game_stats_clean so the
+      ranks are consistent with the Season Team SOG Rankings section on the dashboard.
+
+    Avg SOG / SOGA / Goals / Streak:
+      Source: gold_game_stats_clean, deduplicated to 1 row per game via ROW_NUMBER().
+              Averages computed over last 7 distinct games directly from raw columns.
+              Pre-calculated rolling columns are NOT used — they may be player-level averages
+              rather than team totals depending on table granularity.
     Returns {home: {...}, away: {...}}.
     """
     result = {"home": {}, "away": {}}
     if not home or not away or not game_date:
         return result
 
-    # 1. Team SOG ranks from predictions (first row per team)
-    try:
-        preds = _predictions_query(
-            {"home": home, "away": away, "game_date": game_date}, limit=100
-        )
-        for p in preds or []:
-            pt = (p.get("player_team") or "").strip().upper()
-            opp = (p.get("opposing_team") or "").strip().upper()
-            if pt == home and not result["home"].get("sog_rank"):
-                result["home"]["sog_rank"] = p.get("team_sog_for_rank")
-                result["away"]["sog_against_rank"] = p.get("opp_sog_against_rank")
-            elif pt == away and not result["away"].get("sog_rank"):
-                result["away"]["sog_rank"] = p.get("team_sog_for_rank")
-                result["home"]["sog_against_rank"] = p.get("opp_sog_against_rank")
-    except Exception as e:
-        print(f"Game analysis predictions lookup failed: {e}")
+    # 1. SOG ranks: derived from full-season averages via shared _season_sog_rank_map()
+    #    so they are consistent with the Season Team SOG Rankings and player analysis sections.
+    rank_map = _season_sog_rank_map()
+    for team, side in [(home, "home"), (away, "away")]:
+        t = team.upper()
+        if t in rank_map:
+            result[side]["sog_rank"] = rank_map[t]["sog"]
+            result[side]["sog_against_rank"] = rank_map[t]["soga"]
 
-    # 2. Streak and avg goals from gold_game_stats_clean (last 10 games per team)
-    # Uses pre-calc rolling cols when available (pipeline), else computes from rows
+    # 2. Per-game stats from gold_game_stats_clean.
+    #    Use ROW_NUMBER() to deduplicate to exactly 1 row per gameId (table may have multiple
+    #    rows per game — e.g. one per player). Compute averages directly from last 7 games'
+    #    raw column values rather than pre-calc rolling columns (which may be player-level).
+    #    Exclude today's date: on game day, rows for tonight's games are pre-loaded as
+    #    placeholders (isWin='No', SOG=0) before the puck drops, which would corrupt
+    #    both the streak and the SOG averages.
     for team in [home, away]:
         team_upper = team.strip().upper()
+        side = "home" if team_upper == home.upper() else "away"
         try:
             rows = _query_one(
-                """
-                SELECT "gameDate"::date AS game_date,
-                    "sum_game_Total_goalsFor"::int AS goals_for,
-                    "sum_game_Total_goalsAgainst"::int AS goals_against,
-                    "sum_game_Total_shotsOnGoalFor"::int AS sog_for,
-                    "sum_game_Total_shotsOnGoalAgainst"::int AS sog_against,
-                    "isWin" AS is_win,
-                    "average_sum_game_Total_shotsOnGoalFor_last_7_games" AS avg_sog_precalc,
-                    "average_sum_game_Total_goalsFor_last_7_games" AS avg_gf_precalc,
-                    "opponent_average_sum_game_Total_shotsOnGoalFor_last_7_games" AS avg_soga_precalc,
-                    "opponent_average_sum_game_Total_goalsFor_last_7_games" AS avg_ga_precalc
-                FROM public.gold_game_stats_clean
-                WHERE "playerTeam" = %s AND "gameId" IS NOT NULL
-                ORDER BY "gameDate" DESC
-                LIMIT 10
-                """,
-                (team_upper,),
-            )
-        except Exception:
-            try:
-                rows = _query_one(
-                    """
-                    SELECT "gameDate"::date AS game_date,
-                        "sum_game_Total_goalsFor"::int AS goals_for,
-                        "sum_game_Total_goalsAgainst"::int AS goals_against,
-                        "sum_game_Total_shotsOnGoalFor"::int AS sog_for,
-                        "sum_game_Total_shotsOnGoalAgainst"::int AS sog_against,
-                        "isWin" AS is_win
+                f"""
+                SELECT game_date, goals_for, goals_against, sog_for, sog_against, is_win
+                FROM (
+                    SELECT
+                        "gameDate"::date AS game_date,
+                        COALESCE("sum_game_Total_goalsFor"::numeric, 0)::int AS goals_for,
+                        COALESCE("sum_game_Total_goalsAgainst"::numeric, 0)::int AS goals_against,
+                        COALESCE("sum_game_Total_shotsOnGoalFor"::numeric, 0)::int AS sog_for,
+                        COALESCE("sum_game_Total_shotsOnGoalAgainst"::numeric, 0)::int AS sog_against,
+                        -- gold_game_stats_clean.isWin is already per-team perspective:
+                        -- Prep Genie Data.py computes isWin = (goalsFor > goalsAgainst)
+                        -- for EVERY row, so both HOME and AWAY rows are correct as-is.
+                        "isWin" AS is_win,
+                        ROW_NUMBER() OVER (PARTITION BY "gameId" ORDER BY "gameDate" DESC) AS rn
                     FROM public.gold_game_stats_clean
                     WHERE "playerTeam" = %s AND "gameId" IS NOT NULL
-                    ORDER BY "gameDate" DESC
-                    LIMIT 10
-                    """,
-                    (team_upper,),
-                )
-            except Exception as e:
-                print(f"Game analysis team {team} query failed: {e}")
-                continue
+                      AND "gameDate"::date >= %s
+                      AND "gameDate"::date < CURRENT_DATE
+                ) t
+                WHERE rn = 1
+                ORDER BY game_date DESC
+                LIMIT 10
+                """,
+                (team_upper, _CURRENT_SEASON_START),
+            )
+        except Exception as e:
+            print(f"Game analysis team {team} query failed: {e}")
+            continue
 
         if not rows:
             continue
-        # Streak: count consecutive W or L from most recent
+
+        # Streak: consecutive W or L from most recent completed game
         wins = [1 if (r.get("is_win") or "").lower() == "yes" else 0 for r in rows]
         streak_count = 0
         streak_type = None
@@ -1242,48 +1430,21 @@ def _game_analysis_for_teams(home, away, game_date):
                 streak_count += 1
             else:
                 break
-        result["home" if team_upper == home.upper() else "away"]["streak"] = (
-            f"{streak_type}{streak_count}" if streak_type else None
-        )
-        # Avg goals for/against: use pre-calc from pipeline when available, else compute from rows
-        r0 = rows[0]
-        avg_gf_pre = r0.get("avg_gf_precalc")
-        avg_ga_pre = r0.get("avg_ga_precalc")
-        if avg_gf_pre is not None and avg_ga_pre is not None:
-            result["home" if team_upper == home.upper() else "away"]["avg_goals_for"] = (
-                round(float(avg_gf_pre), 1)
-            )
-            result["home" if team_upper == home.upper() else "away"]["avg_goals_against"] = (
-                round(float(avg_ga_pre), 1)
-            )
-        else:
-            gf = [r.get("goals_for") for r in rows if r.get("goals_for") is not None]
-            ga = [r.get("goals_against") for r in rows if r.get("goals_against") is not None]
-            result["home" if team_upper == home.upper() else "away"]["avg_goals_for"] = (
-                round(sum(gf) / len(gf), 1) if gf else None
-            )
-            result["home" if team_upper == home.upper() else "away"]["avg_goals_against"] = (
-                round(sum(ga) / len(ga), 1) if ga else None
-            )
-        # Avg SOG for/against: use pre-calc (L7) when available, else compute from rows
-        avg_sog_pre = r0.get("avg_sog_precalc")
-        avg_soga_pre = r0.get("avg_soga_precalc")
-        if avg_sog_pre is not None and avg_soga_pre is not None:
-            result["home" if team_upper == home.upper() else "away"]["avg_sog"] = (
-                round(float(avg_sog_pre), 1)
-            )
-            result["home" if team_upper == home.upper() else "away"]["avg_sog_against"] = (
-                round(float(avg_soga_pre), 1)
-            )
-        else:
-            sfg = [r.get("sog_for") for r in rows if r.get("sog_for") is not None]
-            sag = [r.get("sog_against") for r in rows if r.get("sog_against") is not None]
-            result["home" if team_upper == home.upper() else "away"]["avg_sog"] = (
-                round(sum(sfg) / len(sfg), 1) if sfg else None
-            )
-            result["home" if team_upper == home.upper() else "away"]["avg_sog_against"] = (
-                round(sum(sag) / len(sag), 1) if sag else None
-            )
+        result[side]["streak"] = f"{streak_type}{streak_count}" if streak_type else None
+
+        # Averages over last 7 games with complete data.
+        # Some recent games have SOG=0 due to pipeline lag (goals synced before shot data).
+        # Exclude those from the SOG/SOGA averages so they reflect actual shot volume.
+        # Goals averages use any game where at least one score was recorded.
+        last7 = rows[:7]
+        gf = [r.get("goals_for") for r in last7 if (r.get("goals_for") or 0) > 0 or (r.get("goals_against") or 0) > 0]
+        ga = [r.get("goals_against") for r in last7 if (r.get("goals_for") or 0) > 0 or (r.get("goals_against") or 0) > 0]
+        sfg = [r.get("sog_for") for r in last7 if (r.get("sog_for") or 0) > 0]
+        sag = [r.get("sog_against") for r in last7 if (r.get("sog_against") or 0) > 0]
+        result[side]["avg_goals_for"] = round(sum(gf) / len(gf), 1) if gf else None
+        result[side]["avg_goals_against"] = round(sum(ga) / len(ga), 1) if ga else None
+        result[side]["avg_sog"] = round(sum(sfg) / len(sfg), 1) if sfg else None
+        result[side]["avg_sog_against"] = round(sum(sag) / len(sag), 1) if sag else None
 
     return result
 
@@ -1319,11 +1480,25 @@ def api_player_detail():
         "exact_player": True,
     }
     filters = {k: v for k, v in filters.items() if v is not None}
-    rows = _predictions_query(filters, limit=5)
+    rows = _predictions_query(filters, limit=5, by_date=bool(game_date))
     if not rows:
         return jsonify(player=None, error="Player not found")
     p = dict(rows[0])
     pt = p.get("player_team") or ""
+    # Fix team_skater_count: the window function only sees 1 row when querying a single
+    # player with exact_player=True, so it always returns 1. Run a separate count instead.
+    if pt and p.get("game_date"):
+        try:
+            gd_str = str(p["game_date"])[:10]
+            count_res = _query_one(
+                'SELECT COUNT(*) AS cnt FROM public.clean_prediction_summary'
+                ' WHERE "playerTeam" = %s AND "gameDate"::date = %s',
+                (pt, gd_str),
+            )
+            if count_res and count_res[0].get("cnt"):
+                p["team_skater_count"] = count_res[0]["cnt"]
+        except Exception:
+            pass
     ot = p.get("opposing_team") or ""
     rank_fields = [
         "team_sog_for_rank",
@@ -1353,6 +1528,16 @@ def api_player_detail():
             ):
                 if p.get(f) is None and o.get(f) is not None:
                     p[f] = o[f]
+
+    # Override team_sog_for_rank and opp_sog_against_rank with season-computed values from
+    # gold_game_stats_clean so they match the top/bottom section and game analysis section.
+    # The pipeline-computed rolling percentiles can diverge from the season-long ordinal ranks.
+    season_ranks = _season_sog_rank_map()
+    if season_ranks:
+        if pt and pt.upper() in season_ranks:
+            p["team_sog_for_rank"] = season_ranks[pt.upper()]["sog"]
+        if ot and ot.upper() in season_ranks:
+            p["opp_sog_against_rank"] = season_ranks[ot.upper()]["soga"]
 
     # Ice time rank fallback: clean_prediction_summary may not have these columns synced;
     # fetch from gold_player_stats_clean (player's most recent game) when null.
@@ -1393,9 +1578,13 @@ def api_player_detail():
 def api_player_sog_chart():
     """SOG trend data for chart: last 3 avg, last 7 avg, last game, predicted."""
     player = request.args.get("player", "").strip()
+    game_date = request.args.get("game_date", "").strip()
     if not player:
         return jsonify(points=[], error="player required")
-    rows = _predictions_query({"player": player, "exact_player": True}, limit=1)
+    chart_filters = {"player": player, "exact_player": True}
+    if game_date:
+        chart_filters["game_date"] = game_date
+    rows = _predictions_query(chart_filters, limit=1, by_date=bool(game_date))
     if not rows:
         return jsonify(points=[], error="Player not found")
     p = rows[0]
@@ -1734,6 +1923,9 @@ def api_historical_games():
     if game_date_to:
         conditions.append('"gameDate"::date <= %s')
         params.append(game_date_to)
+    else:
+        # Never show today or future games in the historical view
+        conditions.append(f'"gameDate"::date < {_eastern_date()}')
     if team:
         conditions.append('("HOME" = %s OR "AWAY" = %s)')
         params.extend([team, team])
@@ -1756,7 +1948,7 @@ def api_historical_games():
         rows = _query_one(
             f"""
             SELECT game_date, home, away, goals_for, goals_against, is_win, game_id FROM (
-                SELECT "gameDate" AS game_date, "HOME" AS home, "AWAY" AS away,
+                SELECT "gameDate"::date AS game_date, "HOME" AS home, "AWAY" AS away,
                     CASE WHEN "home_or_away" = 'HOME' THEN "sum_game_Total_goalsFor" ELSE "sum_game_Total_goalsAgainst" END AS goals_for,
                     CASE WHEN "home_or_away" = 'HOME' THEN "sum_game_Total_goalsAgainst" ELSE "sum_game_Total_goalsFor" END AS goals_against,
                     CASE WHEN "home_or_away" = 'HOME' THEN "isWin" ELSE (CASE WHEN "isWin" = 'Yes' THEN 'No' ELSE 'Yes' END) END AS is_win,
@@ -1773,9 +1965,14 @@ def api_historical_games():
     except Exception as e:
         print(f"Historical games query failed: {e}")
     games = [dict(r) for r in rows] if rows else []
+    # Normalize game_date to plain YYYY-MM-DD string to prevent timezone
+    # shifts when the JSON is parsed by JavaScript (avoids "off by 1 day" bug)
+    for g in games:
+        if g.get("game_date") is not None:
+            g["game_date"] = _to_iso_date(g["game_date"])
     _fix_zero_scores_from_player_stats(games)
     data_through = max(
-        (str(g.get("game_date"))[:10] for g in games if g.get("game_date")),
+        (g["game_date"] for g in games if g.get("game_date")),
         default=None,
     )
     return jsonify(games=games, data_through=data_through)
@@ -2088,8 +2285,9 @@ def _historical_player_stats_queries(game_id, game_date, home, away):
 
 @app.route("/api/historical-game-stats")
 def api_historical_game_stats():
-    """Player stats for a specific historical game. Params: game_date, home, away (or game_id).
-    Requires gold_player_stats_clean synced to Lakebase."""
+    """Player stats + team SOG totals for a specific historical game. Params: game_date, home, away (or game_id).
+    Returns: players (list), team_totals (list of {team, sog, goals, home, away}).
+    """
     game_date = request.args.get("game_date", "").strip()
     home = (request.args.get("home") or "").strip().upper()
     away = (request.args.get("away") or "").strip().upper()
@@ -2098,7 +2296,42 @@ def api_historical_game_stats():
         game_id = ""
 
     if not game_id and not (game_date and home and away):
-        return jsonify(players=[], error="game_date+home+away or game_id required"), 400
+        return jsonify(players=[], team_totals=[], error="game_date+home+away or game_id required"), 400
+
+    # --- Team-level SOG & goals from gold_game_stats_clean ---
+    team_totals = []
+    try:
+        if game_id:
+            tt_rows = _query_one(
+                """
+                SELECT "playerTeam" AS team,
+                       COALESCE("sum_game_Total_shotsOnGoalFor"::numeric, 0)::int AS sog,
+                       COALESCE("sum_game_Total_goalsFor"::numeric, 0)::int AS goals,
+                       "HOME" AS home, "AWAY" AS away
+                FROM public.gold_game_stats_clean
+                WHERE "gameId" = %s
+                ORDER BY team
+                """,
+                (game_id,),
+            )
+        else:
+            tt_rows = _query_one(
+                """
+                SELECT "playerTeam" AS team,
+                       COALESCE("sum_game_Total_shotsOnGoalFor"::numeric, 0)::int AS sog,
+                       COALESCE("sum_game_Total_goalsFor"::numeric, 0)::int AS goals,
+                       "HOME" AS home, "AWAY" AS away
+                FROM public.gold_game_stats_clean
+                WHERE "gameId" IS NOT NULL AND "gameDate"::date = %s
+                  AND (("HOME" = %s AND "AWAY" = %s) OR ("HOME" = %s AND "AWAY" = %s))
+                ORDER BY team
+                """,
+                (game_date, home, away, away, home),
+            )
+        if tt_rows:
+            team_totals = [dict(r) for r in tt_rows]
+    except Exception as e:
+        print(f"Historical game team totals query failed: {e}")
 
     queries = _historical_player_stats_queries(game_id, game_date, home, away)
     last_err = None
@@ -2119,17 +2352,75 @@ def api_historical_game_stats():
             if box:
                 players = _players_from_nhl_boxscore(box)
                 if players:
-                    return jsonify(players=players)
+                    # Also derive team totals from boxscore if not already populated
+                    if not team_totals:
+                        away_t = box.get("awayTeam") or {}
+                        home_t = box.get("homeTeam") or {}
+                        a_abbrev = (away_t.get("abbrev") or "").strip().upper()
+                        h_abbrev = (home_t.get("abbrev") or "").strip().upper()
+                        if a_abbrev and h_abbrev:
+                            team_totals = [
+                                {"team": a_abbrev, "sog": sum(p.get("sog", 0) for p in players if p.get("team") == a_abbrev),
+                                 "goals": away_t.get("score", 0), "home": h_abbrev, "away": a_abbrev},
+                                {"team": h_abbrev, "sog": sum(p.get("sog", 0) for p in players if p.get("team") == h_abbrev),
+                                 "goals": home_t.get("score", 0), "home": h_abbrev, "away": a_abbrev},
+                            ]
+                    return jsonify(players=players, team_totals=team_totals)
 
     if rows is None:
         print(f"Historical game stats: all queries failed. Last error: {last_err}")
         return jsonify(
             players=[],
+            team_totals=team_totals,
             error="Player stats unavailable. Ensure gold_player_stats_clean is synced to Lakebase.",
         )
 
     players = [dict(r) for r in rows]
-    return jsonify(players=players)
+    return jsonify(players=players, team_totals=team_totals)
+
+
+@app.route("/api/team-last-game")
+def api_team_last_game():
+    """Most recent completed game for a team. Returns game metadata + team SOG totals.
+    Param: team (e.g. OTT).
+    """
+    team = (request.args.get("team") or "").strip().upper()
+    if not team:
+        return jsonify(game=None, error="team required"), 400
+    rows = []
+    try:
+        rows = _query_one(
+            f"""
+            SELECT "gameDate"::date AS game_date,
+                   "HOME" AS home, "AWAY" AS away,
+                   "gameId" AS game_id,
+                   COALESCE("sum_game_Total_goalsFor"::numeric, 0)::int AS goals_for,
+                   COALESCE("sum_game_Total_goalsAgainst"::numeric, 0)::int AS goals_against,
+                   "isWin" AS is_win,
+                   COALESCE("sum_game_Total_shotsOnGoalFor"::numeric, 0)::int AS team_sog,
+                   COALESCE("sum_game_Total_shotsOnGoalAgainst"::numeric, 0)::int AS opp_sog
+            FROM public.gold_game_stats_clean
+            WHERE "playerTeam" = %s
+              AND "gameId" IS NOT NULL
+              AND "gameDate"::date < {_eastern_date()}
+            ORDER BY "gameDate"::date DESC, "gameId" DESC
+            LIMIT 1
+            """,
+            (team,),
+        )
+    except Exception as e:
+        print(f"Team last game query failed: {e}")
+        return jsonify(game=None, error=str(e))
+
+    if not rows:
+        return jsonify(game=None)
+    game = dict(rows[0])
+    gd = game.get("game_date")
+    if hasattr(gd, "strftime"):
+        game["game_date"] = gd.strftime("%Y-%m-%d")
+    elif gd is not None:
+        game["game_date"] = str(gd)[:10]
+    return jsonify(game=game)
 
 
 def _top_shooters_from_nhl_games(game_ids, limit=10):

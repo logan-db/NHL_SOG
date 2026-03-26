@@ -319,91 +319,56 @@ display(
 # COMMAND ----------
 
 # DBTITLE 1,clean_prediction_summary
-# MAGIC %sql
-# MAGIC CREATE OR REPLACE TABLE lr_nhl_demo.dev.clean_prediction_summary (
-# MAGIC     gameId STRING COMMENT 'The ID of the game',
-# MAGIC     playerId STRING COMMENT 'The ID of the player',
-# MAGIC     gameDate DATE COMMENT 'The date of the game',
-# MAGIC     shooterName STRING COMMENT 'Name of the player',
-# MAGIC     playerTeam STRING COMMENT 'Team of the player',
-# MAGIC     opposingTeam STRING COMMENT 'Opposing team',
-# MAGIC     season INT COMMENT 'Season year',
-# MAGIC     is_last_played_game BOOLEAN COMMENT 'Is the last played game for the player',
-# MAGIC     is_last_played_game_team INT COMMENT 'Is the last played game for the playerTeam',
-# MAGIC     absVarianceAvgLast7SOG DOUBLE COMMENT 'Absolute variance of average shots on goal in the last 7 games of the player against the players predicted Shots on Goal',
-# MAGIC     predictedSOG DOUBLE COMMENT 'Predicted shots on goal for the player',
-# MAGIC     `playerLast7PPSOG%` DOUBLE COMMENT 'Player last 7 games power play shots on goal to player total shots on goal percentage',
-# MAGIC     `playerLast7EVSOG%` DOUBLE COMMENT 'Player last 7 games even strength shots on goal to player total shots on goal percentage',
-# MAGIC     playerLastSOG DOUBLE COMMENT 'Previous game player total shots on goal',
-# MAGIC     playerAvgSOGLast3 DOUBLE COMMENT 'Average player total shots on goal in the last 3 games',
-# MAGIC     playerAvgSOGLast7 DOUBLE COMMENT 'Average player total shots on goal in the last 7 games',
-# MAGIC     `teamGoalsForRank%` DOUBLE COMMENT 'Player Team percentage rank of total goals for. Higher is better',
-# MAGIC     `teamSOGForRank%` DOUBLE COMMENT 'Player Team percentage rank of total shots on goal for. Higher is better',
-# MAGIC     `teamPPSOGRank%` DOUBLE COMMENT 'Player Team percentage rank of power play shots on goal per penalty. Higher is better',
-# MAGIC     `playerSOGRank%` DOUBLE COMMENT 'Player SOG percentile rank vs teammates (0-1). Higher = top shooter on team.',
-# MAGIC     `oppGoalsAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total goals against. Lower = opponent allows more goals = better',
-# MAGIC     `oppSOGAgainstRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total shots on goal against. Lower = opponent allows more shots = better',
-# MAGIC     `oppPenaltiesRank%` DOUBLE COMMENT 'Opponent Team percentage rank of total penalties for. Higher = opponent takes more penalties = better',
-# MAGIC     `oppPKSOGRank%` DOUBLE COMMENT 'Opponent Team percentage rank of penalty kill shots on goal against per penalty. Lower = opponent allows more PK SOG = better',
-# MAGIC     matchup_previous_player_Total_shotsOnGoal DOUBLE COMMENT 'Total shots on goal by the player the last game they played against this opposingTeam',
-# MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games DOUBLE COMMENT 'Average shots on goal by the player over the last 3 games they played against this opposingTeam',
-# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games DOUBLE COMMENT 'Average shots on goal by the player over the last 7 games they played against this opposingTeam',
-# MAGIC     `player_2+_SeasonHitRate` DOUBLE COMMENT 'Player 2+ SOG hit rate for the season',
-# MAGIC     `player_3+_SeasonHitRate` DOUBLE COMMENT 'Player 3+ SOG hit rate for the season',
-# MAGIC     `player_2+_SeasonMatchupHitRate` DOUBLE COMMENT 'Player 2+ SOG hit rate vs this opponent this season',
-# MAGIC     `player_3+_SeasonMatchupHitRate` DOUBLE COMMENT 'Player 3+ SOG hit rate vs this opponent this season',
-# MAGIC     `player_2+_Last30HitRate` DOUBLE COMMENT 'Player 2+ SOG hit rate in last 30 days',
-# MAGIC     `player_3+_Last30HitRate` DOUBLE COMMENT 'Player 3+ SOG hit rate in last 30 days',
-# MAGIC     previous_player_Total_iceTimeRank INT COMMENT 'Player ice time rank among teammates in last game (1=most). Higher=more usage',
-# MAGIC     previous_player_PP_iceTimeRank INT COMMENT 'Player PP ice time rank among teammates in last game (1=most)'
-# MAGIC )
-# MAGIC COMMENT 'Summary of clean predictions for NHL games'
-# MAGIC TBLPROPERTIES (delta.enableChangeDataFeed = true);
-# MAGIC
-# MAGIC INSERT INTO lr_nhl_demo.dev.clean_prediction_summary
-# MAGIC SELECT
-# MAGIC     gameId,
-# MAGIC     playerId,
-# MAGIC     gameDate,
-# MAGIC     shooterName,
-# MAGIC     playerTeam,
-# MAGIC     opposingTeam,
-# MAGIC     season,
-# MAGIC     is_last_played_game,
-# MAGIC     is_last_played_game_team,
-# MAGIC     absVarianceAvgLast7SOG,
-# MAGIC     ROUND(predictedSOG, 2) AS predictedSOG,
-# MAGIC     `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
-# MAGIC     `average_player_SOG%_EV_last_7_games` AS `playerLast7EVSOG%`,
-# MAGIC     previous_player_Total_shotsOnGoal AS playerLastSOG,
-# MAGIC     average_player_Total_shotsOnGoal_last_3_games AS playerAvgSOGLast3,
-# MAGIC     average_player_Total_shotsOnGoal_last_7_games AS playerAvgSOGLast7,
-# MAGIC     previous_perc_rank_rolling_game_Total_goalsFor AS `teamGoalsForRank%`,
-# MAGIC     previous_perc_rank_rolling_game_Total_shotsOnGoalFor AS `teamSOGForRank%`,
-# MAGIC     previous_perc_rank_rolling_game_PP_SOGForPerPenalty AS `teamPPSOGRank%`,
-# MAGIC     previous_perc_rank_rolling_player_Total_shotsOnGoal AS `playerSOGRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
-# MAGIC     opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`,
-# MAGIC     matchup_previous_player_Total_shotsOnGoal,
-# MAGIC     matchup_average_player_Total_shotsOnGoal_last_3_games,
-# MAGIC     matchup_average_player_Total_shotsOnGoal_last_7_games,
-# MAGIC     `player_2+_SeasonHitRate`,
-# MAGIC     `player_3+_SeasonHitRate`,
-# MAGIC     `player_2+_SeasonMatchupHitRate`,
-# MAGIC     `player_3+_SeasonMatchupHitRate`,
-# MAGIC     `player_2+_Last30HitRate`,
-# MAGIC     `player_3+_Last30HitRate`,
-# MAGIC     previous_player_Total_iceTimeRank,
-# MAGIC     previous_player_PP_iceTimeRank
-# MAGIC FROM (
-# MAGIC   SELECT *, ROW_NUMBER() OVER (PARTITION BY shooterName, gameDate, playerTeam, opposingTeam ORDER BY absVarianceAvgLast7SOG DESC, predictedSOG DESC) AS rn
-# MAGIC   FROM lr_nhl_demo.dev.clean_prediction_v2
-# MAGIC   WHERE gameDate IS NOT NULL
-# MAGIC ) sub
-# MAGIC WHERE rn = 1
-# MAGIC ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC;
+# Use PySpark overwrite instead of CREATE OR REPLACE TABLE + INSERT INTO.
+# CREATE OR REPLACE resets the Delta transaction log on every run, which invalidates
+# the Lakebase triggered-sync CDF checkpoint → Lakebase serves stale predictions.
+# DataFrame.write.mode("overwrite") preserves the Delta table and its CDF history so
+# the Lakebase sync correctly sees each day's deletes + inserts.
+summary_df = spark.sql("""
+    SELECT
+        gameId, playerId, gameDate, shooterName, playerTeam, opposingTeam, season,
+        is_last_played_game, is_last_played_game_team, absVarianceAvgLast7SOG,
+        ROUND(predictedSOG, 2) AS predictedSOG,
+        `average_player_SOG%_PP_last_7_games` AS `playerLast7PPSOG%`,
+        `average_player_SOG%_EV_last_7_games` AS `playerLast7EVSOG%`,
+        previous_player_Total_shotsOnGoal AS playerLastSOG,
+        average_player_Total_shotsOnGoal_last_3_games AS playerAvgSOGLast3,
+        average_player_Total_shotsOnGoal_last_7_games AS playerAvgSOGLast7,
+        previous_perc_rank_rolling_game_Total_goalsFor AS `teamGoalsForRank%`,
+        previous_perc_rank_rolling_game_Total_shotsOnGoalFor AS `teamSOGForRank%`,
+        previous_perc_rank_rolling_game_PP_SOGForPerPenalty AS `teamPPSOGRank%`,
+        previous_perc_rank_rolling_player_Total_shotsOnGoal AS `playerSOGRank%`,
+        opponent_previous_perc_rank_rolling_game_Total_goalsAgainst AS `oppGoalsAgainstRank%`,
+        opponent_previous_perc_rank_rolling_game_Total_shotsOnGoalAgainst AS `oppSOGAgainstRank%`,
+        opponent_previous_perc_rank_rolling_game_Total_penaltiesFor AS `oppPenaltiesRank%`,
+        opponent_previous_perc_rank_rolling_game_PK_SOGAgainstPerPenalty AS `oppPKSOGRank%`,
+        matchup_previous_player_Total_shotsOnGoal,
+        matchup_average_player_Total_shotsOnGoal_last_3_games,
+        matchup_average_player_Total_shotsOnGoal_last_7_games,
+        `player_2+_SeasonHitRate`, `player_3+_SeasonHitRate`,
+        `player_2+_SeasonMatchupHitRate`, `player_3+_SeasonMatchupHitRate`,
+        `player_2+_Last30HitRate`, `player_3+_Last30HitRate`,
+        previous_player_Total_iceTimeRank, previous_player_PP_iceTimeRank
+    FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (
+                   PARTITION BY shooterName, gameDate, playerTeam, opposingTeam
+                   ORDER BY absVarianceAvgLast7SOG DESC, predictedSOG DESC
+               ) AS rn
+        FROM lr_nhl_demo.dev.clean_prediction_v2
+        WHERE gameDate IS NOT NULL
+    ) sub
+    WHERE rn = 1
+    ORDER BY gameDate ASC, absVarianceAvgLast7SOG DESC, predictedSOG DESC
+""")
+
+summary_df.write.format("delta").mode("overwrite").option(
+    "overwriteSchema", "true"
+).saveAsTable("lr_nhl_demo.dev.clean_prediction_summary")
+# Re-enable CDF after overwrite (preserved by mode("overwrite") but set explicitly as belt-and-suspenders)
+spark.sql(
+    "ALTER TABLE lr_nhl_demo.dev.clean_prediction_summary SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+)
 
 # COMMAND ----------
 

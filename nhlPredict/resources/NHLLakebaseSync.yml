@@ -72,14 +72,18 @@ resources:
           storage_schema: dev
 
     # 5b. gold_player_stats_clean - Historical player stats per game (SOG, goals, points)
-    # One row per player per game; (gameId, playerId) is unique
+    # One row per player per game; (playerId, gameDate, playerTeam, opposingTeam) is unique
+    # NOTE: gameId is NULL for upcoming games (no result yet), so it cannot be a PK.
+    # playerId+gameDate+playerTeam+opposingTeam has 0 nulls and is perfectly unique.
     gold_player_stats_clean_sync:
       name: lr-lakebase.public.gold_player_stats_clean
       spec:
         source_table_full_name: lr_nhl_demo.dev.gold_player_stats_clean
         primary_key_columns:
-          - gameId
           - playerId
+          - gameDate
+          - playerTeam
+          - opposingTeam
         scheduling_policy: TRIGGERED
         create_database_objects_if_missing: true
         new_pipeline_spec:

@@ -271,8 +271,19 @@ def aggregate_games_data():
     else:
         print(f"📊 silver_games_schedule after join: {_join_count} rows")
 
+    # TODAY'S GAMES FIX: The NHL API assigns gameIds to scheduled future games before they're
+    # played. When bronze ingestion runs on game day (e.g. 9 AM), today's games already have
+    # real gameIds in silver_games_historical_v2, causing them to fall into the "historical"
+    # bucket (gameId IS NOT NULL) and get skipped by the prediction pipeline.
+    # Fix: treat any game with gameDate > future_cutoff_date (i.e. >= today) as upcoming,
+    # regardless of gameId. Null out the gameId so downstream prediction logic sees them as
+    # future games needing predictions.
     upcoming_final_clean = (
-        silver_games_schedule.filter(col("gameId").isNull())
+        silver_games_schedule.filter(
+            col("gameId").isNull()
+            | (to_date(col("DATE")) > lit(future_cutoff_date))
+        )
+        .withColumn("gameId", lit(None))  # Force gameId=NULL: not yet played
         .withColumn("team", col("TEAM_ABV"))
         .withColumn(
             "season",
@@ -311,8 +322,12 @@ def aggregate_games_data():
     # CRITICAL: Historical rows have "team" from games_historical but NOT "playerTeam".
     # Add playerTeam=team so the join with silver_players_ranked (on playerTeam) matches.
     # Without this, historical rows get playerTeam=null from union -> 0 join matches -> gold empty.
+    # Historical = gameId IS NOT NULL AND gameDate <= yesterday (already played)
     regular_season_schedule = (
-        silver_games_schedule.filter(col("gameId").isNotNull())
+        silver_games_schedule.filter(
+            col("gameId").isNotNull()
+            & (to_date(col("DATE")) <= lit(future_cutoff_date))
+        )
         .drop("TEAM_ABV")
         .withColumn("playerTeam", col("team"))
         .unionByName(upcoming_final_clean)

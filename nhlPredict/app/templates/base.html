@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}SOG Predict — NHL Shots on Goal{% endblock %}</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥅</text></svg>">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.png') }}">
+  <meta property="og:image" content="{{ url_for('static', filename='logo.png') }}">
+  <meta property="og:title" content="SOG Predict — NHL Shots on Goal Analytics">
+  <meta property="og:description" content="AI-powered NHL shots-on-goal predictions and player analytics.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -15,7 +19,7 @@
   <header class="app-header">
     <div class="header-content">
       <h1 class="logo">
-        <span class="logo-mark">◈</span>
+        <img src="{{ url_for('static', filename='favicon.png') }}" alt="SOG Predict logo" class="logo-img">
         <span class="logo-text">SOG Predict</span>
         <span class="logo-sub">NHL Shots on Goal</span>
       </h1>

@@ -354,22 +354,23 @@ display(gold_player_stats_clean)
 
 # COMMAND ----------
 
-spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_player_stats_clean")
+# Write with overwrite mode — preserves the Delta table's identity and transaction log so the
+# Lakebase TRIGGERED sync (CDF-based) can detect changes. Dropping and recreating the table
+# resets the Delta log, which leaves the sync pipeline with a stale checkpoint and no updates.
 gold_player_stats_clean.write.format("delta").mode("overwrite").option(
-    "delta.enableChangeDataFeed", "true"
+    "overwriteSchema", "true"
 ).saveAsTable("lr_nhl_demo.dev.gold_player_stats_clean")
-# Ensure CDF for Lakebase TRIGGERED sync
+# Ensure CDF is enabled for Lakebase TRIGGERED sync (belt-and-suspenders; set on first write)
 spark.sql(
     "ALTER TABLE lr_nhl_demo.dev.gold_player_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
 
 # COMMAND ----------
 
-spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_game_stats_clean")
 games_clean.write.format("delta").mode("overwrite").option(
-    "delta.enableChangeDataFeed", "true"
+    "overwriteSchema", "true"
 ).saveAsTable("lr_nhl_demo.dev.gold_game_stats_clean")
-# Belt-and-suspenders: ensure CDF for Lakebase TRIGGERED sync (option may not apply on saveAsTable)
+# Ensure CDF is enabled for Lakebase TRIGGERED sync (belt-and-suspenders; set on first write)
 spark.sql(
     "ALTER TABLE lr_nhl_demo.dev.gold_game_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )

@@ -39,22 +39,25 @@ targets:
     #       - nhlPredict/src/data/2025_26_official_nhl_schedule_by_day.csv
     #       - nhlPredict/src/data/8477493.csv
     #       - nhlPredict/src/data/team_code_mappings.csv
-    artifacts:
-      player_data_upload:
-        path: /Users/logan.rupert/Library/CloudStorage/GoogleDrive-logan.rupert@databricks.com/My Drive/Repositories/NHL_SOG/nhlPredict/src/data/8477493.csv
-        type: csv
-        files: 
-          - source: "/Users/logan.rupert/Library/CloudStorage/GoogleDrive-logan.rupert@databricks.com/My Drive/Repositories/NHL_SOG/nhlPredict/src/data/8477493.csv"
-      schedule_upload:
-        path: /Users/logan.rupert/Library/CloudStorage/GoogleDrive-logan.rupert@databricks.com/My Drive/Repositories/NHL_SOG/nhlPredict/src/data/Edited_25-26 NHL Schedule - NHL schedule.csv
-        type: csv
-        files: 
-          - source: "/Users/logan.rupert/Library/CloudStorage/GoogleDrive-logan.rupert@databricks.com/My Drive/Repositories/NHL_SOG/nhlPredict/src/data/Edited_25-26 NHL Schedule - NHL schedule.csv"
-      mappings_upload:
-        path: /Users/logan.rupert/Library/CloudStorage/GoogleDrive-logan.rupert@databricks.com/My Drive/Repositories/NHL_SOG/nhlPredict/src/data/team_code_mappings.csv
-        type: csv
-        files: 
-          - source: "/Users/logan.rupert/Library/CloudStorage/GoogleDrive-logan.rupert@databricks.com/My Drive/Repositories/NHL_SOG/nhlPredict/src/data/team_code_mappings.csv"
+    # CSV artifact uploads are disabled: "csv" is not a valid artifact type (only whl/jar supported).
+    # These files are handled at runtime by the NHLPlayerPropRetrain upload_player_stats task,
+    # which reads from base_vol_load_path (/Volumes/.../data/.internal/) — a different path anyway.
+    # artifacts:
+    #   player_data_upload:
+    #     path: .../src/data/8477493.csv
+    #     type: csv
+    #     files:
+    #       - source: ".../src/data/8477493.csv"
+    #   schedule_upload:
+    #     path: .../src/data/Edited_25-26 NHL Schedule - NHL schedule.csv
+    #     type: csv
+    #     files:
+    #       - source: ".../src/data/Edited_25-26 NHL Schedule - NHL schedule.csv"
+    #   mappings_upload:
+    #     path: .../src/data/team_code_mappings.csv
+    #     type: csv
+    #     files:
+    #       - source: ".../src/data/team_code_mappings.csv"
   
   ## Optionally, there could be a 'staging' target here.
   ## (See Databricks docs on CI/CD at https://docs.databricks.com/dev-tools/bundles/ci-cd.html.)

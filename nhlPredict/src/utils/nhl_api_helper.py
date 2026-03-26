@@ -537,17 +537,28 @@ def aggregate_team_stats_by_situation(
             if is_team_event:
                 stats[situation]["goalsFor"] += 1
                 stats["all"]["goalsFor"] += 1
+                # Goals are shots on goal (official NHL SOG = saves + goals).
+                # The NHL API fires "goal" events separately from "shot-on-goal"
+                # (saves), so goals must be explicitly counted here.
+                stats[situation]["shotsOnGoalFor"] += 1
+                stats["all"]["shotsOnGoalFor"] += 1
 
                 danger = classify_shot_danger(x_coord, y_coord)
                 stats[situation][f"{danger}GoalsFor"] += 1
                 stats["all"][f"{danger}GoalsFor"] += 1
+                stats[situation][f"{danger}ShotsFor"] += 1
+                stats["all"][f"{danger}ShotsFor"] += 1
             else:
                 stats[situation]["goalsAgainst"] += 1
                 stats["all"]["goalsAgainst"] += 1
+                stats[situation]["shotsOnGoalAgainst"] += 1
+                stats["all"]["shotsOnGoalAgainst"] += 1
 
                 danger = classify_shot_danger(x_coord, y_coord)
                 stats[situation][f"{danger}GoalsAgainst"] += 1
                 stats["all"][f"{danger}GoalsAgainst"] += 1
+                stats[situation][f"{danger}ShotsAgainst"] += 1
+                stats["all"][f"{danger}ShotsAgainst"] += 1
 
         elif event_type == "missed-shot":
             if is_team_event:

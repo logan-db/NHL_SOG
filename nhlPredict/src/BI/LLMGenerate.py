@@ -134,7 +134,7 @@ df_out = latest_games.selectExpr("*", ai_query_expr)
 
 # DBTITLE 1,Save Dataframe to UC
 df_out.write.format("delta").mode("overwrite").option(
-    "mergeSchema", "true"
+    "overwriteSchema", "true"
 ).option("delta.enableChangeDataFeed", "true").saveAsTable(
     "lr_nhl_demo.dev.llm_summary"
 )

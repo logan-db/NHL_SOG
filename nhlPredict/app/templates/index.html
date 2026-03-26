@@ -125,17 +125,29 @@
       <p id="yesterday-shooters-empty" class="empty-hint" style="display:none;">No player stats from yesterday.</p>
     </div>
   </div>
-  <div class="yesterday-team-sog" id="yesterday-team-sog">
-    <h3 class="yesterday-card-title" style="grid-column: 1 / -1; margin-bottom: 0.5rem;">Top / Bottom Teams <span class="yesterday-label-badge">Season Avg</span></h3>
-    <div class="yesterday-team-sog-card" id="team-sog-shooting-card">
-      <h4 class="team-sog-subtitle">Top Shooting</h4>
-      <div id="team-sog-shooting" class="team-sog-list"></div>
-      <p id="team-sog-shooting-empty" class="empty-hint" style="display:none;">No team stats for this date.</p>
+</section>
+<!-- Season Team SOG Rankings -->
+<section id="team-season-rankings" class="section team-season-section">
+  <div class="team-season-header">
+    <div>
+      <h2 class="section-heading" style="margin-bottom:0.15rem;">Season Team SOG Rankings</h2>
+      <p class="text-secondary" style="font-size:0.78rem;color:var(--text-muted);margin:0;">Full-season avg shots on goal (SOG) and shots allowed (SOGA) per team.</p>
     </div>
-    <div class="yesterday-team-sog-card" id="team-sog-allowed-card">
-      <h4 class="team-sog-subtitle">Most SOG Allowed</h4>
+    <div class="team-season-toggle-group">
+      <button type="button" class="btn-team-show-toggle active" id="btn-team-top10" data-show="top10">Top 10</button>
+      <button type="button" class="btn-team-show-toggle" id="btn-team-all" data-show="all">All Teams</button>
+    </div>
+  </div>
+  <div class="team-season-grid" id="team-season-grid">
+    <div class="team-season-card" id="team-sog-shooting-card">
+      <h4 class="team-sog-subtitle">Top Shooting <span class="team-sog-badge">Avg SOG / Game</span></h4>
+      <div id="team-sog-shooting" class="team-sog-list"></div>
+      <p id="team-sog-shooting-empty" class="empty-hint" style="display:none;">No data available.</p>
+    </div>
+    <div class="team-season-card" id="team-sog-allowed-card">
+      <h4 class="team-sog-subtitle">Softest Defense <span class="team-sog-badge soga-badge">Avg SOGA / Game</span></h4>
       <div id="team-sog-allowed" class="team-sog-list"></div>
-      <p id="team-sog-allowed-empty" class="empty-hint" style="display:none;">No team stats for this date.</p>
+      <p id="team-sog-allowed-empty" class="empty-hint" style="display:none;">No data available.</p>
     </div>
   </div>
 </section>
@@ -155,6 +167,7 @@
     <canvas id="hit-rate-chart"></canvas>
   </div>
   <p id="hit-rate-empty" class="empty-hint" style="display:none;">No upcoming game predictions available yet.</p>
+  <p id="hit-rate-click-hint" class="empty-hint" style="margin-top:0.4rem;">Click any player bar to view their full analysis for today's game.</p>
 </section>
 <section id="top-picks" class="section top-picks-section">
   <h2 class="section-heading">Top Picks to Watch</h2>
@@ -164,7 +177,14 @@
   <div id="top-picks-grid" class="top-picks-grid"></div>
 </section>
 <section id="games" class="section">
-  <h2 class="section-heading">Upcoming Games</h2>
+  <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.15rem;">
+    <h2 class="section-heading" style="margin-bottom:0;">Upcoming Games</h2>
+    <div class="games-view-toggle" id="games-view-toggle">
+      <button class="btn-games-view active" data-view="today">Today</button>
+      <button class="btn-games-view" data-view="tomorrow">Tomorrow</button>
+    </div>
+    <span id="games-date-badge" class="games-date-badge" style="display:none;"></span>
+  </div>
   <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.75rem; color: var(--text-muted);">
     Click a game to see all player predictions. Click a player for detailed stats.
   </p>
@@ -211,7 +231,7 @@
           <th class="numeric">Avg 7</th>
           <th class="numeric">2+ %</th>
           <th class="numeric">3+ %</th>
-          <th class="numeric">Opp SOG %</th>
+          <th class="numeric">Opp SOG Rank</th>
           <th>Explanation</th>
         </tr>
       </thead>
@@ -308,7 +328,7 @@
           <th class="sortable" data-sort="away" data-dir="" title="Click to sort">Away <span class="sort-indicator"></span></th>
           <th class="sortable numeric" data-sort="goals_for" data-dir="" title="Click to sort">GF <span class="sort-indicator"></span></th>
           <th class="sortable numeric" data-sort="goals_against" data-dir="" title="Click to sort">GA <span class="sort-indicator"></span></th>
-          <th class="sortable" data-sort="result" data-dir="" title="Click to sort">Result <span class="sort-indicator"></span></th>
+          <th class="sortable" data-sort="result" data-dir="" title="Click to sort">Home Team Result <span class="sort-indicator"></span></th>
         </tr>
       </thead>
       <tbody id="historical-body">

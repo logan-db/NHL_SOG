@@ -3,3 +3,4 @@ venv/
 __pycache__/
 *.py[cod]
 .env
+sog_predict_snapshot*.html
