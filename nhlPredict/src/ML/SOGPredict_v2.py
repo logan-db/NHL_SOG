@@ -138,14 +138,66 @@ display(gold_model_stats.filter(col("gameId").isNull()))
 
 # COMMAND ----------
 
+# Filter out injured/unavailable players using bronze_player_availability
+try:
+    player_availability = spark.table(f"{catalog_param}.bronze_player_availability")
+    unavailable_players = (
+        player_availability
+        .filter(col("status").isin("UNAVAILABLE", "IR", "LTIR", "OUT", "SUSPENDED"))
+        .select(col("playerId").cast("string").alias("_unavail_playerId"))
+        .distinct()
+    )
+    unavailable_count = unavailable_players.count()
+    print(f"Filtering out {unavailable_count} unavailable/injured players from predictions")
+    _has_availability = True
+except Exception:
+    _has_availability = False
+    print("No bronze_player_availability table found; skipping injury filter")
+
+# Also check for traded players and update their team context
+try:
+    player_transactions = spark.table(f"{catalog_param}.bronze_player_transactions")
+    recent_trades = (
+        player_transactions
+        .filter(col("transaction_type") == "TRADE")
+        .groupBy("playerId")
+        .agg({"to_team": "last", "transaction_date": "max"})
+        .withColumnRenamed("last(to_team)", "new_team")
+        .withColumnRenamed("max(transaction_date)", "trade_date")
+        .select(col("playerId").cast("string").alias("_trade_playerId"), "new_team")
+    )
+    trade_count = recent_trades.count()
+    print(f"Found {trade_count} recently traded players to update team context")
+    _has_trades = True
+except Exception:
+    _has_trades = False
+    print("No bronze_player_transactions table found; skipping trade updates")
+
 upcoming_games = gold_model_stats.filter(
     (col("gameId").isNull())
-    # & (col("playerGamesPlayedRolling") > 0)
     & (col("rolling_playerTotalTimeOnIceInGame") > 300)
     & (col("gameDate") != "2024-01-17")
 ).withColumn(
     "is_last_played_game_team", when(col("gameId").isNull(), lit(1)).otherwise(lit(0))
 )
+
+if _has_availability:
+    before_filter = upcoming_games.count()
+    upcoming_games = upcoming_games.join(
+        unavailable_players,
+        upcoming_games["playerId"] == unavailable_players["_unavail_playerId"],
+        how="left_anti",
+    )
+    after_filter = upcoming_games.count()
+    print(f"Injury filter: {before_filter} -> {after_filter} upcoming predictions ({before_filter - after_filter} removed)")
+
+if _has_trades:
+    upcoming_games = (
+        upcoming_games
+        .join(recent_trades, upcoming_games["playerId"] == recent_trades["_trade_playerId"], how="left")
+        .withColumn("playerTeam", when(col("new_team").isNotNull(), col("new_team")).otherwise(col("playerTeam")))
+        .drop("_trade_playerId", "new_team")
+    )
 
 display(upcoming_games)
 

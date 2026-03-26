@@ -112,10 +112,19 @@ resources:
             source: WORKSPACE
           job_cluster_key: LR-ML-old
 
+        - task_key: ingest_player_availability
+          depends_on:
+            - task_key: pre_ingest_staging
+          notebook_task:
+            notebook_path: ../src/dlt_etl/ingestion/roster_health_ingestion.py
+            source: WORKSPACE
+          environment_key: Default
+
         - task_key: predictSOG
           depends_on:
             - task_key: register_model
             - task_key: UpdateFeatureTables
+            - task_key: ingest_player_availability
           run_if: AT_LEAST_ONE_SUCCESS
           notebook_task:
             notebook_path: ../src/ML/SOGPredict_v2.py
@@ -151,11 +160,20 @@ resources:
             source: WORKSPACE
           environment_key: ServerlessBackfill
 
+        - task_key: model_monitoring
+          depends_on:
+            - task_key: predictSOG
+          notebook_task:
+            notebook_path: ../src/ML/model_monitoring.py
+            source: WORKSPACE
+          environment_key: Default
+
         - task_key: trigger_lakebase_sync
           depends_on:
             - task_key: genie_prep
             - task_key: generate_explanations
             - task_key: backfill_user_picks_actual_sog
+            - task_key: model_monitoring
           notebook_task:
             notebook_path: ../src/triggers/trigger_sync_integration.py
             source: WORKSPACE

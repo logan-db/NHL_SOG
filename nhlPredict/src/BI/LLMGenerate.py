@@ -85,19 +85,54 @@ print(input_column_names_clean)
 
 # COMMAND ----------
 
+# DBTITLE 1,Fetch injury/trade context for enhanced explanations
+injury_context = ""
+trade_context = ""
+accuracy_context = ""
+
+try:
+    _avail = spark.table("dev.bronze_player_availability")
+    _unavail = _avail.filter(col("status").isin("UNAVAILABLE", "IR", "LTIR", "OUT", "DAY_TO_DAY"))
+    if _unavail.count() > 0:
+        _unavail_list = _unavail.select("playerName", "team", "status", "injury_type").limit(30).collect()
+        injury_lines = [f"  - {r['playerName']} ({r['team']}): {r['status']}" + (f" ({r['injury_type']})" if r['injury_type'] else "") for r in _unavail_list]
+        injury_context = "\n\nCurrently injured/unavailable players (excluded from predictions):\n" + "\n".join(injury_lines)
+except Exception:
+    pass
+
+try:
+    _txn = spark.table("dev.bronze_player_transactions")
+    from pyspark.sql.functions import max as spark_max
+    _recent = _txn.filter(col("transaction_type") == "TRADE").orderBy(desc("transaction_date")).limit(10).collect()
+    if _recent:
+        trade_lines = [f"  - {r['playerName']}: {r['from_team']} -> {r['to_team']} ({r['transaction_date']})" for r in _recent]
+        trade_context = "\n\nRecent trades (predictions use new team context):\n" + "\n".join(trade_lines)
+except Exception:
+    pass
+
+try:
+    _acc = spark.table("dev.prediction_accuracy").orderBy(desc("prediction_date")).limit(1).collect()
+    if _acc:
+        accuracy_context = f"\n\nModel recent accuracy: 7-day rolling MAE = {_acc[0]['rolling_mae_7d']}, 30-day rolling MAE = {_acc[0]['rolling_mae_30d']}"
+except Exception:
+    pass
+
+# COMMAND ----------
+
 # DBTITLE 1,Setup Prompt and Call AI_Query()
 endpoint_name = "databricks-claude-3-7-sonnet"
 
 prompt = f"""
 You are an NHL analytics expert. Analyze this player's upcoming game and provide a well-formatted 2-4 paragraph analysis. Cover:
 
-1. **Player profile**: Their role (e.g., major shooter, powerplay specialist), recent form, shot consistency. Note if they take most shots on powerplay (playerLast7PPSOG% high) or even strength.
+1. **Player profile**: Their role (e.g., major shooter, powerplay specialist), recent form, shot consistency. Note if they take most shots on powerplay (playerLast7PPSOG% high) or even strength. If the player recently returned from injury or was traded, mention that context and how it may affect their shot volume.
 
-2. **Key metrics**: Predicted SOG (predictedSOG), average SOG (playerAvgSOGLast7, playerAvgSOGLast3), last game SOG (playerLastSOG). How often they hit 2+ and 3+ SOG this season and vs this opponent. Whether they consistently shoot.
+2. **Key metrics**: Predicted SOG (predictedSOG), average SOG (playerAvgSOGLast7, playerAvgSOGLast3), last game SOG (playerLastSOG). How often they hit 2+ and 3+ SOG this season and vs this opponent. Whether they consistently shoot (check stddev/variance if available).
 
-3. **Matchup**: How the opponent ranks in SOG allowed (oppSOGAgainstRank%), penalties (oppPenaltiesRank%), PK (oppPKSOGRank%). If opponent allows lots of penalties and the player is a PP specialist, highlight that advantage.
+3. **Matchup**: How the opponent ranks in SOG allowed (oppSOGAgainstRank%), penalties (oppPenaltiesRank%), PK (oppPKSOGRank%). If opponent allows lots of penalties and the player is a PP specialist, highlight that advantage. Consider opponent goalie quality if available.
 
 4. **Recommendation**: Whether they are a strong SOG pick based on the data. Be specific with numbers.
+{injury_context}{trade_context}{accuracy_context}
 
 Schema/column meanings for reference:
 {modified_comments}

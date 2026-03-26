@@ -568,6 +568,41 @@ def aggregate_games_data():
             .distinct()  # Remove duplicates (actual data overrides projected)
         )
 
+        # Update teams for recently traded players
+        try:
+            _txn_table = spark.table(f"{_catalog}.{_schema}.bronze_player_transactions")
+            if not _txn_table.isEmpty():
+                _latest_trades = (
+                    _txn_table
+                    .filter(col("transaction_type") == "TRADE")
+                    .groupBy("playerId")
+                    .agg(
+                        max("transaction_date").alias("_trade_date"),
+                    )
+                    .join(
+                        _txn_table.select("playerId", "to_team", "transaction_date"),
+                        on=["playerId"],
+                        how="inner",
+                    )
+                    .filter(col("transaction_date") == col("_trade_date"))
+                    .select(
+                        col("playerId").alias("_trade_pid"),
+                        col("to_team").alias("_new_team"),
+                    )
+                    .distinct()
+                )
+                _trade_count = _latest_trades.count()
+                if _trade_count > 0:
+                    player_index_2023 = (
+                        player_index_2023
+                        .join(_latest_trades, player_index_2023["playerId"] == _latest_trades["_trade_pid"], how="left")
+                        .withColumn("team", coalesce(col("_new_team"), col("team")))
+                        .drop("_trade_pid", "_new_team")
+                    )
+                    print(f"📊 Updated {_trade_count} traded players' teams in roster index")
+        except Exception as _trade_err:
+            print(f"📊 Trade table not available (first run?): {_trade_err}")
+
         print(f"📊 Player Index Summary:")
         print(
             f"   Historical seasons: {historical_players.select('season').distinct().count()}"
@@ -874,6 +909,9 @@ def aggregate_games_data():
         "awayTeamCode",
         "playerGamesPlayedRolling",
         "playerMatchupPlayedRolling",
+        "days_since_last_game",
+        "is_back_to_back",
+        "games_in_last_7_days",
     ]
 
     # Create a window specification (same deterministic order as stat windows)
@@ -916,6 +954,34 @@ def aggregate_games_data():
                 2,
             ),
         )
+        .withColumn(
+            "_prev_gameDate",
+            lag(col("gameDate")).over(windowSpec),
+        )
+        .withColumn(
+            "days_since_last_game",
+            when(
+                col("_prev_gameDate").isNotNull(),
+                datediff(col("gameDate"), col("_prev_gameDate")),
+            ).otherwise(lit(None)),
+        )
+        .withColumn(
+            "is_back_to_back",
+            when(col("days_since_last_game") == 1, lit(1)).otherwise(lit(0)),
+        )
+        .withColumn(
+            "_gameDate_epoch_days",
+            datediff(col("gameDate"), lit("1970-01-01")),
+        )
+        .withColumn(
+            "games_in_last_7_days",
+            count("gameId").over(
+                Window.partitionBy("playerId", "shooterName")
+                .orderBy(col("_gameDate_epoch_days"))
+                .rangeBetween(-7, -1)
+            ),
+        )
+        .drop("_prev_gameDate", "_gameDate_epoch_days")
     )
 
     columns_to_iterate = [
@@ -1033,6 +1099,33 @@ def aggregate_games_data():
                 f"matchup_average_{column_name}_last_7_games"
             ),
         ]
+
+    # Stddev and weighted-recent-average (EWMA approximation) for SOG consistency
+    _sog_col = "player_Total_shotsOnGoal"
+    _stddev7_window = windowSpec.rowsBetween(-7, -1)
+    _stddev14_window = windowSpec.rowsBetween(-14, -1)
+    column_exprs += [
+        coalesce(
+            round(stddev(col(_sog_col)).over(_stddev7_window), 3),
+            lit(0.0),
+        ).alias("stddev_player_SOG_last_7_games"),
+        coalesce(
+            round(stddev(col(_sog_col)).over(_stddev14_window), 3),
+            lit(0.0),
+        ).alias("stddev_player_SOG_last_14_games"),
+    ]
+
+    # Weighted recent average: approximate EWMA by weighting last 3 games more than 4-7
+    # Formula: (3*avg_last_3 + 1*avg_games_4_to_7) / 4
+    _avg_last3_sog = mean(col(_sog_col)).over(windowSpec.rowsBetween(-3, -1))
+    _avg_last7_sog = mean(col(_sog_col)).over(windowSpec.rowsBetween(-7, -1))
+    _ewma_approx = round(
+        coalesce(_avg_last3_sog, lit(0)) * 0.75 + coalesce(_avg_last7_sog, lit(0)) * 0.25,
+        2,
+    )
+    column_exprs.append(
+        coalesce(_ewma_approx, lit(0.0)).alias("ewma_approx_player_SOG")
+    )
 
     # Apply all column expressions at once using select
     gold_player_stats = gold_shots_date_count.select(*column_exprs).withColumn(

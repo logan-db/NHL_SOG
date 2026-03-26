@@ -26,7 +26,7 @@ dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog name")
 dbutils.widgets.text("feature_count", "25", "Number of features")
 dbutils.widgets.text("target_col", "player_Total_shotsOnGoal", "target_col")
 dbutils.widgets.text("time_col", "gameDate", "time_col")
-dbutils.widgets.text("pca_param", "0.95", "pca_param")
+dbutils.widgets.text("pca_param", "0", "pca_param (0=disabled)")
 
 # COMMAND ----------
 
@@ -251,26 +251,33 @@ categorical_cols_value_counts
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.pipeline import Pipeline
+import pandas as pd
 
 
-class CategoricalIndexer(BaseEstimator, TransformerMixin):
-    def __init__(self, categorical_cols):
+class TargetEncoder(BaseEstimator, TransformerMixin):
+    """Encodes categorical columns using the mean of the target variable.
+    Includes smoothing to prevent overfitting on rare categories."""
+
+    def __init__(self, categorical_cols, smoothing=10):
         self.categorical_cols = categorical_cols
-        self.encoders = {}
+        self.smoothing = smoothing
+        self.encoding_maps_ = {}
+        self.global_mean_ = None
 
     def fit(self, X, y=None):
-        for col in self.categorical_cols:
-            encoder = OrdinalEncoder(
-                handle_unknown="use_encoded_value", unknown_value=-1
-            )
-            encoder.fit(X[[col]])
-            self.encoders[col] = encoder
+        if y is None:
+            raise ValueError("TargetEncoder requires y for fitting")
+        self.global_mean_ = y.mean()
+        for c in self.categorical_cols:
+            stats = pd.DataFrame({"cat": X[c], "target": y}).groupby("cat")["target"].agg(["mean", "count"])
+            smoother = stats["count"] / (stats["count"] + self.smoothing)
+            self.encoding_maps_[c] = (smoother * stats["mean"] + (1 - smoother) * self.global_mean_).to_dict()
         return self
 
     def transform(self, X):
         X_copy = X.copy()
-        for col, encoder in self.encoders.items():
-            X_copy[col] = encoder.transform(X_copy[[col]])
+        for c in self.categorical_cols:
+            X_copy[c] = X_copy[c].map(self.encoding_maps_.get(c, {})).fillna(self.global_mean_)
         return X_copy
 
 
@@ -278,7 +285,7 @@ team_categorical_cols = ["playerTeam", "previous_opposingTeam", "opposingTeam"]
 
 indexer_pipeline = Pipeline(
     steps=[
-        ("categorical_indexer", CategoricalIndexer(team_categorical_cols)),
+        ("target_encoder", TargetEncoder(team_categorical_cols)),
     ]
 )
 
@@ -432,6 +439,50 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.decomposition import PCA
 from sklearn import set_config
 from sklearn.base import BaseEstimator, TransformerMixin
+
+
+class ShapFeatureSelector(BaseEstimator, TransformerMixin):
+    """Selects features based on mean |SHAP| values from a tree model.
+    More stable and interpretable than SelectFromModel."""
+
+    def __init__(self, estimator, max_features=100, shap_sample_size=2000):
+        self.estimator = estimator
+        self.max_features = max_features
+        self.shap_sample_size = shap_sample_size
+        self.selected_features_ = None
+        self.shap_importances_ = None
+
+    def fit(self, X, y=None):
+        import shap
+
+        self.estimator.fit(X, y)
+
+        sample_size = min(self.shap_sample_size, len(X))
+        X_sample = X.sample(n=sample_size, random_state=42) if isinstance(X, pd.DataFrame) else X[:sample_size]
+
+        explainer = shap.TreeExplainer(self.estimator)
+        shap_values = explainer.shap_values(X_sample)
+
+        mean_abs_shap = np.abs(shap_values).mean(axis=0)
+        feature_names = X.columns if isinstance(X, pd.DataFrame) else [f"f{i}" for i in range(X.shape[1])]
+
+        self.shap_importances_ = pd.Series(mean_abs_shap, index=feature_names).sort_values(ascending=False)
+        top_features = self.shap_importances_.head(self.max_features).index.tolist()
+        self.selected_features_ = top_features
+        print(f"SHAP feature selection: kept {len(top_features)} of {len(feature_names)} features")
+        return self
+
+    def transform(self, X):
+        if self.selected_features_ is None:
+            raise ValueError("ShapFeatureSelector has not been fitted yet")
+        available = [f for f in self.selected_features_ if f in (X.columns if isinstance(X, pd.DataFrame) else range(X.shape[1]))]
+        if isinstance(X, pd.DataFrame):
+            return X[available]
+        indices = [list(X.columns).index(f) for f in available] if hasattr(X, "columns") else list(range(len(available)))
+        return X[:, indices]
+
+    def get_feature_names_out(self):
+        return np.array(self.selected_features_) if self.selected_features_ is not None else np.array([])
 
 
 class MustHaveDropper(BaseEstimator, TransformerMixin):
@@ -619,7 +670,8 @@ def create_feature_store_tables(
 
     dropper = MustHaveDropper(must_have_features_renamed, must_have_features)
 
-    # Create a single preprocessing pipeline with a configurable feature selector
+    pca_step = PCA(n_components=pca_param, random_state=42) if pca_param > 0 else "passthrough"
+
     preprocess_pipeline = Pipeline(
         [
             ("column_selector", col_selector),
@@ -627,40 +679,35 @@ def create_feature_store_tables(
             ("must_have_dropper", dropper),
             (
                 "feature_selector",
-                SelectFromModel(
-                    featSelectionModel,
+                ShapFeatureSelector(
+                    estimator=featSelectionModel,
                     max_features=feature_counts,
-                    threshold=-np.inf,
                 ),
             ),
-            ("pca", PCA(n_components=0.95, random_state=42)),
+            ("pca", pca_step),
             ("must_have_rejoiner", MustHaveRejoiner(dropper)),
         ]
     )
 
-    # Fit the pipeline on the full dataset, excluding id columns
     preprocess_pipeline.fit(X_train.drop(columns=id_columns), y_train)
 
-    # Get the PCA step from the pipeline
-    pca = preprocess_pipeline.named_steps["pca"]
+    if pca_param > 0:
+        pca = preprocess_pipeline.named_steps["pca"]
+        cumulative_variance_ratio = np.cumsum(pca.explained_variance_ratio_)
 
-    # Calculate cumulative explained variance ratio
-    cumulative_variance_ratio = np.cumsum(pca.explained_variance_ratio_)
-
-    # Plot the elbow curve
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        range(1, len(cumulative_variance_ratio) + 1), cumulative_variance_ratio, "bo-"
-    )
-    plt.xlabel("Number of Components")
-    plt.ylabel("Cumulative Explained Variance Ratio")
-    plt.title("Elbow Curve for PCA")
-    plt.axhline(y=0.95, color="r", linestyle="--", label="95% Explained Variance")
-    plt.legend()
-    plt.grid(True)
-
-    # Print the number of components used
-    print(f"Number of PCA components used: {pca.n_components_}")
+        plt.figure(figsize=(10, 6))
+        plt.plot(
+            range(1, len(cumulative_variance_ratio) + 1), cumulative_variance_ratio, "bo-"
+        )
+        plt.xlabel("Number of Components")
+        plt.ylabel("Cumulative Explained Variance Ratio")
+        plt.title("Elbow Curve for PCA")
+        plt.axhline(y=pca_param, color="r", linestyle="--", label=f"{pca_param*100:.0f}% Explained Variance")
+        plt.legend()
+        plt.grid(True)
+        print(f"Number of PCA components used: {pca.n_components_}")
+    else:
+        print("PCA disabled (pca_param=0) -- tree-based models handle high-dimensional data natively")
 
     # Get the current working directory
     cwd = os.getcwd()
@@ -711,16 +758,15 @@ def create_feature_store_tables(
 
     client = mlflow.tracking.MlflowClient()
 
-    # Download and log PCA Plot
-    plt.savefig(f"{artifact_uri_base_path}/pcaPlot.png")
-    plt.show()
-
-    client.log_artifact(
-        run_id=run_id,
-        local_path=f"{artifact_uri_base_path}/pcaPlot.png",
-        artifact_path=file_name,
-    )
-    plt.close()
+    if pca_param > 0:
+        plt.savefig(f"{artifact_uri_base_path}/pcaPlot.png")
+        plt.show()
+        client.log_artifact(
+            run_id=run_id,
+            local_path=f"{artifact_uri_base_path}/pcaPlot.png",
+            artifact_path=file_name,
+        )
+        plt.close()
 
     print("DOWNLOAD START - CONDA")
     # Fix conda.yaml

@@ -16,8 +16,6 @@ dbutils.widgets.text(
 
 # COMMAND ----------
 
-from sklearn.model_selection import train_test_split
-
 target_col = dbutils.widgets.get("target_col")
 time_col = dbutils.widgets.get("time_col")
 id_columns = ["gameId", "playerId"]
@@ -92,42 +90,49 @@ training_df = training_set.load_df().toPandas()
 
 # COMMAND ----------
 
-# DBTITLE 1,random split
-# Separate target column from features
-X = training_df.drop([target_col], axis=1)
-y = training_df[target_col]
+# DBTITLE 1,time-based split (prevents data leakage for time-series data)
+training_df = training_df.sort_values(time_col).reset_index(drop=True)
 
-# Split the data into train and test datasets
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+train_size = int(0.6 * len(training_df))
+val_size = int(0.2 * len(training_df))
 
-# Split the train dataset into train and validation datasets
-X_train, X_val, y_train, y_val = train_test_split(
-    X_train, y_train, test_size=0.25, random_state=42
-)
+split_train_df = training_df.iloc[:train_size]
+split_val_df = training_df.iloc[train_size : train_size + val_size]
+split_test_df = training_df.iloc[train_size + val_size :]
 
-# COMMAND ----------
+X_train = split_train_df.drop([target_col], axis=1)
+y_train = split_train_df[target_col]
 
-# DBTITLE 1,time col split
-# # Convert df_loaded to Pandas DataFrame
-# df_loaded_pd = df_loaded.toPandas()
+X_val = split_val_df.drop([target_col], axis=1)
+y_val = split_val_df[target_col]
 
-# # Sort the DataFrame based on the date column
-# df_loaded_pd = df_loaded_pd.sort_values(time_col)
+X_test = split_test_df.drop([target_col], axis=1)
+y_test = split_test_df[target_col]
 
-# # Determine the indices to split the DataFrame
-# train_size = int(0.6 * len(df_loaded_pd))
-# val_size = int(0.2 * len(df_loaded_pd))
+print(f"Time-based split: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+print(f"Train date range: {split_train_df[time_col].min()} to {split_train_df[time_col].max()}")
+print(f"Val date range:   {split_val_df[time_col].min()} to {split_val_df[time_col].max()}")
+print(f"Test date range:  {split_test_df[time_col].min()} to {split_test_df[time_col].max()}")
 
-# train_indices = list(range(train_size))
-# val_indices = list(range(train_size, train_size + val_size))
-# test_indices = list(range(train_size + val_size, len(df_loaded_pd)))
+# Build expanding-window time-series CV folds for more robust hyperparameter evaluation
+# Each fold uses all data up to a cutoff for training, and the next chunk for validation
+n_cv_folds = 4
+total_non_test = len(split_train_df) + len(split_val_df)
+fold_size = total_non_test // (n_cv_folds + 1)
 
-# # Split the DataFrame into training, validation, and test sets
-# split_train_df = df_loaded_pd.iloc[train_indices]
-# split_val_df = df_loaded_pd.iloc[val_indices]
-# split_test_df = df_loaded_pd.iloc[test_indices]
+X_full_trainval = training_df.iloc[: train_size + val_size].drop([target_col], axis=1)
+y_full_trainval = training_df.iloc[: train_size + val_size][target_col]
+
+ts_cv_folds = []
+for i in range(n_cv_folds):
+    train_end = fold_size * (i + 2)
+    val_end = min(train_end + fold_size, total_non_test)
+    if train_end >= total_non_test:
+        break
+    ts_cv_folds.append((list(range(train_end)), list(range(train_end, val_end))))
+    print(f"CV Fold {i+1}: train[:{ train_end}], val[{train_end}:{val_end}]")
+
+print(f"Total expanding-window CV folds: {len(ts_cv_folds)}")
 
 # COMMAND ----------
 
@@ -165,7 +170,22 @@ from hyperopt.pyll.base import scope
 from mlflow.pyfunc import PyFuncModel
 
 
-# Define the objective function to accept different model types
+import numpy as np
+from sklearn.metrics import r2_score
+
+
+def _make_model(model_type, params):
+    if model_type == "lightgbm":
+        return LGBMRegressor(**params)
+    elif model_type == "linear":
+        return LinearRegression()
+    elif model_type == "random_forest":
+        return RandomForestRegressor(**params)
+    elif model_type == "xgboost":
+        return XGBRegressor(**params)
+    raise ValueError(f"Unknown model type: {model_type}")
+
+
 def objective(params):
 
     model_type = params.pop("model_type")
@@ -174,39 +194,40 @@ def objective(params):
         mlflow.set_tag("model_type", model_type)
         mlflow.set_tag("features_count", feature_count_param)
 
-        # Select the model based on the model_type parameter
-        if model_type == "lightgbm":
-            model = LGBMRegressor(**params)
-            print(f"Training LightGBM model with params: {params}")
-        elif model_type == "linear":
-            model = LinearRegression()
-            print(f"Training LinearRegression model with params: {params}")
-        elif model_type == "random_forest":
-            model = RandomForestRegressor(**params)
-            print(f"Training RandomForestRegressor model with params: {params}")
-        elif model_type == "xgboost":
-            model = XGBRegressor(**params)
-            print(f"Training XGBRegressor model with params: {params}")
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-
-        # Enable automatic logging of input samples, metrics, parameters, and models
         mlflow.sklearn.autolog(
             log_input_examples=True,
             silent=True,
         )
 
-        # Create a pipeline with the selected model
-        pipeline = Pipeline(
-            [
-                ("regressor", model),
-            ]
-        )
+        # Expanding-window time-series CV for robust hyperparameter evaluation
+        cv_val_r2_scores = []
+        for fold_train_idx, fold_val_idx in ts_cv_folds:
+            fold_X_train = X_full_trainval.iloc[fold_train_idx]
+            fold_y_train = y_full_trainval.iloc[fold_train_idx]
+            fold_X_val = X_full_trainval.iloc[fold_val_idx]
+            fold_y_val = y_full_trainval.iloc[fold_val_idx]
 
+            fold_model = _make_model(model_type, params.copy())
+            fit_kwargs = {}
+            if model_type == "lightgbm":
+                fit_kwargs = {
+                    "callbacks": [lightgbm.early_stopping(5), lightgbm.log_evaluation(0)],
+                    "eval_set": [(fold_X_val, fold_y_val)],
+                }
+            fold_model.fit(fold_X_train, fold_y_train, **fit_kwargs)
+            fold_preds = fold_model.predict(fold_X_val)
+            cv_val_r2_scores.append(r2_score(fold_y_val, fold_preds))
+
+        mean_cv_r2 = np.mean(cv_val_r2_scores)
+        mlflow.log_metric("mean_cv_r2", mean_cv_r2)
+        mlflow.log_metric("std_cv_r2", np.std(cv_val_r2_scores))
+
+        # Final model trained on full train split, evaluated on val and test
+        model = _make_model(model_type, params.copy())
+        pipeline = Pipeline([("regressor", model)])
         pipeline.fit(
             X_train,
             y_train,
-            # These callbacks are specific to LightGBM, so they should only be used for LightGBM
             **(
                 {
                     "regressor__callbacks": [
@@ -220,10 +241,10 @@ def objective(params):
             ),
         )
 
-        # Log metrics for the training set
         mlflow_model = Model()
         pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
         pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=pipeline)
+
         training_eval_result = mlflow.evaluate(
             model=pyfunc_model,
             data=X_train.assign(**{str(target_col): y_train}),
@@ -235,7 +256,6 @@ def objective(params):
             },
         )
 
-        # Log metrics for the validation set
         val_eval_result = mlflow.evaluate(
             model=pyfunc_model,
             data=X_val.assign(**{str(target_col): y_val}),
@@ -248,7 +268,6 @@ def objective(params):
         )
         val_metrics = val_eval_result.metrics
 
-        # Log metrics for the test set
         test_eval_result = mlflow.evaluate(
             model=pyfunc_model,
             data=X_test.assign(**{str(target_col): y_test}),
@@ -261,9 +280,9 @@ def objective(params):
         )
         test_metrics = test_eval_result.metrics
 
-        loss = -val_metrics["val_r2_score"]
+        # Use mean CV R2 as the loss to optimize (more robust than single-split)
+        loss = -mean_cv_r2
 
-        # Truncate metric key names so they can be displayed together
         val_metrics = {k.replace("val_", ""): v for k, v in val_metrics.items()}
         test_metrics = {k.replace("test_", ""): v for k, v in test_metrics.items()}
 
@@ -338,6 +357,50 @@ space = hp.choice(
             "learning_rate": hp.loguniform("xgb_learning_rate", -5, -1),
             "subsample": hp.uniform("xgb_subsample", 0.5, 1.0),
             "colsample_bytree": hp.uniform("xgb_colsample_bytree", 0.5, 1.0),
+            "random_state": 729986891,
+        },
+        {
+            "model_type": "lightgbm",
+            "objective": "poisson",
+            "colsample_bytree": hp.uniform("lgb_poisson_colsample_bytree", 0.5, 1.0),
+            "lambda_l1": hp.loguniform("lgb_poisson_lambda_l1", -5, 0),
+            "lambda_l2": hp.loguniform("lgb_poisson_lambda_l2", -5, 2),
+            "learning_rate": hp.loguniform("lgb_poisson_learning_rate", -5, -1),
+            "max_bin": scope.int(hp.quniform("lgb_poisson_max_bin", 20, 100, 1)),
+            "max_depth": scope.int(hp.quniform("lgb_poisson_max_depth", 3, 15, 1)),
+            "min_child_samples": scope.int(
+                hp.quniform("lgb_poisson_min_child_samples", 20, 200, 1)
+            ),
+            "n_estimators": scope.int(hp.quniform("lgb_poisson_n_estimators", 100, 500, 1)),
+            "num_leaves": scope.int(hp.quniform("lgb_poisson_num_leaves", 31, 255, 1)),
+            "subsample": hp.uniform("lgb_poisson_subsample", 0.5, 1.0),
+            "random_state": 729986891,
+        },
+        {
+            "model_type": "xgboost",
+            "objective": "count:poisson",
+            "n_estimators": scope.int(hp.quniform("xgb_poisson_n_estimators", 100, 500, 1)),
+            "max_depth": scope.int(hp.quniform("xgb_poisson_max_depth", 3, 15, 1)),
+            "learning_rate": hp.loguniform("xgb_poisson_learning_rate", -5, -1),
+            "subsample": hp.uniform("xgb_poisson_subsample", 0.5, 1.0),
+            "colsample_bytree": hp.uniform("xgb_poisson_colsample_bytree", 0.5, 1.0),
+            "random_state": 729986891,
+        },
+        {
+            "model_type": "lightgbm",
+            "objective": "tweedie",
+            "tweedie_variance_power": hp.uniform("lgb_tweedie_var_power", 1.1, 1.9),
+            "colsample_bytree": hp.uniform("lgb_tweedie_colsample_bytree", 0.5, 1.0),
+            "lambda_l1": hp.loguniform("lgb_tweedie_lambda_l1", -5, 0),
+            "lambda_l2": hp.loguniform("lgb_tweedie_lambda_l2", -5, 2),
+            "learning_rate": hp.loguniform("lgb_tweedie_learning_rate", -5, -1),
+            "max_depth": scope.int(hp.quniform("lgb_tweedie_max_depth", 3, 15, 1)),
+            "min_child_samples": scope.int(
+                hp.quniform("lgb_tweedie_min_child_samples", 20, 200, 1)
+            ),
+            "n_estimators": scope.int(hp.quniform("lgb_tweedie_n_estimators", 100, 500, 1)),
+            "num_leaves": scope.int(hp.quniform("lgb_tweedie_num_leaves", 31, 255, 1)),
+            "subsample": hp.uniform("lgb_tweedie_subsample", 0.5, 1.0),
             "random_state": 729986891,
         },
     ],

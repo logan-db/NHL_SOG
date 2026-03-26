@@ -391,6 +391,190 @@ print(result)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Stacked Ensemble (LightGBM + XGBoost + RF + Ridge meta-learner)
+
+# COMMAND ----------
+
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+
+def get_best_run_by_type(experiment_id, model_type):
+    """Get the best recent run for a specific model type."""
+    twenty_four_hours_ago = int((datetime.now() - timedelta(hours=24)).timestamp() * 1000)
+    runs = client.search_runs(
+        experiment_id,
+        filter_string=f"attributes.start_time > {twenty_four_hours_ago} AND tags.model_type = '{model_type}'",
+        order_by=["metrics.test_r2_score DESC"],
+        max_results=1,
+    )
+    return runs[0] if runs else None
+
+
+class StackedEnsembleModel(mlflow.pyfunc.PythonModel):
+    def __init__(self, base_models, meta_learner):
+        self.base_models = base_models
+        self.meta_learner = meta_learner
+
+    def predict(self, context, model_input):
+        base_preds = np.column_stack([
+            m.predict(model_input) for m in self.base_models
+        ])
+        return self.meta_learner.predict(base_preds)
+
+
+client = MlflowClient()
+model_types = ["lightgbm", "xgboost", "random_forest"]
+best_runs_by_type = {}
+for mt in model_types:
+    run = get_best_run_by_type(trial_experiment_param, mt)
+    if run:
+        best_runs_by_type[mt] = run
+        print(f"Best {mt}: R2={run.data.metrics.get('test_r2_score', 'N/A')}")
+
+if len(best_runs_by_type) >= 2:
+    print(f"\nBuilding stacked ensemble from {len(best_runs_by_type)} model types...")
+
+    base_models = []
+    for mt, run in best_runs_by_type.items():
+        params = clean_and_prepare_params(run.data.params, mt)
+        params.pop("model_type")
+        params.pop("verbose", None)
+
+        if mt == "lightgbm":
+            m = LGBMRegressor(verbose=-1, **params)
+        elif mt == "random_forest":
+            m = RandomForestRegressor(**params)
+        elif mt == "xgboost":
+            m = XGBRegressor(**params)
+        m.fit(X, y)
+        base_models.append(m)
+        print(f"  Trained base model: {mt}")
+
+    # Generate out-of-fold predictions for meta-learner training
+    n_splits = 5
+    kf = KFold(n_splits=n_splits, shuffle=False)
+    oof_preds = np.zeros((len(X), len(base_models)))
+
+    for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
+        X_fold_train, X_fold_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_fold_train = y.iloc[train_idx]
+
+        for model_idx, (mt, run) in enumerate(best_runs_by_type.items()):
+            params = clean_and_prepare_params(run.data.params, mt)
+            params.pop("model_type")
+            params.pop("verbose", None)
+
+            if mt == "lightgbm":
+                fold_model = LGBMRegressor(verbose=-1, **params)
+            elif mt == "random_forest":
+                fold_model = RandomForestRegressor(**params)
+            elif mt == "xgboost":
+                fold_model = XGBRegressor(**params)
+            fold_model.fit(X_fold_train, y_fold_train)
+            oof_preds[val_idx, model_idx] = fold_model.predict(X_fold_val)
+
+    meta_learner = Ridge(alpha=1.0)
+    meta_learner.fit(oof_preds, y)
+    print(f"  Meta-learner weights: {dict(zip(best_runs_by_type.keys(), meta_learner.coef_))}")
+
+    ensemble = StackedEnsembleModel(base_models, meta_learner)
+
+    with mlflow.start_run(experiment_id=training_experiment_param) as ensemble_run:
+        mlflow.set_tag("model_type", "stacked_ensemble")
+        mlflow.set_tag("features_count", feature_count_param)
+        mlflow.set_tag("base_models", ",".join(best_runs_by_type.keys()))
+
+        ensemble_preds = ensemble.predict(None, X)
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+        mlflow.log_metric("train_r2_score", r2_score(y, ensemble_preds))
+        mlflow.log_metric("train_mae", mean_absolute_error(y, ensemble_preds))
+        mlflow.log_metric("train_rmse", np.sqrt(mean_squared_error(y, ensemble_preds)))
+
+        signature = infer_signature(X, ensemble_preds)
+        mlflow.pyfunc.log_model(
+            artifact_path="model",
+            python_model=ensemble,
+            signature=signature,
+            input_example=X.head(5),
+            registered_model_name=f"{catalog_param}.player_prediction_SOG",
+        )
+        print(f"  Stacked ensemble logged: R2={r2_score(y, ensemble_preds):.4f}")
+else:
+    print(f"Only {len(best_runs_by_type)} model types found; skipping stacking (need >= 2)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Quantile Regression for Prediction Intervals
+
+# COMMAND ----------
+
+class QuantileRegressionModel(mlflow.pyfunc.PythonModel):
+    """Predicts point estimate + quantile intervals (P10, P25, P50, P75, P90)."""
+
+    def __init__(self, point_model, quantile_models):
+        self.point_model = point_model
+        self.quantile_models = quantile_models
+
+    def predict(self, context, model_input):
+        point_pred = self.point_model.predict(model_input)
+        result = pd.DataFrame({"predictedSOG": point_pred})
+        for q, qmodel in self.quantile_models.items():
+            result[f"SOG_p{int(q*100)}"] = qmodel.predict(model_input)
+        return result
+
+
+quantiles = [0.10, 0.25, 0.50, 0.75, 0.90]
+quantile_models = {}
+
+for q in quantiles:
+    lgb_q = LGBMRegressor(
+        objective="quantile",
+        alpha=q,
+        n_estimators=300,
+        max_depth=8,
+        learning_rate=0.05,
+        num_leaves=63,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=729986891,
+        verbose=-1,
+    )
+    lgb_q.fit(X, y)
+    quantile_models[q] = lgb_q
+    print(f"Trained quantile model: P{int(q*100)}")
+
+# Use the single-best retrained pipeline as the point model
+point_model = result["model"]
+
+quantile_ensemble = QuantileRegressionModel(point_model, quantile_models)
+
+with mlflow.start_run(experiment_id=training_experiment_param) as q_run:
+    mlflow.set_tag("model_type", "quantile_ensemble")
+    mlflow.set_tag("features_count", feature_count_param)
+
+    q_preds = quantile_ensemble.predict(None, X)
+    signature = infer_signature(X, q_preds)
+    mlflow.pyfunc.log_model(
+        artifact_path="model",
+        python_model=quantile_ensemble,
+        signature=signature,
+        input_example=X.head(5),
+        registered_model_name=f"{catalog_param}.player_prediction_SOG_quantile",
+    )
+    print(f"Quantile ensemble logged with {len(quantiles)} quantiles")
+
+# Set champion alias for quantile model
+q_model_name = f"{catalog_param}.player_prediction_SOG_quantile"
+q_versions = client.search_model_versions(f"name = '{q_model_name}'")
+q_latest = max(int(v.version) for v in q_versions)
+client.set_registered_model_alias(q_model_name, "champion", q_latest)
+print(f"Quantile model champion set to version {q_latest}")
+
+# COMMAND ----------
+
 # Set this flag to True and re-run the notebook to see the SHAP plots
 shap_enabled = True
 
