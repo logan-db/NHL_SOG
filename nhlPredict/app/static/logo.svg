@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background gradient: deep navy → dark indigo -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+
+    <!-- Accent glow gradient (indigo → cyan) -->
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+
+    <!-- Text gradient -->
+    <linearGradient id="textGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#a5b4fc"/>
+      <stop offset="100%" stop-color="#67e8f9"/>
+    </linearGradient>
+
+    <!-- Puck radial gradient -->
+    <radialGradient id="puckGrad" cx="45%" cy="38%" r="60%">
+      <stop offset="0%"  stop-color="#374151"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </radialGradient>
+
+    <!-- Glow filter for puck ring -->
+    <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Soft glow for bar chart -->
+    <filter id="barGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Drop shadow for text -->
+    <filter id="textShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#6366f1" flood-opacity="0.6"/>
+    </filter>
+
+    <!-- Clip path for puck shape (ellipse) -->
+    <clipPath id="puckClip">
+      <ellipse cx="256" cy="258" rx="100" ry="76"/>
+    </clipPath>
+  </defs>
+
+  <!-- ── Background ───────────────────────────────────────────────── -->
+  <rect width="512" height="512" rx="36" fill="url(#bgGrad)"/>
+
+  <!-- ── Subtle ice-rink arc lines (decorative) ───────────────────── -->
+  <g stroke="#6366f1" stroke-width="0.8" fill="none" opacity="0.10">
+    <ellipse cx="256" cy="560" rx="210" ry="185"/>
+    <ellipse cx="256" cy="560" rx="260" ry="230"/>
+    <ellipse cx="256" cy="-40" rx="210" ry="185"/>
+    <ellipse cx="256" cy="-40" rx="260" ry="230"/>
+    <!-- centre line -->
+    <line x1="0" y1="256" x2="512" y2="256"/>
+    <!-- blue lines -->
+    <line x1="0" y1="170" x2="512" y2="170"/>
+    <line x1="0" y1="342" x2="512" y2="342"/>
+  </g>
+
+  <!-- ── Corner hexagon grid dots (analytical texture) ───────────── -->
+  <g fill="#6366f1" opacity="0.12">
+    <circle cx="20" cy="32" r="2.2"/><circle cx="48" cy="32" r="2.2"/><circle cx="76" cy="32" r="2.2"/><circle cx="104" cy="32" r="2.2"/><circle cx="132" cy="32" r="2.2"/><circle cx="160" cy="32" r="2.2"/><circle cx="188" cy="32" r="2.2"/><circle cx="216" cy="32" r="2.2"/><circle cx="244" cy="32" r="2.2"/><circle cx="272" cy="32" r="2.2"/><circle cx="300" cy="32" r="2.2"/><circle cx="328" cy="32" r="2.2"/><circle cx="356" cy="32" r="2.2"/><circle cx="384" cy="32" r="2.2"/><circle cx="412" cy="32" r="2.2"/><circle cx="440" cy="32" r="2.2"/><circle cx="468" cy="32" r="2.2"/><circle cx="496" cy="32" r="2.2"/><circle cx="34" cy="60" r="2.2"/><circle cx="62" cy="60" r="2.2"/><circle cx="90" cy="60" r="2.2"/><circle cx="118" cy="60" r="2.2"/><circle cx="146" cy="60" r="2.2"/><circle cx="174" cy="60" r="2.2"/><circle cx="202" cy="60" r="2.2"/><circle cx="230" cy="60" r="2.2"/><circle cx="258" cy="60" r="2.2"/><circle cx="286" cy="60" r="2.2"/><circle cx="314" cy="60" r="2.2"/><circle cx="342" cy="60" r="2.2"/><circle cx="370" cy="60" r="2.2"/><circle cx="398" cy="60" r="2.2"/><circle cx="426" cy="60" r="2.2"/><circle cx="454" cy="60" r="2.2"/><circle cx="482" cy="60" r="2.2"/><circle cx="510" cy="60" r="2.2"/><circle cx="20" cy="88" r="2.2"/><circle cx="48" cy="88" r="2.2"/><circle cx="76" cy="88" r="2.2"/><circle cx="104" cy="88" r="2.2"/><circle cx="132" cy="88" r="2.2"/><circle cx="160" cy="88" r="2.2"/><circle cx="188" cy="88" r="2.2"/><circle cx="216" cy="88" r="2.2"/><circle cx="244" cy="88" r="2.2"/><circle cx="272" cy="88" r="2.2"/><circle cx="300" cy="88" r="2.2"/><circle cx="328" cy="88" r="2.2"/><circle cx="356" cy="88" r="2.2"/><circle cx="384" cy="88" r="2.2"/><circle cx="412" cy="88" r="2.2"/><circle cx="440" cy="88" r="2.2"/><circle cx="468" cy="88" r="2.2"/><circle cx="496" cy="88" r="2.2"/><circle cx="34" cy="116" r="2.2"/><circle cx="62" cy="116" r="2.2"/><circle cx="90" cy="116" r="2.2"/><circle cx="118" cy="116" r="2.2"/><circle cx="146" cy="116" r="2.2"/><circle cx="174" cy="116" r="2.2"/><circle cx="202" cy="116" r="2.2"/><circle cx="230" cy="116" r="2.2"/><circle cx="258" cy="116" r="2.2"/><circle cx="286" cy="116" r="2.2"/><circle cx="314" cy="116" r="2.2"/><circle cx="342" cy="116" r="2.2"/><circle cx="370" cy="116" r="2.2"/><circle cx="398" cy="116" r="2.2"/><circle cx="426" cy="116" r="2.2"/><circle cx="454" cy="116" r="2.2"/><circle cx="482" cy="116" r="2.2"/><circle cx="510" cy="116" r="2.2"/><circle cx="20" cy="144" r="2.2"/><circle cx="48" cy="144" r="2.2"/><circle cx="76" cy="144" r="2.2"/><circle cx="104" cy="144" r="2.2"/><circle cx="132" cy="144" r="2.2"/><circle cx="160" cy="144" r="2.2"/><circle cx="188" cy="144" r="2.2"/><circle cx="216" cy="144" r="2.2"/><circle cx="244" cy="144" r="2.2"/><circle cx="272" cy="144" r="2.2"/><circle cx="300" cy="144" r="2.2"/><circle cx="328" cy="144" r="2.2"/><circle cx="356" cy="144" r="2.2"/><circle cx="384" cy="144" r="2.2"/><circle cx="412" cy="144" r="2.2"/><circle cx="440" cy="144" r="2.2"/><circle cx="468" cy="144" r="2.2"/><circle cx="496" cy="144" r="2.2"/><circle cx="34" cy="172" r="2.2"/><circle cx="62" cy="172" r="2.2"/><circle cx="90" cy="172" r="2.2"/><circle cx="118" cy="172" r="2.2"/><circle cx="146" cy="172" r="2.2"/><circle cx="174" cy="172" r="2.2"/><circle cx="202" cy="172" r="2.2"/><circle cx="230" cy="172" r="2.2"/><circle cx="258" cy="172" r="2.2"/><circle cx="286" cy="172" r="2.2"/><circle cx="314" cy="172" r="2.2"/><circle cx="342" cy="172" r="2.2"/><circle cx="370" cy="172" r="2.2"/><circle cx="398" cy="172" r="2.2"/><circle cx="426" cy="172" r="2.2"/><circle cx="454" cy="172" r="2.2"/><circle cx="482" cy="172" r="2.2"/><circle cx="510" cy="172" r="2.2"/><circle cx="20" cy="200" r="2.2"/><circle cx="48" cy="200" r="2.2"/><circle cx="76" cy="200" r="2.2"/><circle cx="104" cy="200" r="2.2"/><circle cx="132" cy="200" r="2.2"/><circle cx="160" cy="200" r="2.2"/><circle cx="188" cy="200" r="2.2"/><circle cx="216" cy="200" r="2.2"/><circle cx="244" cy="200" r="2.2"/><circle cx="272" cy="200" r="2.2"/><circle cx="300" cy="200" r="2.2"/><circle cx="328" cy="200" r="2.2"/><circle cx="356" cy="200" r="2.2"/><circle cx="384" cy="200" r="2.2"/><circle cx="412" cy="200" r="2.2"/><circle cx="440" cy="200" r="2.2"/><circle cx="468" cy="200" r="2.2"/><circle cx="496" cy="200" r="2.2"/><circle cx="34" cy="228" r="2.2"/><circle cx="62" cy="228" r="2.2"/><circle cx="90" cy="228" r="2.2"/><circle cx="118" cy="228" r="2.2"/><circle cx="146" cy="228" r="2.2"/><circle cx="174" cy="228" r="2.2"/><circle cx="202" cy="228" r="2.2"/><circle cx="230" cy="228" r="2.2"/><circle cx="258" cy="228" r="2.2"/><circle cx="286" cy="228" r="2.2"/><circle cx="314" cy="228" r="2.2"/><circle cx="342" cy="228" r="2.2"/><circle cx="370" cy="228" r="2.2"/><circle cx="398" cy="228" r="2.2"/><circle cx="426" cy="228" r="2.2"/><circle cx="454" cy="228" r="2.2"/><circle cx="482" cy="228" r="2.2"/><circle cx="510" cy="228" r="2.2"/><circle cx="20" cy="256" r="2.2"/><circle cx="48" cy="256" r="2.2"/><circle cx="76" cy="256" r="2.2"/><circle cx="104" cy="256" r="2.2"/><circle cx="132" cy="256" r="2.2"/><circle cx="160" cy="256" r="2.2"/><circle cx="188" cy="256" r="2.2"/><circle cx="216" cy="256" r="2.2"/><circle cx="244" cy="256" r="2.2"/><circle cx="272" cy="256" r="2.2"/><circle cx="300" cy="256" r="2.2"/><circle cx="328" cy="256" r="2.2"/><circle cx="356" cy="256" r="2.2"/><circle cx="384" cy="256" r="2.2"/><circle cx="412" cy="256" r="2.2"/><circle cx="440" cy="256" r="2.2"/><circle cx="468" cy="256" r="2.2"/><circle cx="496" cy="256" r="2.2"/><circle cx="34" cy="284" r="2.2"/><circle cx="62" cy="284" r="2.2"/><circle cx="90" cy="284" r="2.2"/><circle cx="118" cy="284" r="2.2"/><circle cx="146" cy="284" r="2.2"/><circle cx="174" cy="284" r="2.2"/><circle cx="202" cy="284" r="2.2"/><circle cx="230" cy="284" r="2.2"/><circle cx="258" cy="284" r="2.2"/><circle cx="286" cy="284" r="2.2"/><circle cx="314" cy="284" r="2.2"/><circle cx="342" cy="284" r="2.2"/><circle cx="370" cy="284" r="2.2"/><circle cx="398" cy="284" r="2.2"/><circle cx="426" cy="284" r="2.2"/><circle cx="454" cy="284" r="2.2"/><circle cx="482" cy="284" r="2.2"/><circle cx="510" cy="284" r="2.2"/><circle cx="20" cy="312" r="2.2"/><circle cx="48" cy="312" r="2.2"/><circle cx="76" cy="312" r="2.2"/><circle cx="104" cy="312" r="2.2"/><circle cx="132" cy="312" r="2.2"/><circle cx="160" cy="312" r="2.2"/><circle cx="188" cy="312" r="2.2"/><circle cx="216" cy="312" r="2.2"/><circle cx="244" cy="312" r="2.2"/><circle cx="272" cy="312" r="2.2"/><circle cx="300" cy="312" r="2.2"/><circle cx="328" cy="312" r="2.2"/><circle cx="356" cy="312" r="2.2"/><circle cx="384" cy="312" r="2.2"/><circle cx="412" cy="312" r="2.2"/><circle cx="440" cy="312" r="2.2"/><circle cx="468" cy="312" r="2.2"/><circle cx="496" cy="312" r="2.2"/><circle cx="34" cy="340" r="2.2"/><circle cx="62" cy="340" r="2.2"/><circle cx="90" cy="340" r="2.2"/><circle cx="118" cy="340" r="2.2"/><circle cx="146" cy="340" r="2.2"/><circle cx="174" cy="340" r="2.2"/><circle cx="202" cy="340" r="2.2"/><circle cx="230" cy="340" r="2.2"/><circle cx="258" cy="340" r="2.2"/><circle cx="286" cy="340" r="2.2"/><circle cx="314" cy="340" r="2.2"/><circle cx="342" cy="340" r="2.2"/><circle cx="370" cy="340" r="2.2"/><circle cx="398" cy="340" r="2.2"/><circle cx="426" cy="340" r="2.2"/><circle cx="454" cy="340" r="2.2"/><circle cx="482" cy="340" r="2.2"/><circle cx="510" cy="340" r="2.2"/><circle cx="20" cy="368" r="2.2"/><circle cx="48" cy="368" r="2.2"/><circle cx="76" cy="368" r="2.2"/><circle cx="104" cy="368" r="2.2"/><circle cx="132" cy="368" r="2.2"/><circle cx="160" cy="368" r="2.2"/><circle cx="188" cy="368" r="2.2"/><circle cx="216" cy="368" r="2.2"/><circle cx="244" cy="368" r="2.2"/><circle cx="272" cy="368" r="2.2"/><circle cx="300" cy="368" r="2.2"/><circle cx="328" cy="368" r="2.2"/><circle cx="356" cy="368" r="2.2"/><circle cx="384" cy="368" r="2.2"/><circle cx="412" cy="368" r="2.2"/><circle cx="440" cy="368" r="2.2"/><circle cx="468" cy="368" r="2.2"/><circle cx="496" cy="368" r="2.2"/><circle cx="34" cy="396" r="2.2"/><circle cx="62" cy="396" r="2.2"/><circle cx="90" cy="396" r="2.2"/><circle cx="118" cy="396" r="2.2"/><circle cx="146" cy="396" r="2.2"/><circle cx="174" cy="396" r="2.2"/><circle cx="202" cy="396" r="2.2"/><circle cx="230" cy="396" r="2.2"/><circle cx="258" cy="396" r="2.2"/><circle cx="286" cy="396" r="2.2"/><circle cx="314" cy="396" r="2.2"/><circle cx="342" cy="396" r="2.2"/><circle cx="370" cy="396" r="2.2"/><circle cx="398" cy="396" r="2.2"/><circle cx="426" cy="396" r="2.2"/><circle cx="454" cy="396" r="2.2"/><circle cx="482" cy="396" r="2.2"/><circle cx="510" cy="396" r="2.2"/><circle cx="20" cy="424" r="2.2"/><circle cx="48" cy="424" r="2.2"/><circle cx="76" cy="424" r="2.2"/><circle cx="104" cy="424" r="2.2"/><circle cx="132" cy="424" r="2.2"/><circle cx="160" cy="424" r="2.2"/><circle cx="188" cy="424" r="2.2"/><circle cx="216" cy="424" r="2.2"/><circle cx="244" cy="424" r="2.2"/><circle cx="272" cy="424" r="2.2"/><circle cx="300" cy="424" r="2.2"/><circle cx="328" cy="424" r="2.2"/><circle cx="356" cy="424" r="2.2"/><circle cx="384" cy="424" r="2.2"/><circle cx="412" cy="424" r="2.2"/><circle cx="440" cy="424" r="2.2"/><circle cx="468" cy="424" r="2.2"/><circle cx="496" cy="424" r="2.2"/><circle cx="34" cy="452" r="2.2"/><circle cx="62" cy="452" r="2.2"/><circle cx="90" cy="452" r="2.2"/><circle cx="118" cy="452" r="2.2"/><circle cx="146" cy="452" r="2.2"/><circle cx="174" cy="452" r="2.2"/><circle cx="202" cy="452" r="2.2"/><circle cx="230" cy="452" r="2.2"/><circle cx="258" cy="452" r="2.2"/><circle cx="286" cy="452" r="2.2"/><circle cx="314" cy="452" r="2.2"/><circle cx="342" cy="452" r="2.2"/><circle cx="370" cy="452" r="2.2"/><circle cx="398" cy="452" r="2.2"/><circle cx="426" cy="452" r="2.2"/><circle cx="454" cy="452" r="2.2"/><circle cx="482" cy="452" r="2.2"/><circle cx="510" cy="452" r="2.2"/><circle cx="20" cy="480" r="2.2"/><circle cx="48" cy="480" r="2.2"/><circle cx="76" cy="480" r="2.2"/><circle cx="104" cy="480" r="2.2"/><circle cx="132" cy="480" r="2.2"/><circle cx="160" cy="480" r="2.2"/><circle cx="188" cy="480" r="2.2"/><circle cx="216" cy="480" r="2.2"/><circle cx="244" cy="480" r="2.2"/><circle cx="272" cy="480" r="2.2"/><circle cx="300" cy="480" r="2.2"/><circle cx="328" cy="480" r="2.2"/><circle cx="356" cy="480" r="2.2"/><circle cx="384" cy="480" r="2.2"/><circle cx="412" cy="480" r="2.2"/><circle cx="440" cy="480" r="2.2"/><circle cx="468" cy="480" r="2.2"/><circle cx="496" cy="480" r="2.2"/><circle cx="34" cy="508" r="2.2"/><circle cx="62" cy="508" r="2.2"/><circle cx="90" cy="508" r="2.2"/><circle cx="118" cy="508" r="2.2"/><circle cx="146" cy="508" r="2.2"/><circle cx="174" cy="508" r="2.2"/><circle cx="202" cy="508" r="2.2"/><circle cx="230" cy="508" r="2.2"/><circle cx="258" cy="508" r="2.2"/><circle cx="286" cy="508" r="2.2"/><circle cx="314" cy="508" r="2.2"/><circle cx="342" cy="508" r="2.2"/><circle cx="370" cy="508" r="2.2"/><circle cx="398" cy="508" r="2.2"/><circle cx="426" cy="508" r="2.2"/><circle cx="454" cy="508" r="2.2"/><circle cx="482" cy="508" r="2.2"/><circle cx="510" cy="508" r="2.2"/>
+  </g>
+
+  <!-- ── Bar-chart analytics (rising bars, clipped to puck area) ──── -->
+  <!-- Background bars (full, dimmed) -->
+  <g fill="url(#accentGrad)" opacity="0.18" filter="url(#barGlow)">
+    <rect x="168" y="200" width="20" height="116" rx="4"/>
+    <rect x="196" y="176" width="20" height="140" rx="4"/>
+    <rect x="224" y="152" width="20" height="164" rx="4"/>
+    <rect x="252" y="136" width="20" height="180" rx="4"/>
+    <rect x="280" y="152" width="20" height="164" rx="4"/>
+    <rect x="308" y="168" width="20" height="148" rx="4"/>
+    <rect x="336" y="188" width="20" height="128" rx="4"/>
+  </g>
+
+  <!-- Bright bars clipped to puck for nice intersect effect -->
+  <g clip-path="url(#puckClip)" fill="url(#accentGrad)" opacity="0.85" filter="url(#barGlow)">
+    <rect x="168" y="200" width="20" height="116" rx="4"/>
+    <rect x="196" y="176" width="20" height="140" rx="4"/>
+    <rect x="224" y="152" width="20" height="164" rx="4"/>
+    <rect x="252" y="136" width="20" height="180" rx="4"/>
+    <rect x="280" y="152" width="20" height="164" rx="4"/>
+    <rect x="308" y="168" width="20" height="148" rx="4"/>
+    <rect x="336" y="188" width="20" height="128" rx="4"/>
+  </g>
+
+  <!-- ── Puck body ──────────────────────────────────────────────── -->
+  <!-- Outer glow ring (cyan) -->
+  <ellipse cx="256" cy="258" rx="108" ry="82" fill="none"
+           stroke="#06b6d4" stroke-width="3" opacity="0.55" filter="url(#glowBlue)"/>
+  <!-- Puck fill -->
+  <ellipse cx="256" cy="258" rx="100" ry="76" fill="url(#puckGrad)"/>
+  <!-- Inner highlight ring -->
+  <ellipse cx="256" cy="248" rx="76" ry="55" fill="none"
+           stroke="#6366f1" stroke-width="1.5" opacity="0.5"/>
+  <!-- Puck surface sheen -->
+  <ellipse cx="248" cy="242" rx="44" ry="28"
+           fill="white" opacity="0.04"/>
+
+  <!-- ── Trend-line overlay on puck (upward curve) ─────────────── -->
+  <g clip-path="url(#puckClip)">
+    <polyline points="168,302 196,278 224,255 252,238 280,245 308,230 336,215"
+              fill="none" stroke="url(#accentGrad)" stroke-width="3.5"
+              stroke-linecap="round" stroke-linejoin="round"
+              opacity="0.95" filter="url(#glowBlue)"/>
+    <!-- Data dots on trend line -->
+    <g fill="#06b6d4" opacity="0.95">
+      <circle cx="168" cy="302" r="4.5"/>
+      <circle cx="196" cy="278" r="4.5"/>
+      <circle cx="224" cy="255" r="4.5"/>
+      <circle cx="252" cy="238" r="6" fill="#a5b4fc"/>
+      <circle cx="280" cy="245" r="4.5"/>
+      <circle cx="308" cy="230" r="4.5"/>
+      <circle cx="336" cy="215" r="4.5"/>
+    </g>
+  </g>
+
+  <!-- ── Hockey stick silhouette (minimalist) ──────────────────── -->
+  <g stroke="#6366f1" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.30">
+    <!-- Shaft -->
+    <line x1="88" y1="80" x2="156" y2="320"/>
+    <!-- Blade -->
+    <path d="M156,320 Q178,338 198,328"/>
+  </g>
+  <g stroke="#06b6d4" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.22">
+    <line x1="88" y1="80" x2="156" y2="320"/>
+    <path d="M156,320 Q178,338 198,328"/>
+  </g>
+
+  <!-- ── Text: "SOG" ───────────────────────────────────────────── -->
+  <text x="256" y="128"
+        font-family="'Arial Black', 'Impact', 'Helvetica Neue', sans-serif"
+        font-size="86" font-weight="900" letter-spacing="8"
+        text-anchor="middle" dominant-baseline="middle"
+        fill="url(#textGrad)" filter="url(#textShadow)">SOG</text>
+
+  <!-- ── Text: "PREDICT" ────────────────────────────────────────── -->
+  <text x="256" y="172"
+        font-family="'Arial', 'Helvetica Neue', sans-serif"
+        font-size="22" font-weight="600" letter-spacing="12"
+        text-anchor="middle" dominant-baseline="middle"
+        fill="#94a3b8" opacity="0.90">PREDICT</text>
+
+  <!-- ── Tagline ────────────────────────────────────────────────── -->
+  <text x="256" y="390"
+        font-family="'Arial', 'Helvetica Neue', sans-serif"
+        font-size="15" font-weight="400" letter-spacing="4"
+        text-anchor="middle" dominant-baseline="middle"
+        fill="#475569" opacity="0.80">NHL SHOTS ON GOAL ANALYTICS</text>
+
+  <!-- ── Small decorative sparkline below tagline ──────────────── -->
+  <polyline points="178,414 196,408 214,416 232,404 250,408 268,400 286,406 304,398 322,404 340,396"
+            fill="none" stroke="url(#accentGrad)" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>
+
+  <!-- ── Border accent line (top) ──────────────────────────────── -->
+  <rect x="0" y="0" width="512" height="4" rx="0"
+        fill="url(#accentGrad)" opacity="0.9"/>
+</svg>

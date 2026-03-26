@@ -1,2 +1,10 @@
 
 .databricks
+
+# Local credentials - never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*secrets*.yml
+*secrets*.yaml

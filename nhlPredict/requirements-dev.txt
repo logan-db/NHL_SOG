@@ -9,6 +9,9 @@ databricks-dlt
 ## pytest is the default package used for testing
 pytest
 
+## NHL API client library for data ingestion
+nhl-api-py==3.1.1
+
 ## Dependencies for building wheel files
 setuptools
 wheel

@@ -28,10 +28,13 @@ from nhl_team_city_to_abbreviation import nhl_team_city_to_abbreviation
 # DBTITLE 1,Prod
 from pyspark.sql.functions import col, expr
 
+# NHL uses 8-digit season format: 20252026 = 2025-26 season
+CURRENT_SEASON = 20252026
+
 input_dataframe = spark.table("lr_nhl_demo.dev.clean_prediction_summary").filter(
     (col("gameId").isNull())
     & (col("is_last_played_game_team") == 1)
-    & (col("season") == 2025)
+    & (col("season") == CURRENT_SEASON)
     # & (col("shooterName") == "Alex Ovechkin")
 )
 
@@ -232,7 +235,7 @@ from pyspark.sql.functions import col, expr
 input_dataframe = spark.table("lr_nhl_demo.dev.clean_prediction_summary").filter(
     (col("gameId").isNull())
     & (col("is_last_played_game_team") == 1)
-    & (col("season") == 2025)
+    & (col("season") == CURRENT_SEASON)
     & (col("shooterName") == "Alex Ovechkin")
 )
 

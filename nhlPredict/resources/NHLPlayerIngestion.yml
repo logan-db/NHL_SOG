@@ -9,21 +9,41 @@ resources:
       photon: true
       libraries:
         - notebook:
-            path: ../src/dlt_etl/ingestion/01-bronze-ingestion.py
+            path: ../src/dlt_etl/ingestion/01-bronze-ingestion-nhl-api.py
         - notebook:
             path: ../src/dlt_etl/transformation/02-silver-transform.py
         - notebook:
             path: ../src/dlt_etl/aggregation/03-gold-agg.py
       serverless: true
       catalog: lr_nhl_demo
+      # Serverless usage policy for budget attribution. Policy UUID from
+      # Settings > Compute > Serverless budget policies (not the display name).
+      usage_policy_id: "2fd2c389-48a5-440d-bdc4-744a1fc67473"
+      # Tags propagate to cluster and billing; use for cost attribution with the policy
+      tags:
+        team: nhl-predict
+        cost_center: nhl-ingestion
+        usage_policy: serverless-budget
       configuration:
         bundle.sourcePath: ${workspace.file_path}/src
-        tmp_base_path: /Volumes/lr_nhl_demo/dev/
-        base_shots_download_url: https://peter-tanner.com/moneypuck/downloads/
-        base_download_url: https://moneypuck.com/moneypuck/playerData/seasonSummary/2024/regular/
-        games_download_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv
-        player_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/regular/skaters/
-        one_time_load: "true"
-        season_list: "[2023, 2024, 2025]"
-        player_playoff_games_url: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/playoffs/skaters/
+        schema: dev
+        catalog: lr_nhl_demo
+        # === PIPELINE MODES ===
+        # FULL LOAD: one_time_load="true" — Backfill 2023-10-01 to today. Run first or after reset. ~3–5 hours.
+        # INCREMENTAL: one_time_load="false" — Daily updates from (bronze max - lookback_days) to today. ~5–10 min.
+        # Use "false" now that bronze is loaded.
+        one_time_load: "false"
+        # skip_staging_ingestion: "true" = use *_staging_manual only (no API calls in DLT).
+        # API fetching is now handled exclusively by the pre_ingest_staging job task,
+        # which writes to both _staging and _staging_manual before the pipeline runs.
+        skip_staging_ingestion: "true"
+        use_manual_for_historical: "false"
+        lookback_days: "5"
+        schedule_future_days: "4"
+      notifications:
+        - email_recipients:
+            - logan.rupert@databricks.com
+          alerts:
+            # - on-update-success
+            - on-update-failure
       root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl

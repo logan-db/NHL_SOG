@@ -58,6 +58,7 @@ game_clean_cols = [
     "opposingTeam",
     "gameId",
     "sum_game_Total_shotsOnGoalFor",
+    "sum_game_Total_shotsOnGoalAgainst",
     "game_Total_missedShotsFor",
     "game_Total_blockedShotAttemptsFor",
     "sum_game_Total_shotAttemptsFor",
@@ -69,6 +70,13 @@ game_clean_cols = [
     "sum_game_Total_penaltiesAgainst",
     "game_Total_faceOffsWonAgainst",
     "game_Total_hitsAgainst",
+]
+# Pre-calculated rolling averages from gold (L7) - speeds up app game analysis
+game_clean_precalc_cols = [
+    "average_sum_game_Total_shotsOnGoalFor_last_7_games",
+    "average_sum_game_Total_goalsFor_last_7_games",
+    "opponent_average_sum_game_Total_shotsOnGoalFor_last_7_games",
+    "opponent_average_sum_game_Total_goalsFor_last_7_games",
 ]
 
 # COMMAND ----------
@@ -254,13 +262,89 @@ display(silver_games_rankings[[game_clean_cols]])
 
 # COMMAND ----------
 
-games_clean = silver_games_rankings[[game_clean_cols]]
+# Use gold_game_stats_v2 for pre-calc rolling averages (avg SOG, SOGA, goals L7)
+# Fall back to silver if gold precalc cols missing (e.g. pipeline not updated)
+# NOTE: gold_game_stats_v2 drops EASTERN/LOCAL (03-gold-agg); silver has them. Use only cols that exist.
+_has_precalc = set(game_clean_precalc_cols).issubset(gold_game_stats_v2.columns)
+_selected_cols = (game_clean_cols + game_clean_precalc_cols) if _has_precalc else game_clean_cols
+_src = gold_game_stats_v2 if _has_precalc else silver_games_rankings
+_cols_in_src = [c for c in _selected_cols if c in _src.columns]
+games_clean = _src[_cols_in_src]
 games_clean = games_clean.withColumn(
     "isWin",
     when(
         col("sum_game_Total_goalsFor") > col("sum_game_Total_goalsAgainst"), "Yes"
     ).otherwise("No"),
 ).filter(col("gameId").isNotNull())
+# Dedupe by PK for Lakebase sync (gameId, playerTeam must be unique)
+games_clean = games_clean.dropDuplicates(["gameId", "playerTeam"])
+
+# Backfill 0-0 scores from player stats when silver_games_rankings has incorrect zeros
+# (ETL issue: schedule-games join can produce gameId with null stats -> coalesced to 0)
+player_goals_by_game = (
+    gold_player_stats_v2.filter(col("gameId").isNotNull())
+    .groupBy("gameId", "playerTeam")
+    .agg(sum("player_Total_goals").cast("int").alias("derived_goals"))
+)
+games_clean = (
+    games_clean.alias("g")
+    .join(
+        player_goals_by_game.alias("pg_team"),
+        (col("g.gameId") == col("pg_team.gameId")) & (col("g.playerTeam") == col("pg_team.playerTeam")),
+        "left",
+    )
+    .join(
+        player_goals_by_game.alias("pg_opp"),
+        (col("g.gameId") == col("pg_opp.gameId")) & (col("g.opposingTeam") == col("pg_opp.playerTeam")),
+        "left",
+    )
+    .withColumn(
+        "_orig_gf",
+        col("g.sum_game_Total_goalsFor"),
+    )
+    .withColumn(
+        "_orig_ga",
+        col("g.sum_game_Total_goalsAgainst"),
+    )
+    .withColumn(
+        "_should_backfill",
+        (col("_orig_gf") == 0)
+        & (col("_orig_ga") == 0)
+        & col("pg_team.derived_goals").isNotNull()
+        & col("pg_opp.derived_goals").isNotNull(),
+    )
+    .withColumn(
+        "sum_game_Total_goalsFor",
+        when(col("_should_backfill"), col("pg_team.derived_goals")).otherwise(
+            col("g.sum_game_Total_goalsFor")
+        ),
+    )
+    .withColumn(
+        "sum_game_Total_goalsAgainst",
+        when(col("_should_backfill"), col("pg_opp.derived_goals")).otherwise(
+            col("g.sum_game_Total_goalsAgainst")
+        ),
+    )
+    .select(
+        *[
+            col("sum_game_Total_goalsFor") if c == "sum_game_Total_goalsFor"
+            else col("sum_game_Total_goalsAgainst") if c == "sum_game_Total_goalsAgainst"
+            else col(f"g.{c}")
+            for c in _cols_in_src
+        ]
+    )
+)
+# Recompute isWin after potential backfill
+games_clean = games_clean.withColumn(
+    "isWin",
+    when(
+        col("sum_game_Total_goalsFor") > col("sum_game_Total_goalsAgainst"), "Yes"
+    ).otherwise("No"),
+)
+# gold_game_stats_v2 drops EASTERN/LOCAL; add defaults for consistent schema (Lakebase/Genie)
+for add_col, default in [("EASTERN", "7:00 PM"), ("LOCAL", "7:00 PM")]:
+    if add_col not in games_clean.columns:
+        games_clean = games_clean.withColumn(add_col, lit(default))
 display(games_clean)
 
 # COMMAND ----------
@@ -270,23 +354,25 @@ display(gold_player_stats_clean)
 
 # COMMAND ----------
 
-spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_player_stats_clean")
-gold_player_stats_clean.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.gold_player_stats_clean"
+# Write with overwrite mode — preserves the Delta table's identity and transaction log so the
+# Lakebase TRIGGERED sync (CDF-based) can detect changes. Dropping and recreating the table
+# resets the Delta log, which leaves the sync pipeline with a stale checkpoint and no updates.
+gold_player_stats_clean.write.format("delta").mode("overwrite").option(
+    "overwriteSchema", "true"
+).saveAsTable("lr_nhl_demo.dev.gold_player_stats_clean")
+# Ensure CDF is enabled for Lakebase TRIGGERED sync (belt-and-suspenders; set on first write)
+spark.sql(
+    "ALTER TABLE lr_nhl_demo.dev.gold_player_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
 
 # COMMAND ----------
 
-spark.sql("DROP TABLE IF EXISTS lr_nhl_demo.dev.gold_game_stats_clean")
-games_clean.write.format("delta").mode("overwrite").saveAsTable(
-    "lr_nhl_demo.dev.gold_game_stats_clean"
-)
-
-# Enable Change Data Feed on gold_game_stats_clean for synced database tables
-print("Enabling Change Data Feed on gold_game_stats_clean...")
+games_clean.write.format("delta").mode("overwrite").option(
+    "overwriteSchema", "true"
+).saveAsTable("lr_nhl_demo.dev.gold_game_stats_clean")
+# Ensure CDF is enabled for Lakebase TRIGGERED sync (belt-and-suspenders; set on first write)
 spark.sql(
     "ALTER TABLE lr_nhl_demo.dev.gold_game_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
-print("✅ Change Data Feed enabled on gold_game_stats_clean")
 
 # COMMAND ----------

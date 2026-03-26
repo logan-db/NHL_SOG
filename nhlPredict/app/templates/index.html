@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Player Analysis Page (full view, shown when #player in URL) -->
+<div id="player-page" class="player-page" style="display: none;">
+  <div class="player-page-back">
+    <a href="#" id="player-page-back" class="back-link">← Back to Dashboard</a>
+  </div>
+  <div class="player-page-hero">
+    <h1 id="player-page-name" class="player-page-name">—</h1>
+    <p id="player-page-matchup" class="player-page-matchup">—</p>
+    <div class="player-page-actions">
+      <button type="button" class="btn-star" id="player-page-fav-btn" title="Favorite">☆ Favorite</button>
+      <button type="button" class="btn-pick" id="player-page-pick-btn" title="Pick for game" style="display:none;">Pick for game</button>
+    </div>
+  </div>
+  <section class="player-page-section player-summary-section">
+    <h2 class="player-section-title">AI Analysis & Summary</h2>
+    <div id="player-page-explanation" class="player-explanation"></div>
+    <div id="player-page-ai-generate" class="player-ai-generate">
+      <button type="button" class="btn-ai-generate" id="player-page-btn-ai-generate">Generate AI analysis</button>
+      <div id="player-page-ai-loading" class="player-ai-loading" style="display:none;">Analyzing…</div>
+    </div>
+  </section>
+  <section class="player-page-section">
+    <h2 class="player-section-title">Key Metrics</h2>
+    <div class="player-page-metrics-grid" id="player-page-metrics"></div>
+  </section>
+  <section class="player-page-section player-charts-row">
+    <div class="player-chart-card">
+      <h3 class="player-chart-title">SOG Trend</h3>
+      <div class="player-chart-wrapper">
+        <canvas id="player-sog-trend-chart"></canvas>
+      </div>
+    </div>
+    <div class="player-chart-card">
+      <h3 class="player-chart-title">Season Hit Rates Over Time</h3>
+      <div class="player-chart-wrapper">
+        <canvas id="player-hit-rates-chart"></canvas>
+      </div>
+    </div>
+  </section>
+  <section class="player-page-section">
+    <h2 class="player-section-title">2+ / 3+ SOG Hit Rates</h2>
+    <div class="player-hit-rates-grid" id="player-page-hit-rates"></div>
+  </section>
+  <section class="player-page-section player-stats-row">
+    <div class="player-stats-block">
+      <h3 class="player-stats-block-title" id="player-page-team-label">Team Rankings</h3>
+      <div id="player-page-team"></div>
+    </div>
+    <div class="player-stats-block">
+      <h3 class="player-stats-block-title">Opponent Rankings</h3>
+      <div id="player-page-opponent"></div>
+    </div>
+  </section>
+  <section class="player-page-section">
+    <h2 class="player-section-title">Player Stats</h2>
+    <div id="player-page-stats"></div>
+  </section>
+</div>
+
+<!-- Main App (hidden when on player page) -->
+<div id="main-app">
+<!-- Filters (shown on Dashboard + Predictions) -->
+<section class="section section-filters" id="filters">
+  <div class="filters-bar">
+    <div class="filter-group">
+      <label>Date</label>
+      <input type="date" id="filter-date" />
+    </div>
+    <div class="filter-group">
+      <label>Team</label>
+      <select id="filter-team">
+        <option value="">All teams</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Player</label>
+      <input type="text" id="filter-player" placeholder="Search player..." />
+    </div>
+    <button type="button" class="btn-clear" id="clear-filters">Clear</button>
+    <div class="filter-group favorite-teams-group">
+      <label>Favorite Teams</label>
+      <div id="favorite-teams-chips" class="favorite-chips"></div>
+      <select id="add-favorite-team" class="add-favorite-select">
+        <option value="">+ Add team</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<!-- Pick Type Modal -->
+<div class="pick-modal-overlay" id="pick-modal-overlay">
+  <div class="pick-modal">
+    <h3>Pick type for <span id="pick-modal-player">—</span></h3>
+    <div class="pick-type-options">
+      <button type="button" class="pick-type-btn" data-type="goal">To score a goal</button>
+      <button type="button" class="pick-type-btn" data-type="point">To have a point</button>
+      <button type="button" class="pick-type-btn" data-type="assist">To have an assist</button>
+      <button type="button" class="pick-type-btn" data-type="sog_2">To have 2+ shots on goal</button>
+      <button type="button" class="pick-type-btn" data-type="sog_3">To have 3+ shots on goal</button>
+      <button type="button" class="pick-type-btn" data-type="sog_4">To have 4+ shots on goal</button>
+    </div>
+    <button type="button" class="btn-clear pick-modal-cancel" id="pick-modal-cancel">Cancel</button>
+  </div>
+</div>
+
+<!-- Tab panels -->
+<div class="tab-panels">
+<!-- Dashboard: Upcoming Games -->
+<section id="tab-dashboard" class="tab-panel active">
+<section id="yesterday-results" class="section yesterday-section">
+  <h2 class="section-heading" id="yesterday-heading">Latest Results</h2>
+  <p id="yesterday-subtitle" class="text-secondary" style="font-size: 0.8rem; margin: -0.5rem 0 0.75rem 0; color: var(--text-muted);"></p>
+  <div class="yesterday-grid">
+    <div class="yesterday-scores-card">
+      <h3 class="yesterday-card-title">Scores</h3>
+      <div id="yesterday-scores" class="yesterday-scores"></div>
+      <p id="yesterday-scores-empty" class="empty-hint" style="display:none;">No games played yesterday.</p>
+    </div>
+    <div class="yesterday-shooters-card">
+      <h3 class="yesterday-card-title">Top Shooters</h3>
+      <div id="yesterday-shooters" class="yesterday-shooters"></div>
+      <p id="yesterday-shooters-empty" class="empty-hint" style="display:none;">No player stats from yesterday.</p>
+    </div>
+  </div>
+</section>
+<!-- Season Team SOG Rankings -->
+<section id="team-season-rankings" class="section team-season-section">
+  <div class="team-season-header">
+    <div>
+      <h2 class="section-heading" style="margin-bottom:0.15rem;">Season Team SOG Rankings</h2>
+      <p class="text-secondary" style="font-size:0.78rem;color:var(--text-muted);margin:0;">Full-season avg shots on goal (SOG) and shots allowed (SOGA) per team.</p>
+    </div>
+    <div class="team-season-toggle-group">
+      <button type="button" class="btn-team-show-toggle active" id="btn-team-top10" data-show="top10">Top 10</button>
+      <button type="button" class="btn-team-show-toggle" id="btn-team-all" data-show="all">All Teams</button>
+    </div>
+  </div>
+  <div class="team-season-grid" id="team-season-grid">
+    <div class="team-season-card" id="team-sog-shooting-card">
+      <h4 class="team-sog-subtitle">Top Shooting <span class="team-sog-badge">Avg SOG / Game</span></h4>
+      <div id="team-sog-shooting" class="team-sog-list"></div>
+      <p id="team-sog-shooting-empty" class="empty-hint" style="display:none;">No data available.</p>
+    </div>
+    <div class="team-season-card" id="team-sog-allowed-card">
+      <h4 class="team-sog-subtitle">Softest Defense <span class="team-sog-badge soga-badge">Avg SOGA / Game</span></h4>
+      <div id="team-sog-allowed" class="team-sog-list"></div>
+      <p id="team-sog-allowed-empty" class="empty-hint" style="display:none;">No data available.</p>
+    </div>
+  </div>
+</section>
+<!-- Hit Rate Leaders -->
+<section id="hit-rate-board" class="section hit-rate-section">
+  <div class="hit-rate-header">
+    <div>
+      <h2 class="section-heading" style="margin-bottom:0.15rem">Today's Hit Rate Leaders</h2>
+      <p class="text-secondary" style="font-size:0.78rem;color:var(--text-muted);margin:0">Season 2+/3+ SOG hit rates for players in today's upcoming games.</p>
+    </div>
+    <div class="hit-rate-toggle-group">
+      <button type="button" class="btn-hit-toggle active" data-sort="2plus">Sort: 2+ SOG%</button>
+      <button type="button" class="btn-hit-toggle" data-sort="3plus">Sort: 3+ SOG%</button>
+    </div>
+  </div>
+  <div class="hit-rate-chart-wrap">
+    <canvas id="hit-rate-chart"></canvas>
+  </div>
+  <p id="hit-rate-empty" class="empty-hint" style="display:none;">No upcoming game predictions available yet.</p>
+  <p id="hit-rate-click-hint" class="empty-hint" style="margin-top:0.4rem;">Click any player bar to view their full analysis for today's game.</p>
+</section>
+<section id="top-picks" class="section top-picks-section">
+  <h2 class="section-heading">Top Picks to Watch</h2>
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.75rem; color: var(--text-muted);">
+    Players with highest predicted SOG and strong matchups. Click to view details.
+  </p>
+  <div id="top-picks-grid" class="top-picks-grid"></div>
+</section>
+<section id="games" class="section">
+  <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.15rem;">
+    <h2 class="section-heading" style="margin-bottom:0;">Upcoming Games</h2>
+    <div class="games-view-toggle" id="games-view-toggle">
+      <button class="btn-games-view active" data-view="today">Today</button>
+      <button class="btn-games-view" data-view="tomorrow">Tomorrow</button>
+    </div>
+    <span id="games-date-badge" class="games-date-badge" style="display:none;"></span>
+  </div>
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.75rem; color: var(--text-muted);">
+    Click a game to see all player predictions. Click a player for detailed stats.
+  </p>
+  <div class="upcoming-filters-bar" id="upcoming-filters-bar">
+    <div class="filter-group">
+      <label>Sort by Date</label>
+      <select id="games-sort-date">
+        <option value="asc">Earliest first</option>
+        <option value="desc">Latest first</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Team</label>
+      <select id="games-filter-team">
+        <option value="">All teams</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Player</label>
+      <input type="text" id="games-filter-player" placeholder="Search player..." />
+    </div>
+    <button type="button" class="btn-clear" id="games-clear-filters">Clear</button>
+  </div>
+  <div class="games-grid" id="games-grid">
+    <div class="loading">Loading games...</div>
+  </div>
+</section>
+</section>
+
+<!-- Predictions tab -->
+<section id="tab-predictions" class="tab-panel">
+<section id="predictions" class="section">
+  <h2 class="section-heading">All Predictions</h2>
+  <div class="data-table-wrapper">
+    <table class="data-table" id="predictions-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Player</th>
+          <th>Team</th>
+          <th>Opp</th>
+          <th class="numeric">Pred SOG</th>
+          <th class="numeric">Variance</th>
+          <th class="numeric">Avg 7</th>
+          <th class="numeric">2+ %</th>
+          <th class="numeric">3+ %</th>
+          <th class="numeric">Opp SOG Rank</th>
+          <th>Explanation</th>
+        </tr>
+      </thead>
+      <tbody id="predictions-body">
+        <tr><td colspan="11" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+</section>
+
+<!-- My Picks tab -->
+<section id="tab-my-picks" class="tab-panel">
+<section id="my-picks" class="section">
+  <h2 class="section-heading">My Picks</h2>
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem; color: var(--text-muted);">
+    Players you've picked for games. Compare predicted vs actual SOG after games are played.
+  </p>
+  <div id="picks-accuracy-chart" class="picks-accuracy-chart"></div>
+  <div id="picks-accuracy-summary" class="picks-accuracy-summary"></div>
+  <div class="data-table-wrapper">
+    <table class="data-table" id="picks-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Game</th>
+          <th>Player</th>
+          <th>Pick Type</th>
+          <th class="numeric">Pred</th>
+          <th class="numeric">Actual</th>
+          <th>Result</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="picks-body">
+        <tr><td colspan="8" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+</section>
+
+<!-- Ask tab - Genie natural language Q&A -->
+<section id="tab-ask" class="tab-panel">
+<section id="ask-genie" class="section ask-genie-section">
+  <h2 class="section-heading">Ask NHL Genie</h2>
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem; color: var(--text-muted);">
+    Ask questions about player analysis, historical stats, game scores, and predicted SOG. Try: &quot;Who has the highest predicted SOG?&quot; or &quot;Show me top shooters from last 10 games.&quot;
+  </p>
+  <div class="genie-chat-container">
+    <div id="genie-messages" class="genie-messages"></div>
+    <div class="genie-input-row">
+      <textarea id="genie-input" class="genie-input" rows="2" placeholder="Ask a question about NHL players, stats, games, or predictions..." maxlength="2000"></textarea>
+      <button type="button" class="btn-genie-send" id="genie-send" aria-label="Send">Send</button>
+    </div>
+    <p id="genie-error" class="genie-error" style="display:none;"></p>
+  </div>
+</section>
+</section>
+
+<!-- Historical tab -->
+<section id="tab-historical" class="tab-panel">
+<section id="historical" class="section">
+  <h2 class="section-heading">Historical Games</h2>
+  <p class="text-secondary" style="font-size: 0.875rem; margin-bottom: 1rem; color: var(--text-muted);">
+    Filter and sort past games. Click a row to expand and see player stats (SOG, goals, assists).
+  </p>
+  <div class="historical-filters" style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; align-items: flex-end;">
+    <div class="filter-group">
+      <label>From date</label>
+      <input type="date" id="historical-date-from" />
+    </div>
+    <div class="filter-group">
+      <label>To date</label>
+      <input type="date" id="historical-date-to" />
+    </div>
+    <div class="filter-group">
+      <label>Team</label>
+      <select id="historical-filter-team">
+        <option value="">All teams</option>
+      </select>
+    </div>
+    <span class="filter-hint" style="font-size: 0.8rem; color: var(--text-muted);">Click column headers to sort</span>
+    <button type="button" class="btn-clear" id="historical-apply">Apply</button>
+    <div id="historical-data-hint" class="historical-data-hint" style="display: none; font-size: 0.8rem; color: var(--warn); margin-left: auto;"></div>
+  </div>
+  <div class="data-table-wrapper">
+    <table class="data-table sortable-table" id="historical-table">
+      <thead>
+        <tr>
+          <th class="no-sort"></th>
+          <th class="sortable" data-sort="date" data-dir="desc" title="Click to sort">Date <span class="sort-indicator"></span></th>
+          <th class="sortable" data-sort="home" data-dir="" title="Click to sort">Home <span class="sort-indicator"></span></th>
+          <th class="sortable" data-sort="away" data-dir="" title="Click to sort">Away <span class="sort-indicator"></span></th>
+          <th class="sortable numeric" data-sort="goals_for" data-dir="" title="Click to sort">GF <span class="sort-indicator"></span></th>
+          <th class="sortable numeric" data-sort="goals_against" data-dir="" title="Click to sort">GA <span class="sort-indicator"></span></th>
+          <th class="sortable" data-sort="result" data-dir="" title="Click to sort">Home Team Result <span class="sort-indicator"></span></th>
+        </tr>
+      </thead>
+      <tbody id="historical-body">
+        <tr><td colspan="7" class="loading">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+</section>
+</div>
+</div><!-- /#main-app -->
+
+<!-- Player Detail Overlay (legacy - kept for fallback) -->
+<div class="player-detail-overlay" id="player-detail-overlay">
+  <div class="player-detail-panel">
+    <div class="header">
+      <h3 id="player-detail-name">—</h3>
+      <div class="header-actions">
+        <button type="button" class="btn-star" id="player-detail-fav-btn" title="Favorite this player">☆ Favorite</button>
+        <button type="button" class="btn-pick" id="player-detail-pick-btn" title="Pick for this game">Pick for game</button>
+        <button type="button" class="close-btn" id="close-player-detail" aria-label="Close">&times;</button>
+      </div>
+    </div>
+    <div class="section player-key-metrics">
+      <div class="section-title">Key Metrics</div>
+      <div class="key-metrics-grid" id="player-key-metrics"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">SOG Trend</div>
+      <div id="player-sog-chart" class="sog-chart"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">2+ / 3+ SOG Hit Rates</div>
+      <div id="player-detail-sog-rates"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Player Stats</div>
+      <div id="player-detail-stats"></div>
+    </div>
+    <div class="section">
+      <div class="section-title" id="player-detail-team-label">Team Rankings</div>
+      <div id="player-detail-team"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Opponent Rankings</div>
+      <div id="player-detail-opponent"></div>
+    </div>
+    <div class="section player-ai-section">
+      <div class="section-title">AI Analysis</div>
+      <div id="player-detail-explanation" class="player-explanation"></div>
+      <div id="player-detail-ai-generate" class="player-ai-generate">
+        <button type="button" class="btn-ai-generate" id="btn-ai-generate">Generate AI analysis</button>
+        <div id="player-ai-loading" class="player-ai-loading" style="display:none;">Analyzing…</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

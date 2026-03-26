@@ -1,0 +1,17 @@
+command: ['flask', '--app', 'app.py', 'run', '--host', '0.0.0.0', '--port', '8000']
+
+env:
+  - name: GENIE_SPACE_ID
+    valueFrom: genie-space
+  - name: PGHOST
+    value: 'ep-patient-credit-d1nz67uh.database.us-west-2.cloud.databricks.com'
+  - name: PGDATABASE
+    value: 'databricks_postgres'
+  - name: PGUSER
+    value: '2e0ea180-83dc-4a75-b2d6-6972f90187b4'
+  - name: PGPORT
+    value: '5432'
+  - name: PGSSLMODE
+    value: 'require'
+  - name: ENDPOINT_NAME
+    value: 'projects/lr-database-instance/branches/production/endpoints/primary'
