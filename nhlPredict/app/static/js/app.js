@@ -409,6 +409,8 @@ async function addPick(gameDate, home, away, playerName, playerTeam, opposingTea
 let allGames = [];
 let allPredictions = [];
 let gamesView = 'today'; // 'today' | 'tomorrow'
+let predictionsSortBy = 'pred_sog';
+let predictionsSortDir = 'desc';
 
 function renderFavoriteTeamsChips() {
   const chipsEl = document.getElementById('favorite-teams-chips');
@@ -1290,6 +1292,77 @@ async function loadGameAnalysis(gameKey) {
   }
 }
 
+function getPredictionsSortValue(p, key) {
+  const fieldMap = {
+    date: 'game_date',
+    player: 'shooter_name',
+    team: 'player_team',
+    opp: 'opposing_team',
+    pred_sog: 'predicted_sog',
+    variance: 'abs_variance_avg_last7_sog',
+    avg7: 'player_avg_sog_last7',
+    hit2: 'player_2plus_season_hit_rate',
+    hit3: 'player_3plus_season_hit_rate',
+    opp_rank: 'opp_sog_against_rank',
+  };
+  const field = fieldMap[key] || key;
+  let val = p[field];
+  if (field === 'player_2plus_season_hit_rate') val = val ?? p.player_2plus_last30_hit_rate;
+  if (field === 'player_3plus_season_hit_rate') val = val ?? p.player_3plus_last30_hit_rate;
+  if (val == null) return -Infinity;
+  if (typeof val === 'string' && !isNaN(parseFloat(val))) return parseFloat(val);
+  return val;
+}
+
+function sortPredictions(data) {
+  const sorted = [...data];
+  const numericKeys = new Set(['pred_sog', 'variance', 'avg7', 'hit2', 'hit3', 'opp_rank']);
+  const isNumeric = numericKeys.has(predictionsSortBy);
+  sorted.sort((a, b) => {
+    let va = getPredictionsSortValue(a, predictionsSortBy);
+    let vb = getPredictionsSortValue(b, predictionsSortBy);
+    let cmp;
+    if (isNumeric) {
+      cmp = (parseFloat(va) || 0) - (parseFloat(vb) || 0);
+    } else {
+      cmp = String(va).localeCompare(String(vb));
+    }
+    return predictionsSortDir === 'desc' ? -cmp : cmp;
+  });
+  return sorted;
+}
+
+function updatePredictionsSortIndicators() {
+  document.querySelectorAll('#predictions-table th.sortable').forEach(th => {
+    const ind = th.querySelector('.sort-indicator');
+    if (!ind) return;
+    if (predictionsSortBy !== th.dataset.sort) {
+      ind.textContent = '';
+      return;
+    }
+    ind.textContent = predictionsSortDir === 'asc' ? ' ▲' : ' ▼';
+  });
+}
+
+function ensurePredictionsSortHandlers() {
+  const table = document.getElementById('predictions-table');
+  if (!table || table._sortHandlersAttached) return;
+  table._sortHandlersAttached = true;
+  table.addEventListener('click', (e) => {
+    const th = e.target.closest('th.sortable');
+    if (!th || !th.dataset.sort) return;
+    const sort = th.dataset.sort;
+    if (predictionsSortBy === sort) {
+      predictionsSortDir = predictionsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      predictionsSortBy = sort;
+      const numericKeys = new Set(['pred_sog', 'variance', 'avg7', 'hit2', 'hit3', 'opp_rank']);
+      predictionsSortDir = numericKeys.has(sort) ? 'desc' : 'asc';
+    }
+    renderPredictionsTable();
+  });
+}
+
 function renderPredictionsTable() {
   const tbody = document.getElementById('predictions-body');
   if (!tbody) return;
@@ -1299,7 +1372,9 @@ function renderPredictionsTable() {
     return;
   }
 
-  tbody.innerHTML = allPredictions.map(p => {
+  const sorted = sortPredictions(allPredictions);
+
+  tbody.innerHTML = sorted.map(p => {
     const date = dateStr(p.game_date);
     const oppRank = rankClassOrdinal(p.opp_sog_against_rank, 32, true);
     const fav = isFavorite(p.shooter_name, p.player_team);
@@ -1319,6 +1394,9 @@ function renderPredictionsTable() {
     </tr>
   `;
   }).join('');
+
+  updatePredictionsSortIndicators();
+  ensurePredictionsSortHandlers();
 
   tbody.querySelectorAll('.player-row').forEach(row => {
     row.addEventListener('click', e => {
