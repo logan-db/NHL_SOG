@@ -50,15 +50,32 @@ print(f"✅ NHL API client ready  |  src path: {_src_dir}")
 # COMMAND ----------
 
 # DBTITLE 1,Configuration
-# spark.conf.get only works inside a DLT pipeline (where pipeline configs are injected).
-# In a regular notebook task the keys are absent and some DBR versions throw
-# CONFIG_NOT_AVAILABLE even when a default is provided.  Use a safe helper instead.
+# spark.conf.get works inside a DLT pipeline (pipeline configs are injected as Spark conf).
+# In a regular notebook task (this script's normal execution path), those keys are absent
+# and spark.conf.get raises an exception. Fall back to job parameter widgets in that case.
+#
+# Special handling for 'schema':
+#   - DLT context:      spark.conf.get("schema") → "dev" or "prod"  (set by pipeline config)
+#   - Notebook task:    spark.conf missing → dbutils.widgets.get("schema") → job parameter value
+#
+# Special handling for 'catalog':
+#   - DLT context:      spark.conf.get("catalog") → "lr_nhl_demo"  (catalog-only string)
+#   - Notebook task:    widget "catalog" = "lr_nhl_demo.dev" (combined). Only extract schema
+#                       from widgets; keep catalog hardcoded to its base name.
 def _conf(key: str, default: str) -> str:
     try:
         v = spark.conf.get(key)
         return v if v else default
     except Exception:
-        return default
+        pass
+    if key == "schema":
+        # Job sends schema=dev|prod as a dedicated parameter (added alongside catalog).
+        try:
+            v = dbutils.widgets.get("schema")
+            return v if v else default
+        except Exception:
+            pass
+    return default
 
 catalog       = _conf("catalog",       "lr_nhl_demo")
 schema        = _conf("schema",        "dev")

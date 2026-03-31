@@ -5,15 +5,22 @@ from pyspark.sql.window import Window
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC USE CATALOG lr_nhl_demo
+# Job passes catalog=lr_nhl_demo.{target} (e.g. lr_nhl_demo.dev or lr_nhl_demo.prod).
+# Widget default covers interactive / ad-hoc runs.
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog")
+catalog_param = dbutils.widgets.get("catalog")
+_parts = catalog_param.split(".")
+catalog_name = _parts[0]
+schema_name = _parts[1] if len(_parts) > 1 else "dev"
+
+spark.sql(f"USE CATALOG {catalog_name}")
 
 # COMMAND ----------
 
 target_col = "player_Total_shotsOnGoal"
 
-predictSOG_upcoming = spark.table("dev.predictSOG_upcoming_v2")
-predictSOG_hist = spark.table("dev.predictSOG_hist_v2")
+predictSOG_upcoming = spark.table(f"{schema_name}.predictSOG_upcoming_v2")
+predictSOG_hist = spark.table(f"{schema_name}.predictSOG_hist_v2")
 
 # COMMAND ----------
 
@@ -299,12 +306,12 @@ display(
 
 clean_prediction_edit.write.format("delta").mode("overwrite").option(
     "mergeSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.clean_prediction_v2")
+).saveAsTable(f"{catalog_param}.clean_prediction_v2")
 
 # COMMAND ----------
 
 display(
-    spark.table("lr_nhl_demo.dev.clean_prediction_v2")
+    spark.table(f"{catalog_param}.clean_prediction_v2")
     .select(
         "gameDate",
         "playerTeam",
@@ -324,7 +331,7 @@ display(
 # the Lakebase triggered-sync CDF checkpoint → Lakebase serves stale predictions.
 # DataFrame.write.mode("overwrite") preserves the Delta table and its CDF history so
 # the Lakebase sync correctly sees each day's deletes + inserts.
-summary_df = spark.sql("""
+summary_df = spark.sql(f"""
     SELECT
         gameId, playerId, gameDate, shooterName, playerTeam, opposingTeam, season,
         is_last_played_game, is_last_played_game_team, absVarianceAvgLast7SOG,
@@ -355,7 +362,7 @@ summary_df = spark.sql("""
                    PARTITION BY shooterName, gameDate, playerTeam, opposingTeam
                    ORDER BY absVarianceAvgLast7SOG DESC, predictedSOG DESC
                ) AS rn
-        FROM lr_nhl_demo.dev.clean_prediction_v2
+        FROM {catalog_param}.clean_prediction_v2
         WHERE gameDate IS NOT NULL
     ) sub
     WHERE rn = 1
@@ -364,19 +371,11 @@ summary_df = spark.sql("""
 
 summary_df.write.format("delta").mode("overwrite").option(
     "overwriteSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.clean_prediction_summary")
+).saveAsTable(f"{catalog_param}.clean_prediction_summary")
 # Re-enable CDF after overwrite (preserved by mode("overwrite") but set explicitly as belt-and-suspenders)
 spark.sql(
-    "ALTER TABLE lr_nhl_demo.dev.clean_prediction_summary SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+    f"ALTER TABLE {catalog_param}.clean_prediction_summary SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
-
-# COMMAND ----------
-
-# DBTITLE 1,Enable Change Data Feed for Synced Tables
-# MAGIC %sql
-# MAGIC -- Enable Change Data Feed on clean_prediction_summary table for synced database tables
-# MAGIC ALTER TABLE lr_nhl_demo.dev.clean_prediction_summary
-# MAGIC SET TBLPROPERTIES (delta.enableChangeDataFeed = true);
 
 # COMMAND ----------
 

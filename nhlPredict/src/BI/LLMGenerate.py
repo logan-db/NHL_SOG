@@ -5,8 +5,15 @@ from pyspark.sql.functions import col, expr, desc
 # COMMAND ----------
 
 # DBTITLE 1,Catalog Setup
-# MAGIC %sql
-# MAGIC USE CATALOG lr_nhl_demo
+# Job passes catalog=lr_nhl_demo.{target} (e.g. lr_nhl_demo.dev or lr_nhl_demo.prod).
+# Widget default covers interactive / ad-hoc runs.
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog")
+catalog_param = dbutils.widgets.get("catalog")
+_parts = catalog_param.split(".")
+catalog_name = _parts[0]
+schema_name = _parts[1] if len(_parts) > 1 else "dev"
+
+spark.sql(f"USE CATALOG {catalog_name}")
 
 # COMMAND ----------
 
@@ -15,7 +22,7 @@ from pyspark.sql.functions import col, expr, desc
 CURRENT_SEASON = 20252026
 
 latest_games = (
-    spark.table("dev.clean_prediction_summary")
+    spark.table(f"{catalog_param}.clean_prediction_summary")
     .filter(
         (col("gameId").isNull())
         & (col("is_last_played_game") == True)
@@ -136,13 +143,13 @@ df_out = latest_games.selectExpr("*", ai_query_expr)
 df_out.write.format("delta").mode("overwrite").option(
     "overwriteSchema", "true"
 ).option("delta.enableChangeDataFeed", "true").saveAsTable(
-    "lr_nhl_demo.dev.llm_summary"
+    f"{catalog_param}.llm_summary"
 )
 # Ensure CDF for Lakebase TRIGGERED sync (option may not apply on saveAsTable)
 spark.sql(
-    "ALTER TABLE lr_nhl_demo.dev.llm_summary SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+    f"ALTER TABLE {catalog_param}.llm_summary SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
-print("Data written to table: lr_nhl_demo.dev.llm_summary")
+print(f"Data written to table: {catalog_param}.llm_summary")
 
 # COMMAND ----------
 

@@ -34,30 +34,8 @@ targets:
       host: https://e2-demo-field-eng.cloud.databricks.com
       root_path: /Users/logan.rupert@databricks.com/.bundle/${bundle.name}/${bundle.target}
       artifact_path: /Volumes/lr_nhl_demo/dev/${workspace.current_user.short_name}/data
-    # sync:
-    #   include:
-    #       - nhlPredict/src/data/2025_26_official_nhl_schedule_by_day.csv
-    #       - nhlPredict/src/data/8477493.csv
-    #       - nhlPredict/src/data/team_code_mappings.csv
-    # CSV artifact uploads are disabled: "csv" is not a valid artifact type (only whl/jar supported).
-    # These files are handled at runtime by the NHLPlayerPropRetrain upload_player_stats task,
-    # which reads from base_vol_load_path (/Volumes/.../data/.internal/) — a different path anyway.
-    # artifacts:
-    #   player_data_upload:
-    #     path: .../src/data/8477493.csv
-    #     type: csv
-    #     files:
-    #       - source: ".../src/data/8477493.csv"
-    #   schedule_upload:
-    #     path: .../src/data/Edited_25-26 NHL Schedule - NHL schedule.csv
-    #     type: csv
-    #     files:
-    #       - source: ".../src/data/Edited_25-26 NHL Schedule - NHL schedule.csv"
-    #   mappings_upload:
-    #     path: .../src/data/team_code_mappings.csv
-    #     type: csv
-    #     files:
-    #       - source: ".../src/data/team_code_mappings.csv"
+    # src/data/ CSV files (8477493.csv, schedule, team_code_mappings) are synced to the workspace
+    # by `bundle deploy` automatically. upload_player_stats reads them from the bundle files path.
   
   ## Optionally, there could be a 'staging' target here.
   ## (See Databricks docs on CI/CD at https://docs.databricks.com/dev-tools/bundles/ci-cd.html.)
@@ -76,7 +54,23 @@ targets:
       # We always use /Users/logan.rupert@databricks.com for all resources to make sure we only have a single copy.
       # If this path results in an error, please make sure you have a recent version of the CLI installed.
       root_path: /Users/logan.rupert@databricks.com/.bundle/${bundle.name}/${bundle.target}
+      # Prod artifacts stored in the shared prod volume (no per-user subfolder).
+      artifact_path: /Volumes/lr_nhl_demo/prod/data
     run_as:
       # This runs as logan.rupert@databricks.com in production. We could also use a service principal here,
       # see https://docs.databricks.com/dev-tools/bundles/permissions.html.
       user_name: logan.rupert@databricks.com
+    resources:
+      jobs:
+        # Activate the daily schedule in prod (yml default is PAUSED for safety).
+        NHLPlayerPropDaily:
+          schedule:
+            quartz_cron_expression: 0 0 9 * * ?
+            timezone_id: America/Chicago
+            pause_status: UNPAUSED
+        # Prod data volume has a different path structure than dev (no user subfolder).
+        # File uploaded via REST Files API: scripts/seed_data_vol.py prod
+        NHLPlayerPropRetrain:
+          parameters:
+            - name: base_vol_load_path
+              default: /Volumes/lr_nhl_demo/prod/data/

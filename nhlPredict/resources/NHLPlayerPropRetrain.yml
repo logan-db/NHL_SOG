@@ -16,17 +16,24 @@ resources:
         - task_key: createVols
           notebook_task:
             notebook_path: ../src/setup/01-Ingestion-createVols.sql
+            source: WORKSPACE
 
         - task_key: upload_player_stats
           depends_on:
             - task_key: createVols
           for_each_task:
-            inputs: '[{"write_path": "/Volumes/lr_nhl_demo/dev/player_game_stats/8477493.csv", "load_path": "8477493.csv", "create_table": "false", "table_name": "NA"}, {"write_path": "/Volumes/lr_nhl_demo/dev/player_game_stats_playoffs/8477493.csv", "load_path": "8477493.csv", "create_table": "false", "table_name": "NA"}, {"write_path": "/Volumes/lr_nhl_demo/dev/data/Edited_25-26 NHL Schedule - NHL schedule.csv", "load_path": "Edited_25-26 NHL Schedule - NHL schedule.csv", "create_table": "true", "table_name": "2025_26_official_nhl_schedule_by_day"}, {"write_path": "/Volumes/lr_nhl_demo/dev/data/team_code_mappings.csv", "load_path": "team_code_mappings.csv", "create_table": "true", "table_name": "team_code_mappings"}]'
+            # Only team_code_mappings is actively used (Genie prep + Lakebase sync).
+            # 8477493.csv uploads removed: player_game_stats/playoffs volumes are legacy
+            #   (active pipeline fetches all player data from NHL API via pre_ingest_staging).
+            # Schedule CSV removed: creates 2025_26_official_nhl_schedule_by_day but Genie
+            #   reads 2023_24_official_nhl_schedule_by_day and bronze_schedule_2023_v2 (DLT).
+            inputs: '[{"write_path": "/Volumes/lr_nhl_demo/${bundle.target}/data/team_code_mappings.csv", "load_path": "team_code_mappings.csv", "create_table": "true", "table_name": "team_code_mappings"}]'
             concurrency: 4
             task:
               task_key: upload_player_stats_iteration
               notebook_task:
                 notebook_path: ../src/setup/upload_to_vol.py
+                source: WORKSPACE
                 base_parameters:
                   write_location: '{{input.write_path}}'
                   load_location: '{{input.load_path}}'
@@ -54,6 +61,8 @@ resources:
           spark_python_task:
             # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
             python_file: ../src/transformation/solidify_gold_tables_v2.py
+            parameters:
+              - "{{job.parameters.catalog}}"
           environment_key: Default
 
         - task_key: createPreFeatEngTable
@@ -181,7 +190,9 @@ resources:
               max_workers: 8
       parameters:
         - name: catalog
-          default: lr_nhl_demo.dev
+          default: lr_nhl_demo.${bundle.target}
+        - name: schema
+          default: ${bundle.target}
         - name: target_col
           default: player_Total_shotsOnGoal
         - name: time_col
@@ -196,8 +207,11 @@ resources:
           default: 4320825364109465
         - name: training_experiment_param
           default: 4320825364109641
+        # Source CSV files are uploaded to the UC data volume root via scripts/seed_data_vol.py
+        # (uses REST Files API /api/2.0/fs/files — the only method that writes to UC volumes).
+        # Dev default; prod overrides in databricks.yml.
         - name: base_vol_load_path
-          default: /Volumes/lr_nhl_demo/dev/logan_rupert/data/.internal/
+          default: /Volumes/lr_nhl_demo/dev/logan_rupert/data/
       environments:
         - environment_key: Default
           spec:

@@ -4,26 +4,33 @@ from pyspark.sql.functions import *
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC USE CATALOG lr_nhl_demo
+# Job passes catalog=lr_nhl_demo.{target} (e.g. lr_nhl_demo.dev or lr_nhl_demo.prod).
+# Widget default covers interactive / ad-hoc runs.
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog")
+catalog_param = dbutils.widgets.get("catalog")
+_parts = catalog_param.split(".")
+catalog_name = _parts[0]
+schema_name = _parts[1] if len(_parts) > 1 else "dev"
+
+spark.sql(f"USE CATALOG {catalog_name}")
 
 # COMMAND ----------
 
-games_v2 = spark.table("dev.bronze_games_historical_v2")
-player_game_stats = spark.table("dev.bronze_player_game_stats")
-player_game_stats_v2 = spark.table("dev.bronze_player_game_stats_v2")
-bronze_schedule_2023_v2 = spark.table("dev.bronze_schedule_2023_v2")
+games_v2 = spark.table(f"{catalog_param}.bronze_games_historical_v2")
+player_game_stats = spark.table(f"{catalog_param}.bronze_player_game_stats")
+player_game_stats_v2 = spark.table(f"{catalog_param}.bronze_player_game_stats_v2")
+bronze_schedule_2023_v2 = spark.table(f"{catalog_param}.bronze_schedule_2023_v2")
 
-schedule_2023 = spark.table("dev.2023_24_official_nhl_schedule_by_day")
-silver_games_schedule_v2 = spark.table("dev.silver_games_schedule_v2")
-team_code_mappings = spark.table("dev.team_code_mappings")
-silver_games_rankings = spark.table("dev.silver_games_rankings")
+schedule_2023 = spark.table(f"{catalog_param}.2023_24_official_nhl_schedule_by_day")
+silver_games_schedule_v2 = spark.table(f"{catalog_param}.silver_games_schedule_v2")
+team_code_mappings = spark.table(f"{catalog_param}.team_code_mappings")
+silver_games_rankings = spark.table(f"{catalog_param}.silver_games_rankings")
 
-silver_games_historical_v2 = spark.table("dev.silver_games_historical_v2")
-gold_player_stats_v2 = spark.table("dev.gold_player_stats_v2")
-gold_merged_stats_v2 = spark.table("dev.gold_merged_stats_v2")
-gold_game_stats_v2 = spark.table("dev.gold_game_stats_v2")
-gold_model_data_v2 = spark.table("dev.gold_model_stats_v2")
+silver_games_historical_v2 = spark.table(f"{catalog_param}.silver_games_historical_v2")
+gold_player_stats_v2 = spark.table(f"{catalog_param}.gold_player_stats_v2")
+gold_merged_stats_v2 = spark.table(f"{catalog_param}.gold_merged_stats_v2")
+gold_game_stats_v2 = spark.table(f"{catalog_param}.gold_game_stats_v2")
+gold_model_data_v2 = spark.table(f"{catalog_param}.gold_model_stats_v2")
 
 # COMMAND ----------
 
@@ -359,20 +366,20 @@ display(gold_player_stats_clean)
 # resets the Delta log, which leaves the sync pipeline with a stale checkpoint and no updates.
 gold_player_stats_clean.write.format("delta").mode("overwrite").option(
     "overwriteSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.gold_player_stats_clean")
+).saveAsTable(f"{catalog_param}.gold_player_stats_clean")
 # Ensure CDF is enabled for Lakebase TRIGGERED sync (belt-and-suspenders; set on first write)
 spark.sql(
-    "ALTER TABLE lr_nhl_demo.dev.gold_player_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+    f"ALTER TABLE {catalog_param}.gold_player_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
 
 # COMMAND ----------
 
 games_clean.write.format("delta").mode("overwrite").option(
     "overwriteSchema", "true"
-).saveAsTable("lr_nhl_demo.dev.gold_game_stats_clean")
+).saveAsTable(f"{catalog_param}.gold_game_stats_clean")
 # Ensure CDF is enabled for Lakebase TRIGGERED sync (belt-and-suspenders; set on first write)
 spark.sql(
-    "ALTER TABLE lr_nhl_demo.dev.gold_game_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+    f"ALTER TABLE {catalog_param}.gold_game_stats_clean SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
 )
 
 # COMMAND ----------

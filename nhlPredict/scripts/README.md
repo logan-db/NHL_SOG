@@ -1,5 +1,33 @@
 # NHL SOG Scripts
 
+## Seed UC Data Volume (one-time per environment)
+
+Uploads static reference CSVs from `src/data/` into the Unity Catalog volume that the
+`NHLPlayerPropRetrain` job reads from in its `upload_player_stats` task.
+
+**When to run:** Once per target after first `databricks bundle deploy`, and again only
+if `team_code_mappings.csv` changes (it's static reference data — rare).
+
+**Why it exists:** UC volumes can only be written from Spark/notebooks or via the REST
+Files API (`/api/2.0/fs/files`). The Databricks CLI `databricks fs cp dbfs:/Volumes/...`
+silently writes to legacy DBFS — a different storage layer invisible to Spark's
+`/Volumes/...` path. This script uses the REST API directly to guarantee UC writes.
+
+**Prerequisites:** Databricks CLI authenticated + Python (no extra packages needed).
+
+**Usage:**
+```bash
+cd nhlPredict
+DATABRICKS_CONFIG_PROFILE=DEFAULT python scripts/seed_data_vol.py prod
+DATABRICKS_CONFIG_PROFILE=DEFAULT python scripts/seed_data_vol.py dev
+```
+
+Volumes written to:
+- dev:  `/Volumes/lr_nhl_demo/dev/logan_rupert/data/team_code_mappings.csv`
+- prod: `/Volumes/lr_nhl_demo/prod/data/team_code_mappings.csv`
+
+---
+
 ## Create Lakebase Catalog (one-time)
 
 Register a Lakebase Autoscaling project as a Unity Catalog catalog (e.g. `lr-lakebase` from `lr-database-instance`).
