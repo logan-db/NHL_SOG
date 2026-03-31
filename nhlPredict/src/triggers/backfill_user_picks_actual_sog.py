@@ -26,6 +26,11 @@ import uuid
 from databricks.sdk import WorkspaceClient
 import psycopg
 
+# Job passes catalog=lr_nhl_demo.{target} (e.g. lr_nhl_demo.dev or lr_nhl_demo.prod).
+# Widget default covers interactive / ad-hoc runs.
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog")
+catalog_param = dbutils.widgets.get("catalog")
+
 # Lakebase connection config. For jobs: set PGHOST, ENDPOINT_NAME in job env_vars if needed.
 # PGUSER must match the identity that generates the OAuth token (job run-as user).
 # Do NOT use the app's service principal UUID here; the job runs as the job owner.
@@ -117,7 +122,7 @@ pick_keys = [
 
 # Query gold for played games: gameDate < today, with actual SOG
 gold_df = (
-    spark.table("lr_nhl_demo.dev.gold_player_stats_v2")
+    spark.table(f"{catalog_param}.gold_player_stats_v2")
     .filter(to_date(col("gameDate")) < current_date())
     .filter(col("gameId").isNotNull())  # exclude future/placeholder rows
     .select(

@@ -3,6 +3,11 @@ from pyspark.sql.functions import col
 
 # COMMAND ----------
 
+# Job passes catalog=lr_nhl_demo.{target} and train_model_param.
+# Widget declarations provide defaults for interactive / ad-hoc runs.
+dbutils.widgets.text("catalog", "lr_nhl_demo.dev", "Catalog")
+dbutils.widgets.text("train_model_param", "false", "Train model?")
+
 # Get Pipeline Params
 catalog_param = dbutils.widgets.get("catalog").lower()
 train_model_param = dbutils.widgets.get("train_model_param").lower()

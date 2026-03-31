@@ -6,7 +6,8 @@ resources:
       schedule:
         quartz_cron_expression: 0 0 9 * * ?
         timezone_id: America/Chicago
-        pause_status: UNPAUSED
+        # Default PAUSED — prod target overrides to UNPAUSED. Dev mode also forces PAUSED automatically.
+        pause_status: PAUSED
 
       email_notifications:
         on_failure:
@@ -16,6 +17,7 @@ resources:
         - task_key: createVols
           notebook_task:
             notebook_path: ../src/setup/01-Ingestion-createVols.sql
+            source: WORKSPACE
 
         - task_key: pre_ingest_staging
           depends_on:
@@ -41,6 +43,8 @@ resources:
           spark_python_task:
             # python_file: /Repos/logan.rupert@databricks.com/NHL_SOG/transformation/solidify_gold_tables_v2.py
             python_file: ../src/transformation/solidify_gold_tables_v2.py
+            parameters:
+              - "{{job.parameters.catalog}}"
           environment_key: Default
 
         - task_key: createPreFeatEngTable
@@ -220,7 +224,9 @@ resources:
               max_workers: 8
       parameters:
         - name: catalog
-          default: lr_nhl_demo.dev
+          default: lr_nhl_demo.${bundle.target}
+        - name: schema
+          default: ${bundle.target}
         - name: target_col
           default: player_Total_shotsOnGoal
         - name: time_col

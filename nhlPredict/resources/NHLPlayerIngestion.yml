@@ -3,7 +3,7 @@ resources:
   pipelines:
     NHLPlayerIngestion:
       name: NHLPlayerIngestion
-      target: ${bundle.environment}
+      target: ${bundle.target}
       continuous: false
       channel: PREVIEW
       photon: true
@@ -26,7 +26,7 @@ resources:
         usage_policy: serverless-budget
       configuration:
         bundle.sourcePath: ${workspace.file_path}/src
-        schema: dev
+        schema: ${bundle.target}
         catalog: lr_nhl_demo
         # === PIPELINE MODES ===
         # FULL LOAD: one_time_load="true" — Backfill 2023-10-01 to today. Run first or after reset. ~3–5 hours.
@@ -46,4 +46,4 @@ resources:
           alerts:
             # - on-update-success
             - on-update-failure
-      root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/dev/files/src/dlt_etl
+      root_path: /Workspace/Users/logan.rupert@databricks.com/.bundle/nhlPredict/${bundle.target}/files/src/dlt_etl

@@ -1,8 +1,9 @@
 # Lakebase sync pipelines for NHL app tables
-# Syncs lr_nhl_demo.dev tables to Lakebase (lr-lakebase)
+# Syncs lr_nhl_demo.${bundle.target} tables to Lakebase (lr-lakebase)
 # Target catalog lr-lakebase must exist - register your Lakebase in Catalog Explorer first:
 #   Autoscale: Catalog Explorer → Create → Lakebase Postgres (Autoscaling) → pick project lr-database-instance
 #   Provisioned: Use NHLLakebaseCatalog.yml in bundle include (creates instance + catalog)
+# NOTE: The Lakebase destination (lr-lakebase.public.*) is shared across dev and prod targets for now.
 
 resources:
   synced_database_tables:
@@ -11,7 +12,7 @@ resources:
     clean_prediction_summary_sync:
       name: lr-lakebase.public.clean_prediction_summary
       spec:
-        source_table_full_name: lr_nhl_demo.dev.clean_prediction_summary
+        source_table_full_name: lr_nhl_demo.${bundle.target}.clean_prediction_summary
         primary_key_columns:
           - shooterName
           - gameDate
@@ -21,7 +22,7 @@ resources:
         create_database_objects_if_missing: true
         new_pipeline_spec:
           storage_catalog: lr_nhl_demo
-          storage_schema: dev
+          storage_schema: ${bundle.target}
 
     # 2. nhl_schedule_by_day - Upcoming games (DATE, HOME, AWAY)
     # Primary key: DATE + HOME + AWAY for unique game rows
@@ -29,7 +30,7 @@ resources:
     nhl_schedule_by_day_sync:
       name: lr-lakebase.public.nhl_schedule_by_day
       spec:
-        source_table_full_name: lr_nhl_demo.dev.2025_26_official_nhl_schedule_by_day
+        source_table_full_name: lr_nhl_demo.${bundle.target}.2025_26_official_nhl_schedule_by_day
         primary_key_columns:
           - DATE
           - HOME
@@ -38,13 +39,13 @@ resources:
         create_database_objects_if_missing: true
         new_pipeline_spec:
           storage_catalog: lr_nhl_demo
-          storage_schema: dev
+          storage_schema: ${bundle.target}
 
     # 4. llm_summary - Player explanations for predictions
     llm_summary_sync:
       name: lr-lakebase.public.llm_summary
       spec:
-        source_table_full_name: lr_nhl_demo.dev.llm_summary
+        source_table_full_name: lr_nhl_demo.${bundle.target}.llm_summary
         primary_key_columns:
           - shooterName
           - gameDate
@@ -54,14 +55,14 @@ resources:
         create_database_objects_if_missing: true
         new_pipeline_spec:
           storage_catalog: lr_nhl_demo
-          storage_schema: dev
+          storage_schema: ${bundle.target}
 
     # 5. gold_game_stats_clean - Historical game results
     # One row per team per game; (gameId, playerTeam) is unique
     gold_game_stats_clean_sync:
       name: lr-lakebase.public.gold_game_stats_clean
       spec:
-        source_table_full_name: lr_nhl_demo.dev.gold_game_stats_clean
+        source_table_full_name: lr_nhl_demo.${bundle.target}.gold_game_stats_clean
         primary_key_columns:
           - gameId
           - playerTeam
@@ -69,7 +70,7 @@ resources:
         create_database_objects_if_missing: true
         new_pipeline_spec:
           storage_catalog: lr_nhl_demo
-          storage_schema: dev
+          storage_schema: ${bundle.target}
 
     # 5b. gold_player_stats_clean - Historical player stats per game (SOG, goals, points)
     # One row per player per game; (playerId, gameDate, playerTeam, opposingTeam) is unique
@@ -78,7 +79,7 @@ resources:
     gold_player_stats_clean_sync:
       name: lr-lakebase.public.gold_player_stats_clean
       spec:
-        source_table_full_name: lr_nhl_demo.dev.gold_player_stats_clean
+        source_table_full_name: lr_nhl_demo.${bundle.target}.gold_player_stats_clean
         primary_key_columns:
           - playerId
           - gameDate
@@ -88,17 +89,17 @@ resources:
         create_database_objects_if_missing: true
         new_pipeline_spec:
           storage_catalog: lr_nhl_demo
-          storage_schema: dev
+          storage_schema: ${bundle.target}
 
     # 6. team_code_mappings - Team abbreviation → full name lookup
     team_code_mappings_sync:
       name: lr-lakebase.public.team_code_mappings
       spec:
-        source_table_full_name: lr_nhl_demo.dev.team_code_mappings
+        source_table_full_name: lr_nhl_demo.${bundle.target}.team_code_mappings
         primary_key_columns:
           - abbreviation
         scheduling_policy: SNAPSHOT
         create_database_objects_if_missing: true
         new_pipeline_spec:
           storage_catalog: lr_nhl_demo
-          storage_schema: dev
+          storage_schema: ${bundle.target}
