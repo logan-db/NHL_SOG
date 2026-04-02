@@ -751,6 +751,30 @@ async function loadTeamSeasonSog() {
   const data = await fetchAPI('/team-season-sog').catch(() => null);
   teamSeasonSogData = data;
   renderTeamSeasonSog(data, teamSeasonShowAll);
+  if (allGames.length) renderGames();
+}
+
+function getTeamSogMap() {
+  if (!teamSeasonSogData) return {};
+  const map = {};
+  for (const entry of (teamSeasonSogData.top_shooting || [])) {
+    if (!map[entry.team]) map[entry.team] = {};
+    map[entry.team].avgSog = entry.avg_sog;
+  }
+  for (const entry of (teamSeasonSogData.most_allowed || [])) {
+    if (!map[entry.team]) map[entry.team] = {};
+    map[entry.team].avgSoga = entry.avg_sog_allowed;
+  }
+  return map;
+}
+
+function teamSogMiniHtml(team, sogMap) {
+  const data = sogMap[(team || '').toUpperCase()];
+  if (!data) return '';
+  const sog = data.avgSog != null ? `${Number(data.avgSog).toFixed(1)} SF` : '';
+  const soga = data.avgSoga != null ? `${Number(data.avgSoga).toFixed(1)} SA` : '';
+  if (!sog && !soga) return '';
+  return `<div class="team-sog-mini">${sog ? `<span class="sog-for">${sog}</span>` : ''}${sog && soga ? '<span class="sog-sep"> · </span>' : ''}${soga ? `<span class="sog-against">${soga}</span>` : ''}</div>`;
 }
 
 function renderTeamSeasonSog(data, showAll) {
@@ -914,6 +938,8 @@ function renderGames() {
     return;
   }
 
+  const sogMap = getTeamSogMap();
+
   grid.innerHTML = gamesToShow.map(g => {
     const home = g.home || '';
     const away = g.away || '';
@@ -964,13 +990,19 @@ function renderGames() {
         <div class="matchup">
           <div class="matchup-team away-team-block">
             <img src="${nhlLogoUrl(away)}" alt="${escapeHtml(away)}" class="matchup-logo" onerror="this.style.display='none';">
-            <span class="away-team">${escapeHtml(away)}</span>
+            <div class="team-identity">
+              <span class="away-team">${escapeHtml(away)}</span>
+              ${teamSogMiniHtml(away, sogMap)}
+            </div>
             <button type="button" class="btn-last-game" data-team="${escapeHtml(away)}" title="View ${escapeHtml(away)} last game" aria-label="Last game for ${escapeHtml(away)}">Last game ↗</button>
           </div>
           <span class="vs">@</span>
           <div class="matchup-team home-team-block">
             <img src="${nhlLogoUrl(home)}" alt="${escapeHtml(home)}" class="matchup-logo" onerror="this.style.display='none';">
-            <span class="home-team">${escapeHtml(home)}</span>
+            <div class="team-identity">
+              <span class="home-team">${escapeHtml(home)}</span>
+              ${teamSogMiniHtml(home, sogMap)}
+            </div>
             <button type="button" class="btn-last-game" data-team="${escapeHtml(home)}" title="View ${escapeHtml(home)} last game" aria-label="Last game for ${escapeHtml(home)}">Last game ↗</button>
           </div>
         </div>
