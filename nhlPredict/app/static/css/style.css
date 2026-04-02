@@ -876,6 +876,33 @@ body {
   flex-shrink: 0;
 }
 
+.game-card .team-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.game-card .team-sog-mini {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.game-card .team-sog-mini .sog-for {
+  color: var(--accent);
+}
+
+.game-card .team-sog-mini .sog-sep {
+  color: var(--border);
+}
+
+.game-card .team-sog-mini .sog-against {
+  color: var(--text-muted);
+}
+
 .game-card .game-date {
   font-size: 0.8rem;
   color: var(--text-muted);
